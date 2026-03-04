@@ -36,6 +36,15 @@ module.exports = {
         '2xl': '1.5rem',
         '3xl': '2rem',
       },
+      keyframes: {
+        'pop-up': {
+          '0%':   { opacity: '0', transform: 'translateX(-50%) translateY(0.5rem)' },
+          '100%': { opacity: '1', transform: 'translateX(-50%) translateY(0)' },
+        },
+      },
+      animation: {
+        'pop-up': 'pop-up 0.2s ease-out',
+      },
     },
   },
   plugins: [],

@@ -30,6 +30,7 @@ export default function OnboardingPage() {
         .single()
 
       if (error) {
+        console.error('Supabase insert error:', error)
         setError('Something went a little sideways. Let\'s try again.')
         return
       }
