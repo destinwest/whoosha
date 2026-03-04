@@ -617,6 +617,13 @@ Use this tone in all in-app copy, labels, feedback messages, and marketing text.
 - **Second person for children.** "You're doing great 🌊" not "The user has completed the exercise."
 - **Avoid AI-sounding phrases.** No "Certainly!", no "Great job!", no "As an AI...". Write like a kind, patient human.
 
+## 16. Open Questions
+
+- what the logo looks like 
+- whether you want sound in the MVP
+- what the app tagline is
+- whether the landing page needs real copy or placeholder copy for now
+
 ### Sample In-App Copy
 - Game instruction: "Breathe in slowly as you trace this side..."
 - Pacing — too fast: "Slow down a little 🌿"
