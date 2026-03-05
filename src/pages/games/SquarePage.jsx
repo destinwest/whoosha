@@ -9,7 +9,7 @@ export default function SquarePage() {
 
   async function handleExit(dur) {
     if (dur > 2) {
-      await saveSession({ gameSlug: 'square-breathing', durationSeconds: dur, completed: false })
+      await saveSession({ gameSlug: 'square-breathing', durationSeconds: dur, completed: true })
     }
     navigate('/home')
   }

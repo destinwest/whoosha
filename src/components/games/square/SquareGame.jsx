@@ -1,59 +1,59 @@
 import { useState, useRef, useEffect } from 'react'
 import IntroScreen from './IntroScreen'
 
-// ── Palette ───────────────────────────────────────────────────────────────────
-const SIDE_COLORS = ['#B5DC84', '#7CC87A', '#5A9E6A', '#2A8E82']
-
-const MESSAGES = [
-  'Beautiful work 🌟',
-  "You're doing great 🌊",
-  'Keep breathing 🌿',
-  'So peaceful ✨',
-]
-
-const CYCLE_MS       = 16_000
-const GOOD_THRESHOLD = 0.3
+// ── Constants ─────────────────────────────────────────────────────────────────
+const BASE_COLOR = '#F5EFE6'                                     // cream — untraced path
+const LAP_COLORS = ['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7'] // lap color sequence
+const CYCLE_MS   = 16_000                                        // 4s per side × 4 sides
 
 // ── SquareGame ────────────────────────────────────────────────────────────────
-// Reusable game canvas component. Renders as `absolute inset-0` so the parent
-// controls sizing. Uses `fixed inset-0` on the parent for full-screen play.
+// Manages 'intro' | 'game' phases. Renders IntroScreen during intro, then
+// fades in the game canvas. All game animation via requestAnimationFrame.
 //
 // Props:
-//   onExit(durationSeconds) — called when the back button is pressed.
-//     The parent handles navigation and any session persistence.
-
+//   onExit(durationSeconds) — called when exit button is pressed.
+//     Parent handles navigation and session persistence.
 export default function SquareGame({ onExit }) {
-  // ── Phase state ─────────────────────────────────────────────────────────────
-  // 'intro': IntroScreen is visible, canvas loop idles
-  // 'game':  IntroScreen gone, canvas draws and accepts input
-  const [phase, setPhase]   = useState('intro')
-  const phaseRef            = useRef('intro')
+
+  // ── Phase ──────────────────────────────────────────────────────────────────
+  const [phase, setPhase] = useState('intro')
+  const phaseRef          = useRef('intro')
 
   function handleIntroComplete() {
-    phaseRef.current      = 'game'
+    phaseRef.current        = 'game'
     sessionStartRef.current = Date.now()
     setPhase('game')
   }
 
+  // ── Canvas / paint refs ────────────────────────────────────────────────────
   const canvasRef = useRef(null)
+  const paintRef  = useRef(null)   // off-screen canvas — permanent paint history
   const rafRef    = useRef(null)
   const geoRef    = useRef(null)
 
-  const startedRef      = useRef(false)
-  const gameStartRef    = useRef(null)
-  const sessionStartRef = useRef(Date.now())
-  const childPosRef     = useRef(null)
-  const touchRef        = useRef(false)
-  const trailRef        = useRef([])
-  const pulseRef        = useRef(0)
+  // ── Session / game timing ──────────────────────────────────────────────────
+  const sessionStartRef = useRef(Date.now())  // reset to Date.now() when intro ends
+  const gameStartRef    = useRef(null)         // set when child touches start circle
 
-  const cycleIdxRef = useRef(-1)
-  const devsRef     = useRef([])
-  const prevGoodRef = useRef(false)
-  const goodCntRef  = useRef(0)
+  // ── Input state ────────────────────────────────────────────────────────────
+  const startedRef    = useRef(false)   // has child touched the start circle
+  const touchRef      = useRef(false)   // is finger/mouse currently down
+  const childPosRef   = useRef(null)    // current projected position
+  const prevPosRef    = useRef(null)    // previous projected position (for paint segments)
 
-  const msgRef      = useRef(null)
-  const msgTimerRef = useRef(null)
+  // ── Lap tracking ───────────────────────────────────────────────────────────
+  const lapColorIdxRef = useRef(0)     // indexes into LAP_COLORS with modulo
+  const lapHalfRef     = useRef(false) // true once child has passed fraction ≥ 2 this lap
+
+  // ── Pacing circle (for encouragement distance check) ──────────────────────
+  const pacingPosRef = useRef(null)
+
+  // ── Encouragement ──────────────────────────────────────────────────────────
+  const lastEncouragementRef = useRef(-Infinity) // -Infinity so first qualifying lap always fires
+  const encouragementRef     = useRef(null)       // { startTime } when active, null otherwise
+
+  // ── Start circle pulse ─────────────────────────────────────────────────────
+  const pulseRef = useRef(0)
 
   // ── Geometry ──────────────────────────────────────────────────────────────
   function buildGeo(rect) {
@@ -66,16 +66,17 @@ export default function SquareGame({ onExit }) {
     const lw   = sq * 0.055
     return {
       corners: [
-        { x: cx - half, y: cy + half }, // 0: BL
+        { x: cx - half, y: cy + half }, // 0: BL — start point
         { x: cx + half, y: cy + half }, // 1: BR
         { x: cx + half, y: cy - half }, // 2: TR
         { x: cx - half, y: cy - half }, // 3: TL
       ],
-      cx, cy, sq, lw,
+      cx, cy, sq, half, lw,
     }
   }
 
-  // ── Path helpers ──────────────────────────────────────────────────────────
+  // ── Pacing circle position ─────────────────────────────────────────────────
+  // Returns { x, y, fraction } where fraction is 0–4 around the path.
   function getPacing(elapsed) {
     const geo = geoRef.current
     if (!geo) return null
@@ -87,6 +88,7 @@ export default function SquareGame({ onExit }) {
     return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, fraction: frac }
   }
 
+  // ── Project finger onto nearest point on path centerline ──────────────────
   function project(px, py) {
     const geo = geoRef.current
     if (!geo) return null
@@ -108,21 +110,73 @@ export default function SquareGame({ onExit }) {
     return best
   }
 
-  // ── Message ───────────────────────────────────────────────────────────────
-  function triggerMsg(text) {
-    if (msgTimerRef.current) clearTimeout(msgTimerRef.current)
-    msgRef.current = text
-    msgTimerRef.current = setTimeout(() => { msgRef.current = null }, 3000)
+  // ── Lap detection ──────────────────────────────────────────────────────────
+  // Called on every pointer move. Fraction runs 0–4; start/end is BL (fraction 0/4).
+  // A lap is complete when:
+  //   1. The child has been past fraction 2.0 (halfway) during this lap, AND
+  //   2. Their projected position is now back below fraction 0.3 (near start).
+  function checkLap(pos) {
+    if (!pos) return
+    const frac = pos.fraction
+
+    // Mark halfway once child traces past the midpoint
+    if (!lapHalfRef.current && frac >= 2.0 && frac < 4.0) {
+      lapHalfRef.current = true
+    }
+
+    // Lap complete: returned near start AND was past halfway
+    if (lapHalfRef.current && frac < 0.3) {
+      onLapComplete()
+    }
   }
 
-  // ── Exit ──────────────────────────────────────────────────────────────────
+  function onLapComplete() {
+    lapHalfRef.current = false
+    lapColorIdxRef.current++   // next color takes effect immediately for subsequent painting
+
+    // Encouragement check: is the child close to the pacing circle right now?
+    const now    = performance.now()
+    const pacing = pacingPosRef.current
+    const child  = childPosRef.current
+    if (pacing && child) {
+      const dist = Math.hypot(child.x - pacing.x, child.y - pacing.y)
+      if (dist <= 60 && now - lastEncouragementRef.current > 45_000) {
+        encouragementRef.current     = { startTime: now }
+        lastEncouragementRef.current = now
+      }
+    }
+  }
+
+  // ── Exit ───────────────────────────────────────────────────────────────────
   function handleExit() {
     cancelAnimationFrame(rafRef.current)
     const dur = Math.round((Date.now() - sessionStartRef.current) / 1000)
     onExit(dur)
   }
 
-  // ── Pointer helpers ───────────────────────────────────────────────────────
+  // ── Paint helpers ──────────────────────────────────────────────────────────
+  // Draws a single line segment on the off-screen paint canvas.
+  // Segments are projected onto the path centerline so they naturally
+  // stay within the stroke bounds without explicit clipping.
+  function paintSegment(from, to) {
+    const pCanvas = paintRef.current
+    const geo     = geoRef.current
+    if (!pCanvas || !geo) return
+    const dpr  = window.devicePixelRatio || 1
+    const pCtx = pCanvas.getContext('2d')
+    pCtx.save()
+    pCtx.scale(dpr, dpr)
+    pCtx.beginPath()
+    pCtx.moveTo(from.x, from.y)
+    pCtx.lineTo(to.x, to.y)
+    pCtx.strokeStyle = LAP_COLORS[lapColorIdxRef.current % LAP_COLORS.length]
+    pCtx.lineWidth   = geo.lw
+    pCtx.lineCap     = 'round'
+    pCtx.stroke()
+    pCtx.restore()
+  }
+
+  // ── Pointer handlers ───────────────────────────────────────────────────────
   function getRawPos(e) {
     const rect = canvasRef.current.getBoundingClientRect()
     const src  = e.touches ? e.touches[0] : e
@@ -132,33 +186,44 @@ export default function SquareGame({ onExit }) {
   function onPointerDown(px, py) {
     const geo = geoRef.current
     if (!geo) return
+
     if (!startedRef.current) {
+      // Only start when child touches near the BL start circle
       const BL   = geo.corners[0]
       const dist = Math.hypot(px - BL.x, py - BL.y)
       if (dist <= geo.lw * 2.5) {
         startedRef.current   = true
         gameStartRef.current = performance.now()
         touchRef.current     = true
-        const pos = project(px, py)
+        const pos            = project(px, py)
         childPosRef.current  = pos
-        trailRef.current     = [{ x: pos.x, y: pos.y, t: performance.now() }]
+        prevPosRef.current   = pos
       }
     } else {
-      touchRef.current = true
-      const pos = project(px, py)
+      touchRef.current    = true
+      const pos           = project(px, py)
       childPosRef.current = pos
-      trailRef.current.push({ x: pos.x, y: pos.y, t: performance.now() })
+      prevPosRef.current  = pos  // anchor paint from touch-down point
     }
   }
 
   function onPointerMove(px, py) {
     if (!startedRef.current || !touchRef.current) return
-    const pos = project(px, py)
+    const pos  = project(px, py)
+    const prev = prevPosRef.current
+
+    if (prev) paintSegment(prev, pos)
+
     childPosRef.current = pos
-    trailRef.current.push({ x: pos.x, y: pos.y, t: performance.now() })
+    prevPosRef.current  = pos
+
+    checkLap(pos)
   }
 
-  function onPointerUp() { touchRef.current = false }
+  function onPointerUp() {
+    touchRef.current   = false
+    prevPosRef.current = null  // break paint segment — lifting finger does not erase
+  }
 
   function handleMouseDown(e)  { const p = getRawPos(e); onPointerDown(p.x, p.y) }
   function handleMouseMove(e)  { const p = getRawPos(e); onPointerMove(p.x, p.y) }
@@ -167,10 +232,14 @@ export default function SquareGame({ onExit }) {
   function handleTouchMove(e)  { e.preventDefault(); const p = getRawPos(e); onPointerMove(p.x, p.y) }
   function handleTouchEnd(e)   { e.preventDefault(); onPointerUp() }
 
-  // ── Main effect ───────────────────────────────────────────────────────────
+  // ── Main effect ────────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current
     const ctx    = canvas.getContext('2d')
+
+    // Off-screen paint canvas — stores all painted color permanently
+    const paintCanvas = document.createElement('canvas')
+    paintRef.current  = paintCanvas
 
     function resize() {
       const dpr  = window.devicePixelRatio || 1
@@ -178,6 +247,9 @@ export default function SquareGame({ onExit }) {
       if (rect.width === 0 || rect.height === 0) return
       canvas.width  = rect.width  * dpr
       canvas.height = rect.height * dpr
+      // Resizing clears the paint canvas — acceptable on device rotation
+      paintCanvas.width  = rect.width  * dpr
+      paintCanvas.height = rect.height * dpr
       geoRef.current = buildGeo(rect)
     }
 
@@ -187,40 +259,67 @@ export default function SquareGame({ onExit }) {
 
     function frame() {
       rafRef.current = requestAnimationFrame(frame)
-      // Idle during intro — canvas is hidden, no drawing needed
-      if (phaseRef.current !== 'game') return
+      if (phaseRef.current !== 'game') return   // idle during intro
+
       const geo = geoRef.current
       if (!geo) return
 
       const dpr = window.devicePixelRatio || 1
       const W   = canvas.width  / dpr
       const H   = canvas.height / dpr
-      const { corners, cx, cy, lw } = geo
+      const { corners, cx, cy, half, lw } = geo
+      const now = performance.now()
 
       ctx.save()
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, W, H)
 
-      // Square sides
+      // ── 1. Cream base path — the untraced state ──────────────────────────
+      ctx.beginPath()
       for (let i = 0; i < 4; i++) {
         const a = corners[i]
         const b = corners[(i + 1) % 4]
-        ctx.beginPath()
-        ctx.moveTo(a.x, a.y)
+        if (i === 0) ctx.moveTo(a.x, a.y)
         ctx.lineTo(b.x, b.y)
-        ctx.strokeStyle = SIDE_COLORS[i]
-        ctx.lineWidth   = lw
-        ctx.lineCap     = 'round'
-        ctx.stroke()
+      }
+      ctx.closePath()
+      ctx.strokeStyle = BASE_COLOR
+      ctx.lineWidth   = lw
+      ctx.lineCap     = 'round'
+      ctx.lineJoin    = 'round'
+      ctx.stroke()
+
+      // ── 2. Paint layer — permanent traces on top of cream ────────────────
+      // paintCanvas is device-pixel sized; draw into CSS-pixel region via scale
+      ctx.drawImage(paintCanvas, 0, 0, W, H)
+
+      // ── 3. Pacing circle (white) — hidden until game starts ──────────────
+      if (startedRef.current) {
+        const elapsed = now - gameStartRef.current
+        const pacing  = getPacing(elapsed)
+        if (pacing) {
+          pacingPosRef.current = pacing
+          ctx.beginPath()
+          ctx.arc(pacing.x, pacing.y, lw * 0.62, 0, Math.PI * 2)
+          ctx.fillStyle = 'rgba(255,255,255,0.88)'
+          ctx.fill()
+        }
       }
 
-      pulseRef.current += 0.05
-      const BL = corners[0]
+      // ── 4. Child trace circle (amber) — visible while touching ───────────
+      if (touchRef.current && childPosRef.current) {
+        ctx.beginPath()
+        ctx.arc(childPosRef.current.x, childPosRef.current.y, lw * 0.85, 0, Math.PI * 2)
+        ctx.fillStyle = '#D4A056'
+        ctx.fill()
+      }
 
+      // ── 5. Start circle — pulsing amber at BL, shown before game begins ──
       if (!startedRef.current) {
-        // Pulsing amber start circle
+        pulseRef.current += 0.05
         const p1 = Math.sin(pulseRef.current)
         const p2 = Math.sin(pulseRef.current - 0.7)
+        const BL = corners[0]
 
         ctx.beginPath()
         ctx.arc(BL.x, BL.y, lw * 1.9 + p1 * lw * 0.3, 0, Math.PI * 2)
@@ -238,83 +337,38 @@ export default function SquareGame({ onExit }) {
         ctx.arc(BL.x, BL.y, lw * 0.85, 0, Math.PI * 2)
         ctx.fillStyle = '#D4A056'
         ctx.fill()
+      }
 
-      } else {
-        const now     = performance.now()
-        const elapsed = now - gameStartRef.current
-        const pacing  = getPacing(elapsed)
-        if (!pacing) { ctx.restore(); return }
+      // ── 6. Encouragement moment ───────────────────────────────────────────
+      // Fires at lap completion when child is within 60px of pacing circle
+      // and at least 45 seconds have passed since the last encouragement.
+      const enc = encouragementRef.current
+      if (enc) {
+        const t = (now - enc.startTime) / 2_000
+        if (t < 1) {
+          const alpha = 1 - t
 
-        // Sample timing deviation for good-cycle tracking
-        if (touchRef.current && childPosRef.current) {
-          let delta = childPosRef.current.fraction - pacing.fraction
-          if (delta >  2) delta -= 4
-          if (delta < -2) delta += 4
-          devsRef.current.push(Math.abs(delta) * 4)
-        }
-
-        // Evaluate at cycle boundary
-        const cycIdx = Math.floor(elapsed / CYCLE_MS)
-        if (cycIdx > cycleIdxRef.current) {
-          const samples = devsRef.current
-          const avg     = samples.length > 0
-            ? samples.reduce((s, v) => s + v, 0) / samples.length
-            : Infinity
-          const isGood = avg <= GOOD_THRESHOLD
-
-          if (isGood) {
-            goodCntRef.current++
-            const n    = goodCntRef.current
-            const prev = prevGoodRef.current
-            if (n === 1 || (n > 1 && (n - 1) % 5 === 0) || (!prev && isGood)) {
-              triggerMsg(MESSAGES[(n - 1) % MESSAGES.length])
-            }
-          }
-
-          prevGoodRef.current = isGood
-          cycleIdxRef.current = cycIdx
-          devsRef.current     = []
-        }
-
-        // Lavender trail
-        const TRAIL_FADE_MS = 2000
-        trailRef.current = trailRef.current.filter(p => now - p.t < TRAIL_FADE_MS)
-        const trail = trailRef.current
-        for (let i = 1; i < trail.length; i++) {
-          const age = (now - trail[i].t) / TRAIL_FADE_MS
+          // Soft radial glow from shape center
+          const glowR = half * 0.8
+          const grad  = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
+          grad.addColorStop(0, `rgba(212,160,86,${(alpha * 0.3).toFixed(3)})`)
+          grad.addColorStop(1, 'rgba(212,160,86,0)')
           ctx.beginPath()
-          ctx.moveTo(trail[i - 1].x, trail[i - 1].y)
-          ctx.lineTo(trail[i].x,     trail[i].y)
-          ctx.strokeStyle = `rgba(155,143,196,${((1 - age) * 0.65).toFixed(2)})`
-          ctx.lineWidth   = lw * 0.45
-          ctx.lineCap     = 'round'
-          ctx.stroke()
-        }
-
-        // Pacing circle (white)
-        ctx.beginPath()
-        ctx.arc(pacing.x, pacing.y, lw * 0.62, 0, Math.PI * 2)
-        ctx.fillStyle = 'rgba(255,255,255,0.88)'
-        ctx.fill()
-
-        // Child trace circle (amber)
-        if (touchRef.current && childPosRef.current) {
-          ctx.beginPath()
-          ctx.arc(childPosRef.current.x, childPosRef.current.y, lw * 0.85, 0, Math.PI * 2)
-          ctx.fillStyle = '#D4A056'
+          ctx.arc(cx, cy, glowR, 0, Math.PI * 2)
+          ctx.fillStyle = grad
           ctx.fill()
-        }
 
-        // Motivational message (centered in square)
-        if (msgRef.current) {
-          const fs = Math.max(18, geo.sq * 0.07)
+          // "Beautiful work 🌟" — below the shape, fades out over 2 seconds
+          const fs = Math.max(16, geo.sq * 0.065)
           ctx.save()
           ctx.font         = `600 ${fs}px 'Nunito', sans-serif`
           ctx.textAlign    = 'center'
           ctx.textBaseline = 'middle'
-          ctx.fillStyle    = 'rgba(255,255,255,0.92)'
-          ctx.fillText(msgRef.current, cx, cy)
+          ctx.fillStyle    = `rgba(255,255,255,${(alpha * 0.92).toFixed(3)})`
+          ctx.fillText('Beautiful work 🌟', cx, cy + half + fs * 1.5)
           ctx.restore()
+        } else {
+          encouragementRef.current = null
         }
       }
 
@@ -326,7 +380,6 @@ export default function SquareGame({ onExit }) {
     return () => {
       cancelAnimationFrame(rafRef.current)
       ro.disconnect()
-      if (msgTimerRef.current) clearTimeout(msgTimerRef.current)
     }
   }, [])
 
@@ -349,12 +402,12 @@ export default function SquareGame({ onExit }) {
         </svg>
       </button>
 
-      {/* Pre-game intro — renders on top of canvas, fades out then calls onComplete */}
+      {/* Pre-game intro — fades out then calls handleIntroComplete */}
       {phase === 'intro' && (
         <IntroScreen onComplete={handleIntroComplete} />
       )}
 
-      {/* Game canvas — opacity 0 during intro, transitions to 1 when game starts */}
+      {/* Game canvas — opacity 0 during intro, transitions to 1 on game start */}
       <canvas
         ref={canvasRef}
         className="w-full h-full"
