@@ -7,7 +7,7 @@
 
 **Whoosha** is a web application that helps elementary-aged children (ages 5–12) regulate their nervous systems through interactive, multisensory breathing games. The name evokes the sound and feeling of a calming breath.
 
-Children trace illustrated shapes on the screen with their finger, following a guided breathing pattern. Visual feedback, audio cues, and gentle on-screen encouragement guide the pace. The experience is tactile, calming, and designed to work even when a child is dysregulated or distressed.
+Children trace illustrated shapes on the screen with their finger, following a guided breathing pattern. Visual feedback, audio cues (todo), and gentle on-screen encouragement guide the user. The experience is tactile, calming, and designed to work even when a child is dysregulated or distressed.
 
 **The core insight driving the design:** Research shows that combining tactile interaction, geometric tracing, and paced breathwork is one of the most effective nervous system regulation techniques for children. The app makes this accessible and engaging without requiring adult instruction during use.
 
@@ -129,6 +129,7 @@ whoosha.com/              → Landing Page (public, parent audience)
 whoosha.com/demo          → Interactive Demo Page (public, tryable game)
 whoosha.com/login         → Login Page (public)
 whoosha.com/signup        → Sign Up Page (public)
+whoosha.com/onboarding    → Child Profile Setup (protected, first login only)
 whoosha.com/home          → Game Selection Home (protected, child-friendly)
 whoosha.com/games/square  → Square Breathing Game (protected, immersive)
 whoosha.com/dashboard     → Parent Dashboard (protected, parent audience)
@@ -139,6 +140,7 @@ whoosha.com/account       → Account Settings (protected, parent audience)
 - Landing Page (`/`)
 - Login Page (`/login`)
 - Sign Up Page (`/signup`)
+- Onboarding Screen (`/onboarding`)
 - Game Selection Home (`/home`)
 - Square Breathing Game (`/games/square`)
 
@@ -150,6 +152,34 @@ whoosha.com/account       → Account Settings (protected, parent audience)
 ---
 
 ## 6. Screen-by-Screen Layout Specifications
+
+---
+
+### 6.0 Pre-Game Intro Screen (Shared — All Games)
+
+Every game session begins with this intro screen, regardless of which game is being launched. It plays every time the child enters a game. A skip button is always available for children who have done it before.
+
+**Purpose:** Guide the child through one complete breath before the game begins. Grounds an activated or distressed child before asking them to engage with the tracing mechanic.
+
+**Background start:** Deep forest green `#2C4A3E`
+
+**Sequence:**
+1. **Text phase (4 seconds total):**
+   - Line 1 appears immediately: "Before we begin..."
+   - Line 2 fades in over 4 seconds, starting invisible and transitioning to fully solid: "Let's take one slow breath together 🌿"
+   - Both lines centered, large, Nunito semibold, warm white
+
+2. **Breath animation (8 seconds total), begins immediately after text phase:**
+   - **Inhale — 4 seconds:** Background brightens from deep forest green `#2C4A3E` to luminous mint `#D4EBE0`, radiating outward from the center of the screen
+   - **Exhale — 4 seconds:** Background dims smoothly from `#D4EBE0` down to the game's background color `#9FBFB4`
+   - Transition is a smooth JS interpolation using `requestAnimationFrame` — not a CSS transition or flash
+   - The exhale settles exactly on the game canvas background color so the transition into the game is seamless
+
+3. **Handoff:** After the full 12-second sequence (4s text + 8s breath), the intro fades out and the game canvas fades in automatically with a 0.5 second opacity transition.
+
+**Skip button:** Small, low-contrast "skip" text link, bottom right corner, visible throughout. Tapping it jumps immediately to the game canvas.
+
+**Implementation:** Implement as a React state phase `'intro'` that precedes `'game'`. The intro is a full-screen `<div>` — not part of the canvas. Use `performance.now()` and `requestAnimationFrame` for the brightness interpolation timing.
 
 ---
 
@@ -196,7 +226,7 @@ whoosha.com/account       → Account Settings (protected, parent audience)
 ### 6.3 Game Selection Home (`/home`)
 **Audience:** Child (with parent setup complete)  
 **Goal:** Child selects a breathing game to play — as fast and clear as possible  
-**Background:** Pale mint `#DFF0E6`  
+**Background:** Eucalyptus sage `#9FBFB4`
 **Feel:** Welcoming, calm, child-appropriate — soothing and rewarding palette dominates
 
 **Layout:**
@@ -206,7 +236,7 @@ whoosha.com/account       → Account Settings (protected, parent audience)
   - Large rounded rectangle, minimum 180px tall, generous padding
   - Soft background color from soothing palette — one card per color (sage green, teal, lavender, amber)
   - Simple illustrated shape icon centered (square, infinity, hexagon, flower)
-  - Game name in large rounded font below icon
+  - Game name in large rounded font below icon: **Square Breathing, Infinity Breathing, Hexagon Breathing, Flower Breathing**
   - One short line of description ("Trace the square and breathe")
   - Entire card is tappable — large touch target
 - **Bottom of screen:** Only if needed — small parent icon to access dashboard. No other navigation.
@@ -216,76 +246,85 @@ whoosha.com/account       → Account Settings (protected, parent audience)
 
 ### 6.4 Square Breathing Game Page (`/games/square`)
 **Audience:** Child (immersive)  
-**Goal:** Child traces the square path and completes the breathing exercise  
-**Background:** Starts at pale mint `#DFF0E6`, slowly deepens toward sage `#4A9B7F` as exercise progresses  
+**Goal:** Child traces the square path and breathes at a calm, guided pace  
+**Background:** Eucalyptus sage `#9FBFB4` — static throughout, does not change during exercise  
 **Feel:** All interface disappears. Only the game exists.
 
 **Reference image:** `design-assets/boxBreathingGame.png` — use this as the primary visual reference for the shape, corner style, stroke width, and start circle placement.
 
----
-
-#### Phase 1 — Pre-Game Intro Screen
-
-Before the game canvas appears, show a full-screen intro state.
-
-- **Background:** Deep forest green `#2C4A3E` — darker and calmer than the game background, signals a safe and quiet space
-- **Text:** Centered, large, rounded (Nunito semibold), warm white or pale mint color. Two lines:
-  - Line 1: "Before we begin..."
-  - Line 2: "Let's take one slow breath together 🌿"
-- **Breath animation:** Immediately after the text appears, the background begins a slow brightness transition:
-  - Over 4 seconds, the background brightens from deep forest green `#2C4A3E` to a much lighter, almost luminous mint-green `#A8D8C0` — this is the inhale, the screen literally breathes in
-  - Over the next 4 seconds, the background dims back down to the regular game background color `#DFF0E6` — this is the exhale, the screen breathes out
-  - The brightness transition should be a smooth CSS or JS interpolation, not a flash — it should feel like lungs expanding and releasing
-- **No interaction required.** The child simply watches. After the full 8-second breath animation completes, the intro screen fades out and the game canvas fades in automatically.
-- **Skip:** A small, low-contrast "skip" text link in the bottom right corner for children who have done this before. Tapping it jumps straight to the game canvas.
+**Intro screen:** Every game session begins with the shared Pre-Game Intro Screen defined in Section 6.0. Apply it here exactly as specified.
 
 ---
 
-#### Phase 2 — Game Canvas
+#### Game Canvas
 
 - **Exit button only:** Small rounded button, top left, arrow or X icon. Tappable at all times. Returns to `/home`. No label needed.
 
-- **Shape — Racetrack Path:**
-  The path is NOT a traditional sharp-cornered square. It is a thick, heavily rounded rectangular path — like a racetrack or a rounded rectangle with very large corner radii. Reference `design-assets/boxBreathingGame.png` closely.
+- **Shape — Rhomboid Path:**
+  The path is NOT a traditional sharp-cornered square. It is a thick, heavily rounded rhomboid path — like a rounded rectangle with very large corner radii. Reference `design-assets/boxBreathingGame.png` closely.
   - Stroke width: approximately 6mm in physical size — scale this relative to screen DPI. On a standard tablet this is roughly 22–26px. The stroke is thick enough that a child's finger fits comfortably within it.
-  - Corner radius: very large — approximately 15–20% of the square's side length. The corners are nearly semicircular, not subtle rounding. The result looks like a smooth oval-ish track, not a square with clipped corners.
-  - The stroke itself has two visible edges — an inner rail and an outer rail — because of its thickness. The pacing circle travels along one of these rails depending on which side it is on (see below).
-  - Color: soft teal `#5B9FAA`
+  - Corner radius: very large — approximately 15–20% of the shorter side length. The corners are nearly semicircular, not subtle rounding. The result looks like a smooth rhomboid track, not a square with clipped corners.
+  - The stroke itself has two visible edges — an inner rail and an outer rail — because of its thickness.
+  - **Base color: off-white cream `#F5EFE6`** — the full path starts in this color before the child has traced anything. This is the untraced state.
   - The shape takes up approximately 60–70% of the screen width, centered.
-  - Side labels (Breathe In, Hold, Breathe Out, Hold) appear in soft muted text alongside each side, outside the path.
+  - Side labels (Breathe In — bottom side, Hold — right side, Breathe Out — top side, Hold — left side) appear in soft muted text alongside each side, outside the path.
 
 - **Start circle:**
   Large amber pulsing circle `#D4A056` positioned at the bottom-left of the path — exactly as shown in `design-assets/boxBreathingGame.png`. The circle sits on the path itself, overlapping the stroke. It pulses gently with a soft glow to invite touch. Label: "start" in small dark text inside the circle. This is the child's finger target to begin.
 
 - **Pacing circle:**
-  A smaller circle in soft white or pale mint. Hidden until the child touches the start circle. Once triggered, travels the full racetrack path at a constant speed — 4 seconds per side — with smooth continuous movement through corners at consistent speed, no pausing.
-  
-  **Pacing circle rail behavior — this is important:**
-  - **Bottom side (left to right):** pacing circle travels along the **inner edge** of the stroke — the rail closest to the center of the square
-  - **Right side (bottom to top):** pacing circle travels along the **inner edge** of the stroke
-  - **Top side (right to left):** pacing circle travels along the **outer edge** of the stroke — the rail furthest from the center
-  - **Left side (top to bottom):** pacing circle travels along the **outer edge** of the stroke
-  - At corners, the circle transitions smoothly from inner to outer rail (or vice versa) as it rounds the bend — this transition happens naturally as the corner curves
-  - The effect creates a subtle figure-8-like weaving motion across the width of the stroke as the circle completes each lap, which is visually engaging without being distracting
+  A smaller circle in soft white. Hidden until the child touches the start circle. Once triggered, travels the full path continuously — 4 seconds per side — with smooth movement through corners at consistent speed, no pausing. Never stops. Loops indefinitely until the child exits.
+
+  **Pacing circle rail behavior:**
+  - **Bottom side (left to right):** travels along the **inner edge** of the stroke
+  - **Right side (bottom to top):** travels along the **inner edge** of the stroke
+  - **Top side (right to left):** travels along the **outer edge** of the stroke
+  - **Left side (top to bottom):** travels along the **outer edge** of the stroke
+  - At corners, transitions smoothly between inner and outer rail as it rounds the bend
+  - Creates a subtle weaving motion across the stroke width on each lap — visually engaging without being distracting
 
 - **Child's trace circle:**
-  Follows the child's finger, projected onto the nearest point on the racetrack path centerline. The child tries to keep their circle on top of the pacing circle. No penalty or feedback text for being off pace — the pacing circle is the only guide.
+  Amber circle `#D4A056` that follows the child's finger, projected onto the nearest point on the path centerline. The child tries to keep their circle on top of the pacing circle. No penalty, no feedback text — the pacing circle is the only guide.
 
-- **Progress trail:**
-  Soft coral/amber trail behind the child's trace circle. Fades over approximately 2 seconds.
+- **Stroke painting mechanic — the core visual:**
+  As the child's trace circle moves along the path, it paints the stroke with the current lap color. The cream base `#F5EFE6` is replaced by the lap color exactly where the child has traced. Untraced portions remain cream.
 
-- **Phase instruction text:**
-  Large, soft, centered text below the shape. Driven by the pacing circle's current side position — not the child's finger. Fades in and out gently on phase change.
+  **Lap color sequence** — calming, perceptually adjacent transitions:
+  ```
+  Lap 1: Soft sage green    #7DB89A
+  Lap 2: Muted teal         #5B9FAA
+  Lap 3: Dusty lavender     #9B8FC4
+  Lap 4: Pale periwinkle    #8BA7C7
+  Lap 5+: sequence repeats from Lap 1
+  ```
+  Colors are calming — blues, greens, purples predominantly. Each color is perceptually adjacent to its neighbor — no sudden jumps.
 
-- **No pacing feedback text.** The pacing circle is the only guide.
+  **Color transition between laps:**
+  - When the child completes a full lap and returns to the start point, the stroke from that lap remains painted — it does not reset or fade
+  - The next lap's color begins painting from the start point as the child continues tracing
+  - Where the new lap overlaps previously painted portions, the new color paints over the old
+  - Over time the full track builds a layered color history
 
-- **Completion:** Triggered when the pacing circle completes the configured number of cycles (default: 4). Background softens to pale mint. Gentle radial glow from square center. "Beautiful work 🌟" message, "Go again?" and "All done" buttons. No confetti, no loud animation.
+  **Persistence:**
+  - If the child lifts their finger mid-lap, painted portions stay exactly as-is
+  - When they return their finger to the path, painting resumes from where their finger lands
+  - The pacing circle continues independently regardless of whether the child is actively tracing
 
-- **Session save:** On completion, write to Supabase `sessions` table: `child_id`, `game_slug: 'square-breathing'`, `duration_seconds`, `completed: true`.
+- **Encouragement moment:**
+  When the pacing circle completes a lap and the child's trace circle is within **60px of the pacing circle** at that moment (meaning the child was closely following the pace), show a brief gentle encouragement:
+  - Soft radial glow pulses once from the center of the shape
+  - Text "Beautiful work 🌟" fades in below the shape, then fades out over 2 seconds
+  - Game continues uninterrupted — pacing circle does not pause
+  - **This moment only triggers on the first qualifying lap.** After it fires once, it will not fire again until at least 45 seconds have elapsed. After 45 seconds, it becomes eligible to trigger again on the next qualifying lap.
+  - Implementation: on each lap completion, calculate pixel distance between trace circle position and pacing circle position. If distance ≤ 60px AND `now - lastEncouragementTime > 45000`, show encouragement and set `lastEncouragementTime = performance.now()`.
 
-**Square Breathing Timing (one full cycle = 16 seconds):**
+- **No completion state.** The game runs indefinitely. The child exits via the exit button when ready.
 
-The square is traced counterclockwise starting at the bottom-left corner. Each side carries its own breathing instruction. Corners are simply turning points — the child continues tracing without pausing. The breathing phase transitions the moment the corner is reached.
+- **Session save:** When the child taps the exit button, write to Supabase `sessions` table: `child_id`, `game_slug: 'square-breathing'`, `duration_seconds` (time from game start to exit tap), `completed: true`.
+
+**Square Breathing Timing (one full lap = 16 seconds):**
+
+The path is traced counterclockwise starting at the bottom-left corner. Each side carries its own breathing instruction. Corners are simply turning points — no pause. The breathing phase transitions the moment the corner is reached.
 
 ```
 Side 1 (bottom-left → bottom-right):  Breathe IN   — 4 seconds
@@ -294,29 +333,31 @@ Side 3 (top-right → top-left):        Breathe OUT  — 4 seconds
 Side 4 (top-left → bottom-left):      HOLD         — 4 seconds
 ```
 
-One cycle completes and the exercise either loops or ends based on a configurable cycle count (default: 4 cycles for MVP).
-
-**Corner behavior:** No pause at corners. The child's finger rounds the corner naturally and the next phase label fades in immediately as the new side begins. The pacing dot advances smoothly through corners without stopping.
+**Corner behavior:** No pause at corners. The pacing dot advances smoothly through corners without stopping. Phase label fades in immediately as the new side begins.
 
 **Implementation notes:**
 - Use React `useRef` and `requestAnimationFrame` for all animation — no React state updates inside the animation loop
 - Use an HTML `<canvas>` element with a React ref for the game canvas
-- **Intro screen:** implement as a separate React state phase (`'intro' | 'game' | 'complete'`). The intro screen is a full-screen div with CSS background color transitions using a JavaScript interpolation over 8 seconds (4s brighten, 4s dim). After 8 seconds, transition state to `'game'` and fade the canvas in. Render a small low-contrast "skip" button throughout.
-- **Racetrack path geometry:** do not draw a simple square. Draw a rounded rectangle using Canvas 2D `roundRect()` or manually construct the path with `arcTo()` calls. Corner radius should be approximately 18% of the shorter side length. The stroke width should be `Math.round(devicePixelRatio * 22)` pixels to approximate 6mm physical width across common tablet DPIs.
-- **Inner and outer rail coordinates:** because the stroke is thick, calculate two offset paths — the inner rail (offset inward from center path by `strokeWidth / 2 - 2px`) and the outer rail (offset outward by `strokeWidth / 2 - 2px`). The pacing circle travels along the inner rail on the bottom and right sides, and the outer rail on the top and left sides. At corners, interpolate the circle's lateral offset smoothly so it transitions between inner and outer rail as it rounds the bend.
-- **Pacing circle:** driven entirely by `performance.now()`. Position calculated as a function of elapsed time, moving at 4 seconds per side along the path centerline, then laterally offset to inner or outer rail. No user input affects it.
-- **Child's trace circle:** driven by `onTouchMove` / `onMouseMove`. Project finger coordinates onto nearest point on the path centerline.
-- **Phase determination:** derived from the pacing circle's current side index (0 = bottom = Breathe In, 1 = right = Hold, 2 = top = Breathe Out, 3 = left = Hold).
-- **Game start trigger:** pacing circle stays hidden and stationary until child's finger comes within ~40px of the start circle. Once triggered, timer starts.
-- **Trail rendering:** draw recent child trace positions as a fading path stroke. Use decreasing alpha over ~2 seconds for older positions.
-- **Canvas sizing:** recalculate all geometry on resize using `ResizeObserver`. Redraw immediately on resize.
+- Game state phases: `'intro' | 'game'` — no completion state
+- **Racetrack path geometry:** draw using Canvas 2D `roundRect()` or `arcTo()`. Corner radius approximately 18% of the shorter side length. Stroke width `Math.round(devicePixelRatio * 22)` pixels.
+- **Stroke painting:** maintain a persistent off-screen canvas storing all painted color. On each touch/mouse move, draw a thick line segment in the current lap color from the previous trace position to the current, clipped to the path. Composite: cream base path → persistent paint canvas → pacing circle and trace circle on top. Painting is permanent — lifted fingers do not erase.
+- **Lap detection:** detect lap completion when the child's trace circle crosses back over the start point (bottom-left) in the counterclockwise direction. On lap completion, increment lap counter, switch to next color in sequence using `currentLap % colors.length`.
+- **Lap color array:** `['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']` — index with modulo for infinite looping.
+- **Encouragement timing:** on each lap completion, calculate pixel distance between trace circle and pacing circle. If distance ≤ 60px AND `now - lastEncouragementTime > 45000ms`, show encouragement and set `lastEncouragementTime = performance.now()`.
+- **Inner/outer rail:** calculate two offset paths from centerline — inner rail offset inward by `strokeWidth / 2 - 2px`, outer rail offset outward by `strokeWidth / 2 - 2px`. Pacing circle uses inner rail on bottom/right, outer rail on top/left. Interpolate smoothly through corners.
+- **Pacing circle:** driven entirely by `performance.now()`. Loops indefinitely. No user input affects timing.
+- **Child's trace circle:** driven by `onTouchMove` / `onMouseMove`. Projects finger onto nearest path centerline point.
+- **Phase determination:** derived from pacing circle's current side index (0 = bottom = Breathe In, 1 = right = Hold, 2 = top = Breathe Out, 3 = left = Hold).
+- **Game start trigger:** pacing circle stays hidden until child's finger comes within ~40px of start circle. Timer starts on trigger.
+- **Session save on exit:** capture `performance.now()` at game start and at exit button tap to calculate `duration_seconds`.
+- **Canvas sizing:** recalculate all geometry on resize using `ResizeObserver`.
 
 ---
 
 ### 6.5 Onboarding Screen (`/onboarding`)
 **Audience:** Parent (first login only)
 **Goal:** Capture child's first name before entering the app
-**Background:** Pale mint `#DFF0E6`
+**Background:** Eucalyptus sage `#9FBFB4`
 **Trigger:** Redirect here automatically after first login if no rows exist in the `children` table for this parent. Never show again once a child profile exists.
 
 **Layout:**
@@ -355,10 +396,13 @@ Apply colors according to their designated role. Do not swap categories.
 ### Background Colors
 Used for page and section backgrounds. Never for text or interactive elements.
 ```
-#F1E3C6  Warm Cream      → Landing page, marketing sections
-#EDE8DF  Rose Neutral    → Parent dashboard, account pages
-#DFF0E6  Pale Mint       → Login/signup, game home, game pages
+#F1E3C6  Warm Cream        → Landing page, marketing sections
+#EDE8DF  Rose Neutral      → Parent dashboard, account pages
+#DFF0E6  Pale Mint         → Login/signup pages
+#9FBFB4  Eucalyptus Sage   → Game Selection Home (/home) and all game screens
 ```
+
+Game backgrounds use `#9FBFB4` exclusively — not pale mint. This provides sufficient tonal range for the intro screen breath animation to feel meaningful without being overstimulating.
 
 ### Text and Informational Colors
 Used for headings, body text, labels, and informational UI.
@@ -375,7 +419,7 @@ Used for buttons, interactive elements, progress trails, rewards, and game cards
 #4A9B7F  Sage Green      → Primary action color (CTA buttons, Sign Up, primary interactions)
 #5B9FAA  Soft Teal       → Secondary interactive elements, game card backgrounds
 #9B8FC4  Lavender        → Creative exercises, reward moments, secondary accents
-#D4A056  Warm Amber      → Encouragement feedback, celebration moments, completion states
+#D4A056  Warm Amber      → Encouragement moments, celebration, start circle, trace circle
 ```
 
 ### Blues (Inspiration + Selective Use)
@@ -388,34 +432,29 @@ Not primary colors. Use selectively for trust signals on parent-facing pages.
 ```
 
 ### Never Use
-- Pure white `#FFFFFF` as a background — use cream or mint instead
+- Pure white `#FFFFFF` as a background — use cream, mint, or eucalyptus sage instead
 - Pure black `#000000` as text — use `#3E5E52` forest green instead
 - Saturated bright reds, oranges, or yellows as dominant colors
 - High-contrast harsh color combinations on child-facing screens
-
-### Color-as-Feedback in Games
-Background color during breathing games should animate subtly through the exercise:
-- Start: Pale Mint `#DFF0E6`
-- Mid-exercise: Soft Teal `#5B9FAA` at low opacity
-- Completion: Returns to Pale Mint `#DFF0E6`
-This mirrors the physiological shift from alertness to calm and is evidence-based.
+- Background color shifts during game exercises — backgrounds are static
 
 ---
 
 ## 8. Landing Page Demo Animation Spec
 
-The auto-playing Square Breathing demo on the landing page is a looping CSS or React animation — not interactive, not clickable (unless parent clicks it, which navigates to `/demo`).
+The auto-playing Square Breathing demo on the landing page is a looping CSS or React animation — not interactive. Clicking it navigates to `/demo`.
 
 **Animation behavior:**
-- A racetrack-shaped path identical to the game version (thick stroke, heavily rounded corners) renders centered in the right column of the hero
-- A glowing amber dot traces the perimeter of the square continuously, **counterclockwise starting from the bottom-left** — matching the actual game direction
-- The trace trail fills in behind the dot in coral/amber, then fades out as the dot completes a full loop and begins again
-- Phase label text appears alongside the relevant side: "Breathe in" bottom side, "Hold" right side, "Breathe out" top side, "Hold" left side — each fading in when the dot reaches that segment
-- Loop duration: approximately 16 seconds (4 sides × 4 seconds), then seamlessly restarts
-- Subtle pulsing glow effect on the dot
-- No sound in the demo — audio is a game-only feature
+- A rhomboid-shaped path identical to the game version (thick stroke, heavily rounded corners, cream base color `#F5EFE6`) renders centered in the right column of the hero
+- A glowing amber dot traces the perimeter of the path continuously, **counterclockwise starting from the bottom-left** — matching the actual game direction
+- As the dot travels, it **paints the stroke with the current lap color** — the cream path fills in behind the dot exactly as it does in the real game. The painted color stays; it does not fade or reset mid-lap.
+- On each full loop, the stroke color transitions to the next lap color (starting from where the dot is), cycling through the lap color sequence: `#7DB89A → #5B9FAA → #9B8FC4 → #8BA7C7` and repeating
+- Phase label text fades in alongside the relevant side: "Breathe in" bottom, "Hold" right, "Breathe out" top, "Hold" left
+- Loop duration: approximately 16 seconds (4 sides × 4 seconds)
+- Subtle pulsing glow effect on the amber dot
+- No sound
 
-**Implementation:** Use CSS keyframe animations or Framer Motion for the dot path and trail. The square itself is an SVG with a `stroke-dashoffset` animation for the trail effect.
+**Implementation:** Use a React component with `requestAnimationFrame` to drive the dot position and paint the SVG or canvas stroke progressively. The stroke painting effect should use `stroke-dashoffset` on an SVG path or canvas arc drawing — filling in the stroke segment by segment behind the dot. On lap completion, switch stroke color for subsequent segments.
 
 ---
 
@@ -464,14 +503,15 @@ whoosha/
     │   │   └── LoadingSpinner.jsx
     │   └── games/
     │       └── square/
-    │           ├── SquareGame.jsx         # Main game component
-    │           ├── SquareCanvas.jsx       # Canvas drawing logic
+    │           ├── SquareGame.jsx         # Main game component, manages 'intro' | 'game' phases
+    │           ├── SquareCanvas.jsx       # Canvas drawing logic, painting mechanic
     │           ├── PacingCircle.jsx       # Pacing circle timing and movement logic
-    │           └── CompletionScreen.jsx   # End of game screen
+    │           └── IntroScreen.jsx        # Pre-game intro breath animation (shared pattern)
     └── pages/
         ├── LandingPage.jsx
         ├── LoginPage.jsx
         ├── SignupPage.jsx
+        ├── OnboardingPage.jsx     # Child name capture, first login only
         ├── HomePage.jsx           # Game selection
         ├── DashboardPage.jsx      # Stub
         ├── AccountPage.jsx        # Stub
@@ -510,9 +550,10 @@ module.exports = {
     extend: {
       colors: {
         // Backgrounds
-        'bg-cream':     '#F1E3C6',
-        'bg-rose':      '#EDE8DF',
-        'bg-mint':      '#DFF0E6',
+        'bg-cream':          '#F1E3C6',
+        'bg-rose':           '#EDE8DF',
+        'bg-mint':           '#DFF0E6',
+        'bg-eucalyptus':     '#9FBFB4',  // Game home + all game screens
         // Text
         'text-forest':  '#3E5E52',
         'text-sage':    '#6D9B8A',
@@ -612,15 +653,14 @@ All text in the app should feel soft. Use `font-weight: 600` (semibold) rather t
 **MVP = a locally hosted web app that friends and family can test on your home network.**
 
 ### In Scope for MVP
-- [ ] Landing page with auto-playing square breathing demo animation
+- [ ] Landing page with auto-playing square breathing demo animation (painting mechanic)
 - [ ] Login page with email/password + Google OAuth (Supabase Auth)
 - [ ] Sign up page with email/password + Google OAuth
 - [ ] Protected routing (redirect to login if not authenticated)
+- [ ] Onboarding screen (`/onboarding`) — child name capture on first login
 - [ ] Game selection home page showing all four game cards (three locked/coming soon)
-- [ ] Square Breathing game — full tracing mechanic, pacing circle guide, completion screen
-- [ ] Session save to Supabase on game completion
+- [ ] Square Breathing game — pre-game intro screen, painting mechanic, pacing circle, encouragement moment, indefinite play, session save on exit
 - [ ] Greeting with child's first name on home screen
-- [ ] Child profile creation flow (triggered after first login if no children exist)
 - [ ] Parent dashboard stub page
 - [ ] Account settings stub page
 - [ ] Stripe test mode integration (simulated free vs paid tier access check)
@@ -671,11 +711,10 @@ Use this tone in all in-app copy, labels, feedback messages, and marketing text.
 
 ### Sample In-App Copy
 - Game instruction: "Breathe in slowly as you trace this side..."
-- Completion: "Beautiful work 🌟 Your body is feeling calmer now."
+- Encouragement moment: "Beautiful work 🌟 Your body is feeling calmer now."
 - Home greeting: "Hi Lily 🌿 Which game would you like to play?"
 - Error message: "Something went a little sideways. Let's try again."
 - Intro screen: "Before we begin... Let's take one slow breath together 🌿"
-- Go again prompt: "Want to go again?"
 
 ---
 
@@ -893,6 +932,6 @@ extended here with a camera system and reveal.
 
 ---
 
-*Last updated: Whoosha MVP Planning Session — Nature Trace game added (commented out, not yet active)*
+*Last updated: Whoosha MVP Planning Session — painting mechanic, eucalyptus background, shared intro screen, no completion state*
 *Prepared for use with Claude Code*
 -->
