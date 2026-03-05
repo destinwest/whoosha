@@ -317,7 +317,7 @@ export default function SquareGame({ onExit }) {
 
   return (
     <div
-      className="absolute inset-0 bg-primary overflow-hidden select-none"
+      className="absolute inset-0 bg-bg-eucalyptus overflow-hidden select-none"
       style={{ touchAction: 'none' }}
     >
       <button

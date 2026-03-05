@@ -230,7 +230,7 @@ export default function HomePage() {
   const firstName = activeChild?.first_name ?? ''
 
   return (
-    <div className="min-h-screen bg-bg-mint flex flex-col">
+    <div className="min-h-screen bg-bg-eucalyptus flex flex-col">
 
       {/* ── Minimal header: logo left, parent icon right ── */}
       <header className="flex items-center justify-between px-6 pt-6 pb-2 flex-shrink-0">

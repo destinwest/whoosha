@@ -8,9 +8,10 @@ module.exports = {
     extend: {
       colors: {
         // Backgrounds
-        'bg-cream':   '#F1E3C6',
-        'bg-rose':    '#EDE8DF',
-        'bg-mint':    '#DFF0E6',
+        'bg-cream':        '#F1E3C6',
+        'bg-rose':         '#EDE8DF',
+        'bg-mint':         '#DFF0E6',
+        'bg-eucalyptus':   '#9FBFB4',
         // Text
         'text-forest':  '#3E5E52',
         'text-sage':    '#6D9B8A',

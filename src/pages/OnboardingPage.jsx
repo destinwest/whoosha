@@ -47,7 +47,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bg-mint flex flex-col">
+    <div className="min-h-screen bg-bg-eucalyptus flex flex-col">
 
       {/* Logo — top center, links to landing. No navigation. */}
       <div className="pt-8 flex justify-center flex-shrink-0">
