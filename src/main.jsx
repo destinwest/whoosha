@@ -16,8 +16,29 @@ Sentry.init({
   replaysOnErrorSampleRate: 1.0,
 })
 
+function ErrorFallback({ resetError }) {
+  return (
+    <div className="min-h-screen bg-bg-cream flex flex-col items-center justify-center gap-5 px-6 text-center">
+      <p className="font-display text-4xl font-semibold text-text-forest">
+        Something went a little sideways 🌿
+      </p>
+      <p className="font-body text-text-sage max-w-xs">
+        Don't worry — let's take a breath and try again.
+      </p>
+      <button
+        onClick={resetError}
+        className="font-body font-semibold text-sm bg-primary text-white px-6 py-3 rounded-full hover:opacity-90 transition-opacity"
+      >
+        Try again
+      </button>
+    </div>
+  )
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <Sentry.ErrorBoundary fallback={({ resetError }) => <ErrorFallback resetError={resetError} />}>
+      <App />
+    </Sentry.ErrorBoundary>
   </React.StrictMode>,
 )

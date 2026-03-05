@@ -532,7 +532,7 @@ function PricingCard({ title, price, priceNote, features, cta, ctaTo, highlight 
         {features.map(f => (
           <li key={f.label} className="flex items-start gap-3">
             {f.included
-              ? <span className={highlight ? 'text-[#B5DC84]' : 'text-primary'}><CheckIcon /></span>
+              ? <span className={highlight ? 'text-white' : 'text-primary'}><CheckIcon /></span>
               : <CrossIcon />
             }
             <span className={`font-body text-base ${highlight ? 'text-white/80' : f.included ? 'text-text-forest' : 'text-text-sage/50'}`}>

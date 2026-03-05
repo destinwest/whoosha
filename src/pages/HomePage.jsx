@@ -3,6 +3,11 @@ import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import useStore from '../store/useStore'
 
+async function logout(navigate) {
+  navigate('/')
+  await supabase.auth.signOut()
+}
+
 // ── Shape icons ────────────────────────────────────────────────────────────────
 // All icons use stroke="currentColor" so they inherit card text color.
 // viewBox is 64×64 throughout for consistency.
@@ -169,6 +174,8 @@ export default function HomePage() {
   const [tier, setTier] = useState('free')
   const [toast, setToast] = useState(false)
   const toastTimer = useRef(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef(null)
 
   // Fetch this parent's tier from the profiles table.
   useEffect(() => {
@@ -190,6 +197,18 @@ export default function HomePage() {
       if (toastTimer.current) clearTimeout(toastTimer.current)
     }
   }, [])
+
+  // Close menu when clicking outside.
+  useEffect(() => {
+    if (!menuOpen) return
+    function onClickOutside(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [menuOpen])
 
   // Section 10c: Square Breathing is always free; everything else requires paid.
   function isGameActive(slug) {
@@ -218,13 +237,36 @@ export default function HomePage() {
         <span className="font-display text-2xl font-semibold text-text-forest">
           Whoosha
         </span>
-        <Link
-          to="/dashboard"
-          className="text-text-sage hover:text-text-forest transition-colors p-1 -mr-1 rounded-xl"
-          aria-label="Parent dashboard"
-        >
-          <UserCircleIcon />
-        </Link>
+        {/* Parent icon → dropdown with Dashboard + Log out */}
+        <div ref={menuRef} className="relative">
+          <button
+            onClick={() => setMenuOpen((o) => !o)}
+            className="text-text-sage hover:text-text-forest transition-colors p-1 -mr-1 rounded-xl"
+            aria-label="Parent menu"
+            aria-haspopup="true"
+            aria-expanded={menuOpen}
+          >
+            <UserCircleIcon />
+          </button>
+
+          {menuOpen && (
+            <div className="absolute right-0 mt-1 w-44 bg-white rounded-2xl shadow-lg overflow-hidden z-50 border border-black/5">
+              <Link
+                to="/dashboard"
+                onClick={() => setMenuOpen(false)}
+                className="block px-4 py-3 font-body text-sm font-medium text-text-forest hover:bg-bg-cream transition-colors"
+              >
+                Dashboard
+              </Link>
+              <button
+                onClick={() => logout(navigate)}
+                className="block w-full text-left px-4 py-3 font-body text-sm font-medium text-text-sage hover:bg-bg-cream transition-colors border-t border-black/5"
+              >
+                Log out
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
       {/* ── Greeting ── */}
