@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom'
 
 // ── Demo animation — module-level helpers (pure, no component deps) ───────────
 
-const DEMO_COLORS   = ['#B5DC84', '#7CC87A', '#5A9E6A', '#2A8E82']
-const DEMO_CYCLE_MS = 16_000
-const DEMO_TRAIL_MS = 3_000
-const DEMO_LABELS   = ['Breathe in', 'Hold', 'Breathe out', 'Hold']
+const DEMO_BASE_COLOR = '#F5EFE6'                                     // cream — untraced path
+const DEMO_LAP_COLORS = ['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7'] // matches game lap sequence
+const DEMO_CYCLE_MS   = 16_000
+const DEMO_LABELS     = ['Breathe in', 'Hold', 'Breathe out', 'Hold']
 
 function demoBuildGeo(rect) {
   const w    = rect.width
@@ -39,17 +39,25 @@ function demoGetDot(elapsed, geo) {
 
 // ── SquareBreatheDemo ─────────────────────────────────────────────────────────
 // Auto-playing canvas animation — no user input, clicking navigates to /demo.
+// Painting mechanic mirrors the real game: path starts cream, dot paints in
+// the current lap color behind it. After all 4 lap colors, resets to cream.
 
 function SquareBreatheDemo() {
-  const canvasRef = useRef(null)
-  const rafRef    = useRef(null)
-  const geoRef    = useRef(null)
-  const startRef  = useRef(0)
-  const trailRef  = useRef([])
+  const canvasRef   = useRef(null)
+  const rafRef      = useRef(null)
+  const geoRef      = useRef(null)
+  const startRef    = useRef(0)
+  const paintRef    = useRef(null)  // off-screen canvas — persistent paint across frames
+  const lapIdxRef   = useRef(0)     // index into DEMO_LAP_COLORS
+  const lapCountRef = useRef(0)     // total laps elapsed, used to detect lap boundaries
+  const prevDotRef  = useRef(null)  // previous dot position for paint segments
 
   useEffect(() => {
     const canvas = canvasRef.current
     const ctx    = canvas.getContext('2d')
+
+    const paintCanvas = document.createElement('canvas')
+    paintRef.current  = paintCanvas
 
     function resize() {
       const dpr  = window.devicePixelRatio || 1
@@ -57,7 +65,10 @@ function SquareBreatheDemo() {
       if (!rect.width || !rect.height) return
       canvas.width  = rect.width  * dpr
       canvas.height = rect.height * dpr
-      geoRef.current = demoBuildGeo(rect)
+      paintCanvas.width  = rect.width  * dpr
+      paintCanvas.height = rect.height * dpr
+      geoRef.current     = demoBuildGeo(rect)
+      prevDotRef.current = null  // avoid segment across resized geometry
     }
 
     resize()
@@ -69,47 +80,74 @@ function SquareBreatheDemo() {
       const geo = geoRef.current
       if (!geo) return
 
-      const dpr  = window.devicePixelRatio || 1
-      const W    = canvas.width  / dpr
-      const H    = canvas.height / dpr
+      const dpr     = window.devicePixelRatio || 1
+      const W       = canvas.width  / dpr
+      const H       = canvas.height / dpr
       const { corners, cx, cy, lw, sq } = geo
       const now     = performance.now()
       const elapsed = now - startRef.current
       const dot     = demoGetDot(elapsed, geo)
 
+      // ── Lap boundary detection ─────────────────────────────────────────────
+      // One lap = one full DEMO_CYCLE_MS. After every 4th lap, reset paint
+      // canvas and restart from cream for a seamless looping demonstration.
+      const totalLaps = Math.floor(elapsed / DEMO_CYCLE_MS)
+      if (totalLaps > lapCountRef.current) {
+        lapCountRef.current = totalLaps
+        if (totalLaps % DEMO_LAP_COLORS.length === 0) {
+          // Completed a full 4-lap cycle — clear paint canvas, restart cream
+          const pCtx = paintCanvas.getContext('2d')
+          pCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height)
+        }
+        lapIdxRef.current  = totalLaps % DEMO_LAP_COLORS.length
+        prevDotRef.current = null  // don't paint a segment across the lap boundary
+      }
+
+      // ── Paint dot trail on off-screen canvas ──────────────────────────────
+      const prev = prevDotRef.current
+      if (prev) {
+        const pCtx = paintCanvas.getContext('2d')
+        pCtx.save()
+        pCtx.scale(dpr, dpr)
+        pCtx.beginPath()
+        pCtx.moveTo(prev.x, prev.y)
+        pCtx.lineTo(dot.x, dot.y)
+        pCtx.strokeStyle = DEMO_LAP_COLORS[lapIdxRef.current]
+        pCtx.lineWidth   = lw
+        pCtx.lineCap     = 'round'
+        pCtx.stroke()
+        pCtx.restore()
+      }
+      prevDotRef.current = { x: dot.x, y: dot.y }
+
+      // ── Draw frame ────────────────────────────────────────────────────────
       ctx.save()
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, W, H)
 
-      // Square sides
+      // Background fill — eucalyptus sage matches the actual game canvas
+      ctx.fillStyle = '#9FBFB4'
+      ctx.fillRect(0, 0, W, H)
+
+      // 1. Cream base path — the untraced state
+      ctx.beginPath()
       for (let i = 0; i < 4; i++) {
         const a = corners[i]
         const b = corners[(i + 1) % 4]
-        ctx.beginPath()
-        ctx.moveTo(a.x, a.y)
+        if (i === 0) ctx.moveTo(a.x, a.y)
         ctx.lineTo(b.x, b.y)
-        ctx.strokeStyle = DEMO_COLORS[i]
-        ctx.lineWidth   = lw
-        ctx.lineCap     = 'round'
-        ctx.stroke()
       }
+      ctx.closePath()
+      ctx.strokeStyle = DEMO_BASE_COLOR
+      ctx.lineWidth   = lw
+      ctx.lineCap     = 'round'
+      ctx.lineJoin    = 'round'
+      ctx.stroke()
 
-      // Amber trail
-      trailRef.current.push({ x: dot.x, y: dot.y, t: now })
-      trailRef.current = trailRef.current.filter(p => now - p.t < DEMO_TRAIL_MS)
-      const trail = trailRef.current
-      for (let i = 1; i < trail.length; i++) {
-        const age = (now - trail[i].t) / DEMO_TRAIL_MS
-        ctx.beginPath()
-        ctx.moveTo(trail[i - 1].x, trail[i - 1].y)
-        ctx.lineTo(trail[i].x,     trail[i].y)
-        ctx.strokeStyle = `rgba(212,160,86,${((1 - age) * 0.7).toFixed(2)})`
-        ctx.lineWidth   = lw * 0.5
-        ctx.lineCap     = 'round'
-        ctx.stroke()
-      }
+      // 2. Paint layer — permanent traces painted by the dot
+      ctx.drawImage(paintCanvas, 0, 0, W, H)
 
-      // Dot glow
+      // 3. Dot glow
       const grd = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, lw * 1.5)
       grd.addColorStop(0, 'rgba(212,160,86,0.4)')
       grd.addColorStop(1, 'rgba(212,160,86,0)')
@@ -118,13 +156,13 @@ function SquareBreatheDemo() {
       ctx.fillStyle = grd
       ctx.fill()
 
-      // Dot
+      // 4. Dot
       ctx.beginPath()
       ctx.arc(dot.x, dot.y, lw * 0.65, 0, Math.PI * 2)
       ctx.fillStyle = '#D4A056'
       ctx.fill()
 
-      // Phase label — fades in/out with side progress, rendered on canvas
+      // 5. Phase label — fades in/out with side progress
       const { seg, segT } = dot
       const labelAlpha = segT < 0.15 ? segT / 0.15 : segT > 0.85 ? (1 - segT) / 0.15 : 1
 
