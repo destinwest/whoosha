@@ -217,20 +217,19 @@ whoosha.com/account       → Account Settings (protected, parent audience)
 ### 6.4 Square Breathing Game Page (`/games/square`)
 **Audience:** Child (immersive)  
 **Goal:** Child traces the square and completes the breathing exercise  
-**Background:** Starts at pale mint `#DFF0E6`, slowly deepens toward sage `#4A9B7F` as exercise progresses  
+**Background:** `#4A9B7F'
 **Feel:** All interface disappears. Only the game exists.
 
 **Layout:**
 - **Exit button only:** Small rounded button, top left, arrow or X icon. Tappable at all times. Returns to `/home`. No label needed.
-- **Shape:** Large centered square with thick rounded-corner stroke. Takes up approximately 60-70% of screen width. Soft teal `#5B9FAA` base color. Side labels (Breathe In, Hold, Breathe Out, Hold) in soft muted text along each side.
+- **Shape:** Large centered square with thick rounded-corner stroke. Takes up approximately 60-70% of screen width. Each side of the square is a different color — use any 4 of the 5 swatches from `design-assets/light green to dark greenblue.png`, assigned clockwise starting from the bottom (breathe in) side. No side labels — the experience is purely visual and tactile. Reference `design-assets/boxBreathingGame.png` for overall layout.
 - **Start circle:** A larger pulsing circle in amber `#D4A056` sits at the bottom-left corner of the square. Pulses gently to invite touch. This is the child's finger target — they place and hold their finger on it to begin.
-- **Pacing circle:** A smaller circle in soft white or pale mint, distinct from the start circle. Invisible until the child touches the start circle. Once triggered, travels the perimeter of the square at a constant speed — 4 seconds per side, corners rounded smoothly with no pause. This circle is the guide the child tries to follow.
+- **Pacing circle:** A smaller circle in soft white or pale mint, distinct from the start circle. Once game start is triggered, the smaller circle travels the center of each side of the square at a constant speed — 4 seconds per side, corners rounded smoothly with no pause. This circle is the guide the child tries to follow.
 - **Child's trace circle:** The start circle follows the child's finger position, snapped to the nearest point on the square path. It does not need to stay precisely on the pacing circle — the child simply tries to keep it as close as possible. There is no penalty, no error state, no feedback text for being off pace.
-- **Progress trail:** A soft coral/amber trail draws behind the child's trace circle along the path, showing where they have been. Fades gently over time so completed segments don't clutter the view.
-- **Phase instruction text:** Large, soft, centered text below the shape showing the current breathing phase — "Breathe in," "Hold," "Breathe out," "Hold." Phase is determined by the pacing circle's current position on the square, not the child's finger. Fades in and out gently on phase change.
-- **No pacing feedback text.** The pacing circle is the only guide. Removing text feedback reduces cognitive load and keeps the experience purely tactile and visual.
-- **Completion:** Triggered when the pacing circle completes the configured number of cycles (default: 4). Background softens back to pale mint. Gentle radial glow from center of square. Text: "Beautiful work 🌟" with a soft "Go again?" button and an "All done" button that returns to `/home`. No confetti, no loud animation — never re-excite a nervous system you just calmed.
-- **Session save:** On completion, write a record to Supabase `sessions` table with `child_id`, `game_slug: 'square-breathing'`, `duration_seconds`, `completed: true`.
+- **Progress trail:** A soft lavender/purple trail draws behind the child's trace circle along the path, showing where they have been. Fades gently over time so completed segments don't clutter the view.
+- **Phase instruction text:** None. Removed. No text labels on sides or phases. The pacing circle is the only guide. The experience is purely visual and tactile — this reduces cognitive load and is evidence-based for dysregulated children.
+- **Motivational messages:** There is no completion — the child plays as long as desired. A gentle message appears in the center of the square when the child completes a full loop (16 seconds) within an average of ±0.3 seconds timing deviation from the pacing circle. Trigger rules: show after the first good cycle; then every 5 good cycles; if the child has a bad cycle and then returns to the good threshold, show the message again. Use 3–4 rotating gentle phrases (e.g. "Beautiful work 🌟", "You're doing great 🌊"). No confetti, no loud animation — never re-excite a nervous system you just calmed.
+- **Session save:** On exit (when the child taps the exit button), write a record to Supabase `sessions` table with `child_id`, `game_slug: 'square-breathing'`, `duration_seconds`, `completed: false`. There is no explicit completion event. Only save if session duration > 2 seconds.
 
 **Square Breathing Timing (one full cycle = 16 seconds):**
 
@@ -242,8 +241,6 @@ Side 2 (bottom-right → top-right):    HOLD         — 4 seconds
 Side 3 (top-right → top-left):        Breathe OUT  — 4 seconds
 Side 4 (top-left → bottom-left):      HOLD         — 4 seconds
 ```
-
-One cycle completes and the exercise either loops or ends based on a configurable cycle count (default: 4 cycles for MVP).
 
 **Corner behavior:** No pause at corners. The child's finger rounds the corner naturally and the next phase label fades in immediately as the new side begins. The pacing dot advances smoothly through corners without stopping.
 
@@ -257,7 +254,7 @@ Tolerance: if finger is more than 20% of a segment's length ahead of or behind e
 - **Child's trace circle:** driven by `onTouchMove` (mobile) and `onMouseMove` (desktop fallback). On each move event, project the finger's raw canvas coordinates onto the nearest point on the current square path using a simple point-to-segment projection. The trace circle renders at that projected point.
 - **Phase determination:** derived from the pacing circle's current progress through the cycle, not the child's finger position. Calculate which side the pacing circle is on and display the corresponding breathing instruction.
 - **Game start trigger:** the pacing circle does not begin moving until the child places their finger within a threshold radius (approx 40px) of the start circle. Once triggered, the timer starts and does not stop until the configured cycles are complete or the child exits.
-- **Trail rendering:** draw a series of small circles or a path stroke along the child's historical positions on the square. Fade older trail segments using decreasing alpha over approximately 2 seconds so the trail feels alive without cluttering the canvas.
+- **Trail rendering:** draw a path stroke along the child's historical positions on the square. Fade older trail segments using decreasing alpha over approximately 2 seconds so the trail feels alive without cluttering the canvas.
 - **Canvas sizing:** the square should resize responsively based on viewport. Recalculate all path coordinates on window resize using a `ResizeObserver`.
 
 ---
@@ -619,10 +616,18 @@ Use this tone in all in-app copy, labels, feedback messages, and marketing text.
 
 ## 16. Open Questions
 
-- what the logo looks like 
-- whether you want sound in the MVP
+- what the logo looks like
 - what the app tagline is
 - whether the landing page needs real copy or placeholder copy for now
+
+## 17. Clarifications Log
+
+**Square Breathing game (Session 2):**
+- **Side colors:** Use any 4 of the 5 swatches from `light green to dark greenblue.png`.
+- **Phase labels:** Removed. No text on sides. Motivational messages only, in center of square.
+- **Motivational message triggers:** After first good cycle, every 5 good cycles, and on recovery from bad → good. "Good" = average timing deviation ≤ 0.3 seconds per cycle.
+- **Session save:** On exit. No completion event. `completed: false` always.
+- **Sound:** Not in MVP — to be added later.
 
 ### Sample In-App Copy
 - Game instruction: "Breathe in slowly as you trace this side..."
