@@ -1,4 +1,5 @@
-import { useRef, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import IntroScreen from './IntroScreen'
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const SIDE_COLORS = ['#B5DC84', '#7CC87A', '#5A9E6A', '#2A8E82']
@@ -22,6 +23,18 @@ const GOOD_THRESHOLD = 0.3
 //     The parent handles navigation and any session persistence.
 
 export default function SquareGame({ onExit }) {
+  // ── Phase state ─────────────────────────────────────────────────────────────
+  // 'intro': IntroScreen is visible, canvas loop idles
+  // 'game':  IntroScreen gone, canvas draws and accepts input
+  const [phase, setPhase]   = useState('intro')
+  const phaseRef            = useRef('intro')
+
+  function handleIntroComplete() {
+    phaseRef.current      = 'game'
+    sessionStartRef.current = Date.now()
+    setPhase('game')
+  }
+
   const canvasRef = useRef(null)
   const rafRef    = useRef(null)
   const geoRef    = useRef(null)
@@ -174,6 +187,8 @@ export default function SquareGame({ onExit }) {
 
     function frame() {
       rafRef.current = requestAnimationFrame(frame)
+      // Idle during intro — canvas is hidden, no drawing needed
+      if (phaseRef.current !== 'game') return
       const geo = geoRef.current
       if (!geo) return
 
@@ -315,14 +330,17 @@ export default function SquareGame({ onExit }) {
     }
   }, [])
 
+  const inGame = phase === 'game'
+
   return (
     <div
       className="absolute inset-0 bg-bg-eucalyptus overflow-hidden select-none"
       style={{ touchAction: 'none' }}
     >
+      {/* Exit button — always visible above intro and game */}
       <button
         onClick={handleExit}
-        className="absolute top-4 left-4 z-10 w-11 h-11 flex items-center justify-center rounded-2xl bg-white/15 text-white hover:bg-white/25 active:bg-white/30 transition-colors"
+        className="absolute top-4 left-4 z-20 w-11 h-11 flex items-center justify-center rounded-2xl bg-white/15 text-white hover:bg-white/25 active:bg-white/30 transition-colors"
         aria-label="Exit game"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -331,10 +349,21 @@ export default function SquareGame({ onExit }) {
         </svg>
       </button>
 
+      {/* Pre-game intro — renders on top of canvas, fades out then calls onComplete */}
+      {phase === 'intro' && (
+        <IntroScreen onComplete={handleIntroComplete} />
+      )}
+
+      {/* Game canvas — opacity 0 during intro, transitions to 1 when game starts */}
       <canvas
         ref={canvasRef}
         className="w-full h-full"
-        style={{ touchAction: 'none' }}
+        style={{
+          touchAction:   'none',
+          opacity:       inGame ? 1 : 0,
+          transition:    'opacity 0.5s ease-in-out',
+          pointerEvents: inGame ? 'auto' : 'none',
+        }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
