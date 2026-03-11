@@ -47,6 +47,9 @@ function buildGeo(rect) {
   const circleR = sq * 0.0728
   const lw      = circleR * 2 + 8
 
+  const travelPx    = lw * 0.15   // max lateral drift off centerline in CSS px
+  const amberRadius = lw * 0.35   // amber circle radius in CSS px
+
   const LS = sq - 2 * r
   const LA = (Math.PI * r) / 2
   const sf = LS / (LS + LA)   // scalar — all four sides are identical
@@ -109,6 +112,7 @@ function buildGeo(rect) {
 
   return {
     cx, cy, sq, half, lw, circleR, r, sf,
+    travelPx, amberRadius,
     arcCenters, arcStartAngles,
     straightFrom, straightTo,
     outNormals, railOffset,
@@ -311,11 +315,16 @@ export default function SquareGame({ onExit }) {
     }
   }
 
-  // ── Project finger onto nearest centerline point ───────────────────────────
+  // ── Project finger onto nearest centerline point, then clamp to travel band ─
+  // fraction is always centerline-based (used for lap detection + pacing compare).
+  // x, y is the clamped finger position — exactly where paint and the amber
+  // circle are drawn. If the finger is within travelPx of the centerline it
+  // stays at its true position; beyond travelPx it is pulled back to the band
+  // edge in the direction of the centerline.
   function project(px, py) {
     const geo = geoRef.current
     if (!geo) return null
-    const { points } = geo
+    const { points, travelPx } = geo
     const N    = points.length - 1
     let   best = { dist: Infinity, x: 0, y: 0, fraction: 0 }
 
@@ -334,7 +343,16 @@ export default function SquareGame({ onExit }) {
         best = { dist: d, x: nx, y: ny, fraction: (i + t) / N * 4 }
       }
     }
-    return best
+
+    // Clamp finger to within travelPx of the nearest centerline point.
+    const { dist, x: nx, y: ny, fraction } = best
+    if (dist <= travelPx) {
+      // Finger is inside the band — use its true position.
+      return { dist, x: px, y: py, fraction }
+    }
+    // Finger is outside the band — pull back to band edge.
+    const scale = travelPx / dist
+    return { dist, x: nx + (px - nx) * scale, y: ny + (py - ny) * scale, fraction }
   }
 
   // ── Lap detection ──────────────────────────────────────────────────────────
@@ -522,7 +540,7 @@ export default function SquareGame({ onExit }) {
       const dpr = dprRef.current
       const W   = canvas.width  / dpr
       const H   = canvas.height / dpr
-      const { cx, cy, sq, half, lw, circleR, r, startPt } = geo
+      const { cx, cy, sq, half, lw, amberRadius, r, startPt } = geo
 
       ctx.save()
       ctx.scale(dpr, dpr)
@@ -577,20 +595,20 @@ export default function SquareGame({ onExit }) {
 
         if (pulseAlpha.current > 0) {
           ctx.beginPath()
-          ctx.arc(displayPos.x, displayPos.y, circleR * 1.7 + p * circleR * 0.15, 0, Math.PI * 2)
+          ctx.arc(displayPos.x, displayPos.y, amberRadius * 1.7 + p * amberRadius * 0.15, 0, Math.PI * 2)
           ctx.strokeStyle = `rgba(212,160,86,${((0.25 + p * 0.1) * pulseAlpha.current).toFixed(3)})`
           ctx.lineWidth   = 2.5
           ctx.stroke()
 
           ctx.beginPath()
-          ctx.arc(displayPos.x, displayPos.y, circleR * 2.3 + p * circleR * 0.15, 0, Math.PI * 2)
+          ctx.arc(displayPos.x, displayPos.y, amberRadius * 2.3 + p * amberRadius * 0.15, 0, Math.PI * 2)
           ctx.strokeStyle = `rgba(212,160,86,${((0.12 + p * 0.05) * pulseAlpha.current).toFixed(3)})`
           ctx.lineWidth   = 2
           ctx.stroke()
         }
 
         ctx.beginPath()
-        ctx.arc(displayPos.x, displayPos.y, circleR, 0, Math.PI * 2)
+        ctx.arc(displayPos.x, displayPos.y, amberRadius, 0, Math.PI * 2)
         ctx.fillStyle = '#D4A056'
         ctx.fill()
 
