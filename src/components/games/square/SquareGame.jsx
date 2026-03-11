@@ -121,6 +121,29 @@ function buildGeo(rect) {
   }
 }
 
+// ── applyPaintClip ────────────────────────────────────────────────────────────
+// Permanently clips a paint canvas context to the annular track region.
+// All geometry values must already be in physical pixels (CSS px × DPR).
+// paintCtx.save() is called but intentionally never restored — the clip
+// must persist across all subsequent draw calls on this context.
+// Must be called again after every resize because resizing resets canvas state.
+function applyPaintClip(paintCtx, { left, top, sqW, cr, lw }) {
+  paintCtx.save()   // NOTE: do not restore — clip must persist
+  paintCtx.beginPath()
+  // Outer boundary — full track outer edge
+  paintCtx.roundRect(left, top, sqW, sqW, cr)
+  // Inner boundary — track inner edge (creates the hole)
+  paintCtx.roundRect(
+    left + lw,
+    top  + lw,
+    sqW  - lw * 2,
+    sqW  - lw * 2,
+    Math.max(0, cr - lw)
+  )
+  // evenodd fill rule punches the inner rect out of the outer rect
+  paintCtx.clip('evenodd')
+}
+
 // ── SquareGame ────────────────────────────────────────────────────────────────
 export default function SquareGame({ onExit }) {
 
@@ -315,18 +338,31 @@ export default function SquareGame({ onExit }) {
     }
   }
 
-  // ── Project finger onto nearest centerline point, then clamp to travel band ─
-  // fraction is always centerline-based (used for lap detection + pacing compare).
-  // x, y is the clamped finger position — exactly where paint and the amber
-  // circle are drawn. If the finger is within travelPx of the centerline it
-  // stays at its true position; beyond travelPx it is pulled back to the band
-  // edge in the direction of the centerline.
+  // ── Project finger onto path centerline, then clamp lateral drift only ───────
+  // Returns:
+  //   x, y      — clamped position (amber circle + paint origin)
+  //   clx, cly  — nearest centerline point (lap detection + encouragement check)
+  //   fraction  — centerline-based path progress (lap detection)
+  //   dist      — raw Euclidean distance from finger to centerline
+  //
+  // Algorithm:
+  //   1. Find the nearest point on the centerline polyline (clx, cly) and
+  //      capture the tangent direction of that segment.
+  //   2. Derive the path normal: normal = { -tangent.y, tangent.x }.
+  //   3. Project the finger's offset onto the normal to get the signed
+  //      lateral offset — the purely sideways drift, ignoring longitudinal
+  //      position along the path.
+  //   4. Clamp that lateral offset to ±travelPx.
+  //   5. The clamped position is clPoint + normal * clampedOffset.
+  //
+  // Longitudinal movement (finger ahead/behind along the path) is untouched —
+  // only the sideways component is constrained.
   function project(px, py) {
     const geo = geoRef.current
     if (!geo) return null
     const { points, travelPx } = geo
     const N    = points.length - 1
-    let   best = { dist: Infinity, x: 0, y: 0, fraction: 0 }
+    let   best = { dist: Infinity, x: 0, y: 0, fraction: 0, tdx: 1, tdy: 0 }
 
     for (let i = 0; i < N; i++) {
       const a   = points[i]
@@ -340,19 +376,32 @@ export default function SquareGame({ onExit }) {
       const ny = a.y + t * dy
       const d  = Math.hypot(px - nx, py - ny)
       if (d < best.dist) {
-        best = { dist: d, x: nx, y: ny, fraction: (i + t) / N * 4 }
+        best = { dist: d, x: nx, y: ny, fraction: (i + t) / N * 4, tdx: dx, tdy: dy }
       }
     }
 
-    // Clamp finger to within travelPx of the nearest centerline point.
-    const { dist, x: nx, y: ny, fraction } = best
-    if (dist <= travelPx) {
-      // Finger is inside the band — use its true position.
-      return { dist, x: px, y: py, fraction }
+    // Tangent unit vector at the nearest point.
+    const { dist, x: clx, y: cly, fraction, tdx, tdy } = best
+    const tLen = Math.hypot(tdx, tdy)
+    const tx   = tdx / tLen   // tangent x
+    const ty   = tdy / tLen   // tangent y
+
+    // Normal points 90° left of the tangent (outward from the path center).
+    const nx = -ty
+    const ny =  tx
+
+    // Signed lateral offset: how far the finger sits to the left or right
+    // of the centerline, measured perpendicular to the path direction.
+    const lateralOffset  = (px - clx) * nx + (py - cly) * ny
+    const clampedOffset  = Math.max(-travelPx, Math.min(travelPx, lateralOffset))
+
+    return {
+      dist,
+      x: clx + nx * clampedOffset,
+      y: cly + ny * clampedOffset,
+      clx, cly,
+      fraction,
     }
-    // Finger is outside the band — pull back to band edge.
-    const scale = travelPx / dist
-    return { dist, x: nx + (px - nx) * scale, y: ny + (py - ny) * scale, fraction }
   }
 
   // ── Lap detection ──────────────────────────────────────────────────────────
@@ -370,7 +419,8 @@ export default function SquareGame({ onExit }) {
     const pacing = pacingPosRef.current
     const child  = childPosRef.current
     if (pacing && child) {
-      const dist = Math.hypot(child.x - pacing.x, child.y - pacing.y)
+      // Compare centerline positions — lateral drift does not affect this check.
+      const dist = Math.hypot(child.clx - pacing.x, child.cly - pacing.y)
       if (dist <= 60 && now - lastEncouragementRef.current > 30_000) {
         encouragementRef.current     = { startTime: now }
         lastEncouragementRef.current = now
@@ -392,31 +442,10 @@ export default function SquareGame({ onExit }) {
     if (!pCanvas || !geo) return
     const dpr  = dprRef.current
     const pCtx = pCanvas.getContext('2d')
-    const { cx, cy, half, lw, r } = geo
 
     pCtx.save()
 
-    // Clip to the track stroke region so paint can never bleed outside the
-    // track — even when the user moves fast or jumps across the shape.
-    // Two roundRects with evenodd fill rule create an annular clip:
-    //   outer = centerline path expanded by lw/2 (outer stroke edge)
-    //   inner = centerline path shrunk by lw/2  (inner stroke edge)
-    pCtx.beginPath()
-    pCtx.roundRect(
-      (cx - half - lw / 2) * dpr,
-      (cy - half - lw / 2) * dpr,
-      (half * 2 + lw) * dpr,
-      (half * 2 + lw) * dpr,
-      (r + lw / 2) * dpr
-    )
-    pCtx.roundRect(
-      (cx - half + lw / 2) * dpr,
-      (cy - half + lw / 2) * dpr,
-      (half * 2 - lw) * dpr,
-      (half * 2 - lw) * dpr,
-      Math.max(0, r - lw / 2) * dpr
-    )
-    pCtx.clip('evenodd')
+    // Annular clip is applied permanently in resize() — no need to reapply here.
 
     // Interpolate from current lap color toward next based on progress through
     // the lap (to.fraction / 4 goes 0→1 over one full lap), so the color
@@ -522,6 +551,17 @@ export default function SquareGame({ onExit }) {
       paintCanvas.width  = rect.width  * dpr
       paintCanvas.height = rect.height * dpr
       geoRef.current     = buildGeo(rect)
+
+      // Resizing resets the paint canvas state (including any prior clip).
+      // Reapply the permanent annular clip every time dimensions change.
+      const { cx, cy, half, lw: cssLw, r } = geoRef.current
+      applyPaintClip(paintCanvas.getContext('2d'), {
+        left: (cx - half - cssLw / 2) * dpr,
+        top:  (cy - half - cssLw / 2) * dpr,
+        sqW:  (half * 2 + cssLw) * dpr,
+        cr:   (r + cssLw / 2) * dpr,
+        lw:   cssLw * dpr,
+      })
     }
 
     resize()
