@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import IntroScreen from './IntroScreen'
+import StrokeSelector from './StrokeSelector'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const BASE_COLOR = '#F5EFE6'
@@ -151,6 +152,7 @@ export default function SquareGame({ onExit }) {
   const [showIntro, setShowIntro]           = useState(true)
   const [overlayOpacity, setOverlayOpacity] = useState(1)
   const [overlayColor, setOverlayColor]     = useState('#2C4A3E')
+  const [activeStroke, setActiveStroke]     = useState('classic')
 
   const introStartRef                       = useRef(null)
   const introDoneRef                        = useRef(false)
@@ -186,6 +188,52 @@ export default function SquareGame({ onExit }) {
   const startLabelAlpha = useRef(1)
 
   const dprRef = useRef(window.devicePixelRatio || 1)
+
+  const strokeModeRef = useRef('classic')
+
+  // ── Reset to start state ───────────────────────────────────────────────────
+  // Clears the paint canvas, reapplies the clip, and resets all game-state refs
+  // back to their initial values. Called when the stroke style is changed.
+  function resetToStartState() {
+    const pCanvas = paintRef.current
+    if (pCanvas && geoRef.current) {
+      // Reassigning .width clears all canvas content AND resets context state
+      // (including any prior clip), so we must reapply the permanent annular clip.
+      const w = pCanvas.width
+      pCanvas.width = w
+      const dpr = dprRef.current
+      const { cx, cy, half, lw: cssLw, r } = geoRef.current
+      applyPaintClip(pCanvas.getContext('2d'), {
+        left: (cx - half - cssLw / 2) * dpr,
+        top:  (cy - half - cssLw / 2) * dpr,
+        sqW:  (half * 2 + cssLw) * dpr,
+        cr:   (r + cssLw / 2) * dpr,
+        lw:   cssLw * dpr,
+      })
+    }
+
+    startedRef.current       = false
+    touchRef.current         = false
+    childPosRef.current      = null
+    prevPosRef.current       = null
+    lastChildPos.current     = null
+    prevFracRef.current      = null
+    gameStartRef.current     = null
+    lapColorIdxRef.current   = 0
+    pulseRef.current         = 0
+    pulseAlpha.current       = 1
+    startLabelAlpha.current  = 1
+    lastEncouragementRef.current = 0
+    encouragementRef.current     = null
+  }
+
+  // ── Stroke selection ────────────────────────────────────────────────────────
+  function handleStrokeSelect(newStroke) {
+    if (newStroke === strokeModeRef.current) return  // no-op if same
+    strokeModeRef.current = newStroke
+    setActiveStroke(newStroke)
+    resetToStartState()
+  }
 
   // ── Intro timeline ─────────────────────────────────────────────────────────
   function tickIntro(now) {
@@ -719,6 +767,13 @@ export default function SquareGame({ onExit }) {
           <path d="M19 12H5M12 5l-7 7 7 7" />
         </svg>
       </button>
+
+      {!showIntro && (
+        <StrokeSelector
+          activeStroke={activeStroke}
+          onSelect={handleStrokeSelect}
+        />
+      )}
 
       <canvas
         ref={canvasRef}
