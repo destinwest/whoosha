@@ -165,17 +165,18 @@ Every game session begins with this intro screen, regardless of which game is be
 
 **Sequence:**
 1. **Text phase (4 seconds total):**
-   - Line 1 appears immediately: "Before we begin..."
-   - Line 2 fades in over 4 seconds, starting invisible and transitioning to fully solid: "Let's take one slow breath together 🌿"
+   - Dark deep forest green `#2C4A3E` appears immediately
+   - Line 1 fades in immediately: "Ready to begin?" (0.5s fade)
+   - Line 2 fades in starting at 2 seconds over 2 seconds, fully solid at 4s: "Let's take one good breath together"
    - Both lines centered, large, Nunito semibold, warm white
+   - Text fades out over the final 1 second of the inhale phase, fully gone at peak brightness
 
 2. **Breath animation (8 seconds total), begins immediately after text phase:**
-   - **Inhale — 4 seconds:** Background brightens from deep forest green `#2C4A3E` to luminous mint `#D4EBE0`, radiating outward from the center of the screen
-   - **Exhale — 4 seconds:** Background dims smoothly from `#D4EBE0` down to the game's background color `#9FBFB4`
+   - **Inhale — 4 seconds:** Background/fullscreen brightens from deep forest green `#2C4A3E` to off-white cream `#F5EFE6`. Text is gone by the end of this phase.
+   - **Exhale — 4 seconds:** The overlay fades from opacity 1 to 0 while holding color `#F5EFE6`, revealing the game canvas below
    - Transition is a smooth JS interpolation using `requestAnimationFrame` — not a CSS transition or flash
-   - The exhale settles exactly on the game canvas background color so the transition into the game is seamless
 
-3. **Handoff:** After the full 12-second sequence (4s text + 8s breath), the intro fades out and the game canvas fades in automatically with a 0.5 second opacity transition.
+3. **Handoff:** COMMENT - Does this instruction makes sense, or do the rest of the instructions already ensure a smooth handoff? After the full intro sequence, the intro fades out and the game canvas fades in automatically with a 0.5 second opacity transition.
 
 **Skip button:** Small, low-contrast "skip" text link, bottom right corner, visible throughout. Tapping it jumps immediately to the game canvas.
 
@@ -250,41 +251,50 @@ Every game session begins with this intro screen, regardless of which game is be
 **Background:** Eucalyptus sage `#9FBFB4` — static throughout, does not change during exercise  
 **Feel:** All interface disappears. Only the game exists.
 
-**Reference image:** `design-assets/boxBreathingGame.png` — use this as the primary visual reference for the shape, corner style, stroke width, and start circle placement.
-
 **Intro screen:** Every game session begins with the shared Pre-Game Intro Screen defined in Section 6.0. Apply it here exactly as specified.
 
 ---
 
 #### Game Canvas
 
-- **Exit button only:** Small rounded button, top left, arrow or X icon. Tappable at all times. Returns to `/home`. No label needed.
+- **Exit button only:** Arrow. Tappable at all times. Returns to `/home`. No label needed.
 
 - **Shape — Rhomboid Path:**
-  The path is NOT a traditional sharp-cornered square. It is a thick, heavily rounded rhomboid path — like a rounded rectangle with very large corner radii. Reference `design-assets/boxBreathingGame.png` closely.
+  The path is NOT a traditional sharp-cornered square. It is a thick, heavily rounded square path — like a rounded square with very large corner radii. Reference `design-assets/boxBreathingGame.png` closely.
   - Stroke width: approximately 6mm in physical size — scale this relative to screen DPI. On a standard tablet this is roughly 22–26px. The stroke is thick enough that a child's finger fits comfortably within it.
-  - Corner radius: very large — approximately 15–20% of the shorter side length. The corners are nearly semicircular, not subtle rounding. The result looks like a smooth rhomboid track, not a square with clipped corners.
+  - Corner radius: very large — approximately 15–20% of the side length. The corners are nearly semicircular, not subtle rounding. The result looks like a smooth square track, not a square with clipped corners.
   - The stroke itself has two visible edges — an inner rail and an outer rail — because of its thickness.
   - **Base color: off-white cream `#F5EFE6`** — the full path starts in this color before the child has traced anything. This is the untraced state.
   - The shape takes up approximately 60–70% of the screen width, centered.
-  - Side labels (Breathe In — bottom side, Hold — right side, Breathe Out — top side, Hold — left side) appear in soft muted text alongside each side, outside the path.
+  - Side labels (Breathe In — bottom side, Hold — right side, Breathe Out — top side, Hold — left side) are drawn centered on the path, overlaid on the centerline midpoint of each side.
 
 - **Start circle:**
-  Large amber pulsing circle `#D4A056` positioned at the bottom-left of the path — exactly as shown in `design-assets/boxBreathingGame.png`. The circle sits on the path itself, overlapping the stroke. It pulses gently with a soft glow to invite touch. Label: "start" in small dark text inside the circle. This is the child's finger target to begin.
+  Large amber pulsing circle `#D4A056` positioned at the bottom-left of the path — exactly as shown in `design-assets/boxBreathingGame.png`. The circle sits on the path itself, overlapping the stroke. It pulses gently with a soft glow to invite touch. Label: "start" in small, soft, muted text inside the circle. This is the child's finger target to begin.
+
+---
+
+#### Start State (Pre-Trigger)
+
+This is the exact visual state when the game canvas first appears — after the intro screen, before the child has touched anything — and the state the game returns to when the stroke style is changed.
+
+- **Racetrack:** full cream `#F5EFE6`, no painted color anywhere
+- **Pacing circle:** white circle, visible, stationary at the bottom-left start point
+- **Pacing circle state:** stationary, not yet triggered
+- **Amber user circle:** sitting at the same bottom-left start point, on top of and overlapping the pacing circle. Displays "start" label in small, soft, muted text. Pulse ring animation active.
+- **Lap counter:** 0, lap color index 0 (sage green `#7DB89A` will be the first color painted)
+- **Labels:** all four side labels visible (breathe in, hold, breathe out, hold)
+
+The child places their finger on the amber circle and begins dragging to trigger the game. The moment dragging begins: pacing circle starts moving, "start" label is removed from the amber circle, and the amber circle becomes the trace circle following the finger. The pulse ring animation on the amber circle stops once triggered.
+
+**Reset to start state** (on stroke style change): stop and return the pacing circle to the start point, return the amber circle to the start point with "start" label and pulse ring restored, clear all paint canvases, reset lap counter to 0 and lap color index to 0, freeze/hide the trace circle. Do not replay the intro screen.
+
+---
 
 - **Pacing circle:**
-  A smaller circle in soft white. Hidden until the child touches the start circle. Once triggered, travels the full path continuously — 4 seconds per side — with smooth movement through corners at consistent speed, no pausing. Never stops. Loops indefinitely until the child exits.
+  A larger circle in soft white. Visible at the start point (bottom-left) before the child touches anything — it sits at the start position, stationary, slightly behind the amber start circle. Once the child touches and begins dragging the amber circle, the pacing circle starts moving and travels the full path continuously — 4 seconds per side — with smooth movement through corners at consistent speed, no pausing. Once started, it never stops and is never affected by the child's finger. Loops indefinitely until the child exits.
 
-  **Pacing circle rail behavior:**
-  - **Bottom side (left to right):** travels along the **inner edge** of the stroke
-  - **Right side (bottom to top):** travels along the **inner edge** of the stroke
-  - **Top side (right to left):** travels along the **outer edge** of the stroke
-  - **Left side (top to bottom):** travels along the **outer edge** of the stroke
-  - At corners, transitions smoothly between inner and outer rail as it rounds the bend
-  - Creates a subtle weaving motion across the stroke width on each lap — visually engaging without being distracting
-
-- **Child's trace circle:**
-  Amber circle `#D4A056` that follows the child's finger, projected onto the nearest point on the path centerline. The child tries to keep their circle on top of the pacing circle. No penalty, no feedback text — the pacing circle is the only guide.
+- **Child's trace/Amber user circle:**
+  Amber circle `#D4A056` that follows the child's finger, projected onto the nearest point on the path centerline. The child tries to keep their circle on top of the pacing circle. No penalty, no feedback text — the pacing circle is the only guide. When the child lifts their finger, the trace circle freezes at its last position. It does not disappear and does not move until the child touches the screen again.
 
 - **Stroke painting mechanic — the core visual:**
   As the child's trace circle moves along the path, it paints the stroke with the current lap color. The cream base `#F5EFE6` is replaced by the lap color exactly where the child has traced. Untraced portions remain cream.
@@ -299,12 +309,6 @@ Every game session begins with this intro screen, regardless of which game is be
   ```
   Colors are calming — blues, greens, purples predominantly. Each color is perceptually adjacent to its neighbor — no sudden jumps.
 
-  **Color transition between laps:**
-  - When the child completes a full lap and returns to the start point, the stroke from that lap remains painted — it does not reset or fade
-  - The next lap's color begins painting from the start point as the child continues tracing
-  - Where the new lap overlaps previously painted portions, the new color paints over the old
-  - Over time the full track builds a layered color history
-
   **Persistence:**
   - If the child lifts their finger mid-lap, painted portions stay exactly as-is
   - When they return their finger to the path, painting resumes from where their finger lands
@@ -313,10 +317,10 @@ Every game session begins with this intro screen, regardless of which game is be
 - **Encouragement moment:**
   When the pacing circle completes a lap and the child's trace circle is within **60px of the pacing circle** at that moment (meaning the child was closely following the pace), show a brief gentle encouragement:
   - Soft radial glow pulses once from the center of the shape
-  - Text "Beautiful work 🌟" fades in below the shape, then fades out over 2 seconds
+  - Text "Beautiful work 🌟" fades in at the middle of the shape, then fades out over 2 seconds
   - Game continues uninterrupted — pacing circle does not pause
-  - **This moment only triggers on the first qualifying lap.** After it fires once, it will not fire again until at least 45 seconds have elapsed. After 45 seconds, it becomes eligible to trigger again on the next qualifying lap.
-  - Implementation: on each lap completion, calculate pixel distance between trace circle position and pacing circle position. If distance ≤ 60px AND `now - lastEncouragementTime > 45000`, show encouragement and set `lastEncouragementTime = performance.now()`.
+  - **This moment only triggers on the first qualifying lap.** After it fires once, it will not fire again until at least 30 seconds have elapsed. After 30 seconds, it becomes eligible to trigger again on the next qualifying lap.
+  - Implementation: on each lap completion, calculate pixel distance between trace circle position and pacing circle position. If distance ≤ 60px AND `now - lastEncouragementTime > 30_000`, show encouragement and set `lastEncouragementTime = performance.now()`.
 
 - **No completion state.** The game runs indefinitely. The child exits via the exit button when ready.
 
@@ -333,24 +337,132 @@ Side 3 (top-right → top-left):        Breathe OUT  — 4 seconds
 Side 4 (top-left → bottom-left):      HOLD         — 4 seconds
 ```
 
-**Corner behavior:** No pause at corners. The pacing dot advances smoothly through corners without stopping. Phase label fades in immediately as the new side begins.
+**Corner behavior:** No pause at corners. The pacing dot advances smoothly through corners without stopping. Phase label fades in slightly before the new side begins.
 
 **Implementation notes:**
 - Use React `useRef` and `requestAnimationFrame` for all animation — no React state updates inside the animation loop
 - Use an HTML `<canvas>` element with a React ref for the game canvas
 - Game state phases: `'intro' | 'game'` — no completion state
 - **Racetrack path geometry:** draw using Canvas 2D `roundRect()` or `arcTo()`. Corner radius approximately 18% of the shorter side length. Stroke width `Math.round(devicePixelRatio * 22)` pixels.
-- **Stroke painting:** maintain a persistent off-screen canvas storing all painted color. On each touch/mouse move, draw a thick line segment in the current lap color from the previous trace position to the current, clipped to the path. Composite: cream base path → persistent paint canvas → pacing circle and trace circle on top. Painting is permanent — lifted fingers do not erase.
+- **Stroke painting:** an offscreen canvas stores all painted color. On each pointer move, draw a line segment from the previous to the current projected position at full track width, clipped to the annular track region. Composite order each frame: cream base path → paint canvas → labels → pacing circle → amber circle. Painting is permanent — lifted fingers do not erase. See Visual Polish section for full stroke rendering specs.
 - **Lap detection:** detect lap completion when the child's trace circle crosses back over the start point (bottom-left) in the counterclockwise direction. On lap completion, increment lap counter, switch to next color in sequence using `currentLap % colors.length`.
 - **Lap color array:** `['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']` — index with modulo for infinite looping.
-- **Encouragement timing:** on each lap completion, calculate pixel distance between trace circle and pacing circle. If distance ≤ 60px AND `now - lastEncouragementTime > 45000ms`, show encouragement and set `lastEncouragementTime = performance.now()`.
-- **Inner/outer rail:** calculate two offset paths from centerline — inner rail offset inward by `strokeWidth / 2 - 2px`, outer rail offset outward by `strokeWidth / 2 - 2px`. Pacing circle uses inner rail on bottom/right, outer rail on top/left. Interpolate smoothly through corners.
+- **Encouragement timing:** on each lap completion, calculate pixel distance between trace circle and pacing circle. If distance ≤ 60px AND `now - lastEncouragementTime > 30000ms`, show encouragement and set `lastEncouragementTime = performance.now()`.
 - **Pacing circle:** driven entirely by `performance.now()`. Loops indefinitely. No user input affects timing.
 - **Child's trace circle:** driven by `onTouchMove` / `onMouseMove`. Projects finger onto nearest path centerline point.
 - **Phase determination:** derived from pacing circle's current side index (0 = bottom = Breathe In, 1 = right = Hold, 2 = top = Breathe Out, 3 = left = Hold).
-- **Game start trigger:** pacing circle stays hidden until child's finger comes within ~40px of start circle. Timer starts on trigger.
+- **Game start trigger:** at start state, the pacing circle is visible but stationary at the start point. The game begins (pacing circle starts moving) when the child's finger touches within ~40px of the start point and begins dragging. Timer starts on trigger.
 - **Session save on exit:** capture `performance.now()` at game start and at exit button tap to calculate `duration_seconds`.
 - **Canvas sizing:** recalculate all geometry on resize using `ResizeObserver`.
+
+---
+
+#### Visual Polish — Square Breathing Game
+
+These are the required visual quality standards for the game canvas. They are not optional enhancements — they define what the finished game should look like. All effects use Canvas 2D API only. No CSS filters, no external libraries.
+
+**Guiding principle:** Every element should feel dimensional and alive, not flat. The stroke rendering is the primary visual — it must feel organic and hand-painted, not like a cursor trail.
+
+---
+
+**1. Paint Layer — Default Stroke**
+
+The default stroke is rendered on a persistent offscreen canvas that is composited onto the display canvas each frame. Paint is permanent — lifting the finger does not erase it.
+
+- Each pointer move event draws a line segment from the previous projected position to the current one using `ctx.lineTo` + `ctx.stroke`
+- `lineWidth` equals the full track width (`lw`), `lineCap` is `'round'`
+- The stroke is clipped to an annular region (outer roundRect minus inner roundRect, `evenodd` fill rule) so paint can never bleed outside the track boundaries
+- Color interpolates smoothly between the current lap color and the next lap color based on the finger's progress through the lap (`to.fraction / 4`), so color transitions continuously rather than jumping at lap boundaries
+- Lap color sequence: `['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']`, cycling with modulo
+
+---
+
+**1b. Paint Layer — Watercolor Stroke (Selectable Alternative)**
+
+The layered wash stroke is an alternative rendering mode selectable from the stroke style menu (see Stroke Style Selector below). It produces a softer, more painterly watercolor quality by maintaining multiple independent drawing layers simultaneously.
+
+**Architecture — multiple offscreen canvases:**
+Each layer has its own offscreen canvas. Layers are composited back-to-front onto the display canvas each frame. This is architecturally different from the default stroke — do not attempt to replicate the effect with a single canvas at reduced opacity.
+
+**Layer parameters (3 layers by default, outermost first):**
+- Layer 0 (outer): width = `baseWidth × 1.8`, opacity = `~0.09` — wide, very faint wash, most positional jitter
+- Layer 1 (middle): width = `baseWidth × 1.2`, opacity = `~0.28` — medium wash
+- Layer 2 (inner): width = `baseWidth × 0.65`, opacity = `~0.55` — narrow, most opaque core, follows true path exactly
+
+**Independent point buffers with jitter:**
+Each layer maintains its own point history. Outer layers apply random positional jitter (2–3px) to each incoming point before storing it. This causes each layer to trace a slightly different curve — the result reads as organic depth rather than concentric rings at different opacities.
+
+**Catmull-Rom smoothing + adaptive subdivision** apply identically to the default stroke. Velocity response (width and opacity) applies to all layers simultaneously using the innermost layer's velocity reading.
+
+**Compositing:** draw layer 0 first (widest/faintest), then layer 1, then layer 2 on top. All layers use the current lap color.
+
+---
+
+**Stroke Style Selector**
+
+A small stroke style selector lives in the top-right corner of the game screen, accessible at all times during play. It allows the child (or parent) to switch between available stroke rendering modes.
+
+**Behavior:**
+- Displayed as a compact icon button (paintbrush icon) in the top-right corner, alongside the exit button in the top-left
+- Tapping it opens a small floating panel with two options: **Classic** (default tapered stroke) and **Watercolor** (layered wash stroke)
+- The currently active stroke is indicated with a subtle highlight or checkmark
+- Switching takes effect immediately on the next drawn stroke — the game is reset to the 'start state.'
+- The selected stroke style is session-only — it does not persist between sessions. The default is always Classic on session start.
+- The panel closes automatically after a selection is made, or when the child taps anywhere outside it
+
+**Implementation:**
+- Implement as `StrokeSelector.jsx` in `src/components/games/square/`
+- Stroke mode is stored in a React ref (not state) to avoid triggering re-renders inside the animation loop: `strokeModeRef = useRef('classic')`
+- The two rendering implementations live in separate files: `src/components/games/square/strokes/taperedStroke.js` and `src/components/games/square/strokes/layeredWash.js`
+- Each stroke module exports a consistent interface: `init(ctx, config)`, `addPoint(x, y, vel)`, `render()`, `clear()`
+- `SquareCanvas.jsx` imports both and delegates to whichever `strokeModeRef.current` points to
+
+**Visual design of the selector panel:**
+- Small floating card, softly rounded, semi-transparent dark background (`rgba(44,74,62,0.85)`)
+- Two options displayed as labeled rows with a small stroke preview swatch
+- Nunito semibold, warm white text, no harsh borders
+- Tap target minimum 44px tall per row
+
+---
+
+**2. Encouragement Moment — Pulse**
+
+- Pulse: amber `rgba(212,160,86,...)`, existing behavior, faster fade.
+
+Pulse animate using `t = (now - enc.startTime) / 2000` (0→1). 
+
+"Beautiful work 🌟" text: add a very soft `ctx.shadowBlur = 8` / `ctx.shadowColor = 'rgba(255,255,255,0.6)'` behind the text to make it feel luminous rather than flat.
+
+---
+
+**3. Paint Luminosity Progression**
+
+Each successive lap's paint should feel very slightly more luminous — as if the track is gradually brightening as the child breathes more calmly. Implement as a `globalAlpha` increase on the core paint pass only:
+
+```
+const coreAlpha = Math.min(0.95, 0.80 + lapColorIdxRef.current * 0.04)
+```
+
+The progression is subtle — imperceptible lap to lap, but noticeable across a full session. Cap at 0.95 so it never becomes fully opaque.
+
+---
+**TODO - when polish steps are complete, rewrite this order list**
+**DO NOT REFERENCE THIS LIST NOW - IT IS JUST A PLACE HOLDER**
+<!-- **Drawing Order (complete, authoritative)**
+
+Every frame must draw in exactly this order:
+1. `clearRect` — full canvas
+2. Vignette gradient — full canvas rect
+3. Racetrack shadow pass — `lw + 4`, dark tint
+4. Racetrack cream pass — `lw`, `#F5EFE6`
+5. Racetrack highlight pass — `lineWidth 2`, bright rim
+6. Paint canvas composite — `ctx.drawImage(paintCanvas, 0, 0, W, H)`
+7. Labels — `drawLabels()`
+8. Pacing circle — frosted glass gradient + shadow
+9. Amber circle — gem gradient + existing pulse rings
+10. Encouragement glow — outer sage pulse, inner amber pulse, luminous text
+
+Do not deviate from this order. Any element drawn out of sequence will produce incorrect compositing. -->
 
 ---
 
@@ -504,9 +616,13 @@ whoosha/
     │   └── games/
     │       └── square/
     │           ├── SquareGame.jsx         # Main game component, manages 'intro' | 'game' phases
-    │           ├── SquareCanvas.jsx       # Canvas drawing logic, painting mechanic
+    │           ├── SquareCanvas.jsx       # Canvas drawing logic, delegates to active stroke module
     │           ├── PacingCircle.jsx       # Pacing circle timing and movement logic
-    │           └── IntroScreen.jsx        # Pre-game intro breath animation (shared pattern)
+    │           ├── IntroScreen.jsx        # Pre-game intro breath animation (shared pattern)
+    │           ├── StrokeSelector.jsx     # Top-right stroke style picker UI
+    │           └── strokes/
+    │               ├── taperedStroke.js   # Default stroke: Catmull-Rom + tapered polygon fill
+    │               └── layeredWash.js     # Alternative stroke: multi-layer watercolor wash
     └── pages/
         ├── LandingPage.jsx
         ├── LoginPage.jsx
@@ -711,10 +827,10 @@ Use this tone in all in-app copy, labels, feedback messages, and marketing text.
 
 ### Sample In-App Copy
 - Game instruction: "Breathe in slowly as you trace this side..."
-- Encouragement moment: "Beautiful work 🌟 Your body is feeling calmer now."
-- Home greeting: "Hi Lily 🌿 Which game would you like to play?"
+- Encouragement moment: "Beautiful work! Your body is feeling calmer now."
+- Home greeting: "Hi Lily! Which game would you like to play?"
 - Error message: "Something went a little sideways. Let's try again."
-- Intro screen: "Before we begin... Let's take one slow breath together 🌿"
+- Intro screen: "Before we begin... Let's take one slow breath together"
 
 ---
 
@@ -725,7 +841,7 @@ Use this tone in all in-app copy, labels, feedback messages, and marketing text.
 ⚠️ THIS SECTION IS COMMENTED OUT — FOR FUTURE REFERENCE ONLY.
 Claude Code should not read or build anything in this section.
 Uncomment when ready to build the Nature Trace game.
---!>
+-->
 
 <!--
 
@@ -932,6 +1048,5 @@ extended here with a camera system and reveal.
 
 ---
 
-*Last updated: Whoosha MVP Planning Session — painting mechanic, eucalyptus background, shared intro screen, no completion state*
+*Last updated: layered wash stroke added as selectable alternative, stroke selector menu specified, visual polish section updated (removed vignette/gem/frosted glass, kept encouragement pulse and luminosity progression), folder structure updated for stroke modules, start state section added to Section 6.4, pacing circle and trace circle descriptions corrected*
 *Prepared for use with Claude Code*
--->
