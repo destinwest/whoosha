@@ -269,7 +269,9 @@ Every game session begins with this intro screen, regardless of which game is be
   - Side labels (Breathe In — bottom side, Hold — right side, Breathe Out — top side, Hold — left side) are drawn centered on the path, overlaid on the centerline midpoint of each side.
 
 - **Start circle:**
-  Large amber pulsing circle `#D4A056` positioned at the bottom-left of the path — exactly as shown in `design-assets/boxBreathingGame.png`. The circle sits on the path itself, overlapping the stroke. It pulses gently with a soft glow to invite touch. Label: "start" in small, soft, muted text inside the circle. This is the child's finger target to begin.
+  Amber pulsing circle `#D4A056` positioned at the bottom-left of the path. The circle sits on the path centerline, overlapping the stroke. It pulses gently with a soft glow to invite touch. Label: "start" in small, soft, muted text inside the circle. This is the child's finger target to begin.
+
+  **Sizing:** radius = `lw * 0.35` where `lw` is the track stroke width in CSS px. This is derived from the track geometry so it scales automatically on every resize. The circle is intentionally smaller than the track width — it sits centered on the track with room to drift laterally within the travel band (see Travel Band below).
 
 ---
 
@@ -294,7 +296,13 @@ The child places their finger on the amber circle and begins dragging to trigger
   A larger circle in soft white. Visible at the start point (bottom-left) before the child touches anything — it sits at the start position, stationary, slightly behind the amber start circle. Once the child touches and begins dragging the amber circle, the pacing circle starts moving and travels the full path continuously — 4 seconds per side — with smooth movement through corners at consistent speed, no pausing. Once started, it never stops and is never affected by the child's finger. Loops indefinitely until the child exits.
 
 - **Child's trace/Amber user circle:**
-  Amber circle `#D4A056` that follows the child's finger, projected onto the nearest point on the path centerline. The child tries to keep their circle on top of the pacing circle. No penalty, no feedback text — the pacing circle is the only guide. When the child lifts their finger, the trace circle freezes at its last position. It does not disappear and does not move until the child touches the screen again.
+  Amber circle `#D4A056` — same radius as the start circle (`lw * 0.35`) — that follows the child's finger within a lateral travel band around the path centerline. The child tries to keep their circle on top of the pacing circle. No penalty, no feedback text — the pacing circle is the only guide. When the child lifts their finger, the trace circle freezes at its last position. It does not disappear and does not move until the child touches the screen again.
+
+  **Travel band:** the finger is not snapped exactly to the centerline. Instead it is clamped within ±`travelPx` (`lw * 0.15`) of the centerline, measured perpendicularly. The child can drift up to 15% of the track stroke width inward or outward from the centerline — but never outside the track boundary. This gives the child subtle lateral agency without losing track of the path.
+
+  **Projection:** find the nearest point on the centerline (`clPoint`) and its tangent. Compute the perpendicular normal at that point. Project the raw finger position onto the normal, clamp to ±`travelPx`, and apply the clamped offset to `clPoint` to get the final amber circle position. Use this clamped position — not `clPoint` — as both the amber circle center and the paint stroke origin.
+
+  **Lap detection and encouragement** use `clPoint` (the centerline projection) only — lateral drift does not affect either.
 
 - **Stroke painting mechanic — the core visual:**
   As the child's trace circle moves along the path, it paints the stroke with the current lap color. The cream base `#F5EFE6` is replaced by the lap color exactly where the child has traced. Untraced portions remain cream.
@@ -320,7 +328,7 @@ The child places their finger on the amber circle and begins dragging to trigger
   - Text "Beautiful work 🌟" fades in at the middle of the shape, then fades out over 2 seconds
   - Game continues uninterrupted — pacing circle does not pause
   - **This moment only triggers on the first qualifying lap.** After it fires once, it will not fire again until at least 30 seconds have elapsed. After 30 seconds, it becomes eligible to trigger again on the next qualifying lap.
-  - Implementation: on each lap completion, calculate pixel distance between trace circle position and pacing circle position. If distance ≤ 60px AND `now - lastEncouragementTime > 30_000`, show encouragement and set `lastEncouragementTime = performance.now()`.
+  - Implementation: on each lap completion, calculate longitudinal distance along the path between `clPoint` (centerline projection of the trace circle) and the pacing circle's centerline position. Lateral drift is ignored. If distance ≤ 60px AND `now - lastEncouragementTime > 30_000`, show encouragement and set `lastEncouragementTime = performance.now()`.
 
 - **No completion state.** The game runs indefinitely. The child exits via the exit button when ready.
 
@@ -344,12 +352,17 @@ Side 4 (top-left → bottom-left):      HOLD         — 4 seconds
 - Use an HTML `<canvas>` element with a React ref for the game canvas
 - Game state phases: `'intro' | 'game'` — no completion state
 - **Racetrack path geometry:** draw using Canvas 2D `roundRect()` or `arcTo()`. Corner radius approximately 18% of the shorter side length. Stroke width `Math.round(devicePixelRatio * 22)` pixels.
-- **Stroke painting:** an offscreen canvas stores all painted color. On each pointer move, draw a line segment from the previous to the current projected position at full track width, clipped to the annular track region. Composite order each frame: cream base path → paint canvas → labels → pacing circle → amber circle. Painting is permanent — lifted fingers do not erase. See Visual Polish section for full stroke rendering specs.
+- **Derived geometry constants** (computed from `lw` on every resize, stored alongside track geometry):
+  - `travelPx = lw * 0.15` — lateral travel band half-width in CSS px
+  - `amberRadius = lw * 0.35` — amber circle radius in CSS px
+  Both values scale automatically with screen size. The pulse rings around the amber circle are offset from `amberRadius`, not hardcoded.
+- **Stroke painting:** an offscreen canvas stores all painted color. On each pointer move, pass the clamped position (not the centerline projection) to the active stroke module. The stroke origin follows the child's lateral drift, so consistent inward drift paints along the inner edge of the track and consistent outward drift paints along the outer edge. Composite order each frame: cream base path → paint canvas → labels → pacing circle → amber circle. Painting is permanent — lifted fingers do not erase. See Visual Polish section for full stroke rendering specs.
+- **Paint canvas clip:** a permanent clip path is applied to the paint offscreen canvas restricting all drawing to the annular track region — the area between the outer track boundary and the inner track boundary. Clip geometry: outer `roundRect(left, top, sqW, sqW, cr)` minus inner `roundRect(left+lw, top+lw, sqW-lw*2, sqW-lw*2, cr-lw)` using `evenodd` fill rule. The clip is applied once after canvas sizing and reapplied after every resize. Paint can never bleed outside the track regardless of stroke width or drift position.
 - **Lap detection:** detect lap completion when the child's trace circle crosses back over the start point (bottom-left) in the counterclockwise direction. On lap completion, increment lap counter, switch to next color in sequence using `currentLap % colors.length`.
 - **Lap color array:** `['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']` — index with modulo for infinite looping.
-- **Encouragement timing:** on each lap completion, calculate pixel distance between trace circle and pacing circle. If distance ≤ 60px AND `now - lastEncouragementTime > 30000ms`, show encouragement and set `lastEncouragementTime = performance.now()`.
+- **Encouragement timing:** on each lap completion, calculate longitudinal distance along the path between `clPoint` (the centerline projection of the trace circle) and the pacing circle's centerline position. Lateral drift is ignored — this is a path-distance check only. If distance ≤ 60px AND `now - lastEncouragementTime > 30000ms`, show encouragement and set `lastEncouragementTime = performance.now()`.
 - **Pacing circle:** driven entirely by `performance.now()`. Loops indefinitely. No user input affects timing.
-- **Child's trace circle:** driven by `onTouchMove` / `onMouseMove`. Projects finger onto nearest path centerline point.
+- **Child's trace circle:** driven by `onTouchMove` / `onMouseMove`. Projects finger onto nearest path centerline point (`clPoint`), then applies clamped lateral offset of ±`travelPx` (`lw * 0.15`) along the path normal to get the final clamped position. Amber circle and paint stroke origin both use the clamped position. Lap detection and encouragement distance use `clPoint` only.
 - **Phase determination:** derived from pacing circle's current side index (0 = bottom = Breathe In, 1 = right = Hold, 2 = top = Breathe Out, 3 = left = Hold).
 - **Game start trigger:** at start state, the pacing circle is visible but stationary at the start point. The game begins (pacing circle starts moving) when the child's finger touches within ~40px of the start point and begins dragging. Timer starts on trigger.
 - **Session save on exit:** capture `performance.now()` at game start and at exit button tap to calculate `duration_seconds`.
@@ -384,17 +397,64 @@ The layered wash stroke is an alternative rendering mode selectable from the str
 **Architecture — multiple offscreen canvases:**
 Each layer has its own offscreen canvas. Layers are composited back-to-front onto the display canvas each frame. This is architecturally different from the default stroke — do not attempt to replicate the effect with a single canvas at reduced opacity.
 
-**Layer parameters (3 layers by default, outermost first):**
-- Layer 0 (outer): width = `baseWidth × 1.8`, opacity = `~0.09` — wide, very faint wash, most positional jitter
-- Layer 1 (middle): width = `baseWidth × 1.2`, opacity = `~0.28` — medium wash
-- Layer 2 (inner): width = `baseWidth × 0.65`, opacity = `~0.55` — narrow, most opaque core, follows true path exactly
+**Named tuning constants** — all live at the top of `layeredWash.js`. These are the canonical values. Change them here first, then update the file.
+
+```
+// Layers
+LAYER_COUNT     = 5       // number of independent layer canvases
+WIDTH_SPREAD    = 2.0     // outermost layer width multiplier
+INNER_WIDTH     = 0.5     // innermost layer width multiplier
+OUTER_ALPHA     = 0.02    // opacity of widest/faintest layer
+INNER_ALPHA     = 0.3     // opacity of narrowest/most opaque layer
+EDGE_JITTER     = 2.0     // max px of random positional jitter on outer layers (inner = 0)
+
+// Stroke body
+BASE_WIDTH      = 40      // base stroke width in CSS px
+MIN_WIDTH_FRAC  = 0.3     // minimum width fraction at maximum velocity
+GLOBAL_OPACITY  = 0.3     // master opacity ceiling applied to all layers
+SUBDIV_MAX      = 20      // max subdivision steps per segment
+
+// Velocity response
+VEL_ENABLED     = true    // velocity affects width and opacity when true
+VEL_SENSITIVITY = 12      // higher = less sensitive (divisor in normVel calculation)
+OPACITY_MIN     = 0.35    // opacity multiplier at maximum velocity
+OPACITY_MAX     = 0.5     // opacity multiplier at minimum velocity
+
+// Wet edge
+WET_EDGE        = true    // darker pigment at stroke boundary
+WET_EDGE_WIDTH  = 0.3     // fraction of half-width where edge darkening starts
+WET_EDGE_STR    = 1.0     // strength of edge darkening (0 = none, 1 = full)
+
+// Texture grain
+TEX_GRAIN       = false   // scattered ellipses simulating pigment on paper
+GRAIN_PASSES    = 4       // number of random scatter passes per segment
+GRAIN_OPACITY   = 0.06    // opacity of each grain pass
+GRAIN_SCATTER   = 0.70    // how far grain dots scatter from stroke edge (0–1)
+```
+
+**Layer interpolation:**
+Layer parameters interpolate linearly from outermost (layer 0) to innermost (layer `LAYER_COUNT - 1`). At each layer index `i`, `t = i / (LAYER_COUNT - 1)`:
+- Width multiplier: `WIDTH_SPREAD - t × (WIDTH_SPREAD - INNER_WIDTH)`
+- Layer alpha: `OUTER_ALPHA + t × (INNER_ALPHA - OUTER_ALPHA)`
+- Jitter scale: `EDGE_JITTER × (1 - t)` — outermost has full jitter, innermost has zero
 
 **Independent point buffers with jitter:**
-Each layer maintains its own point history. Outer layers apply random positional jitter (2–3px) to each incoming point before storing it. This causes each layer to trace a slightly different curve — the result reads as organic depth rather than concentric rings at different opacities.
+Each layer maintains its own point history. For each incoming point, outer layers apply random positional jitter of up to `EDGE_JITTER × (1 - t)` px before storing. This causes each layer to trace a slightly different curve — the result reads as organic depth rather than concentric rings at different opacities.
 
-**Catmull-Rom smoothing + adaptive subdivision** apply identically to the default stroke. Velocity response (width and opacity) applies to all layers simultaneously using the innermost layer's velocity reading.
+**Velocity response:**
+When `VEL_ENABLED` is true, velocity is tracked via EMA on the innermost layer. `normVel = min(1, vel / (VEL_SENSITIVITY × 3))`. Width scales from `BASE_WIDTH` down to `BASE_WIDTH × MIN_WIDTH_FRAC` at max velocity. `velAlphaMult = (OPACITY_MAX - normVel × (OPACITY_MAX - OPACITY_MIN)) × GLOBAL_OPACITY`. The same velocity reading drives all layers simultaneously.
 
-**Compositing:** draw layer 0 first (widest/faintest), then layer 1, then layer 2 on top. All layers use the current lap color.
+**Wet edge:**
+When `WET_EDGE` is true, a second pass draws a darker edge along the outer boundary of the outermost layers only. Edge width is `halfWidth × WET_EDGE_WIDTH`. Edge alpha is `layerAlpha × WET_EDGE_STR × 2.2`.
+
+**Texture grain:**
+When `TEX_GRAIN` is true, scattered irregular ellipses near stroke edges simulate pigment catching on paper grain. Grain applies to inner layers only for depth. Currently disabled by default.
+
+**Catmull-Rom smoothing + adaptive subdivision** apply identically to the default stroke. `SUBDIV_MAX` controls the maximum number of subdivision steps per segment.
+
+**Compositing:** draw layer 0 first (widest/faintest), then layers 1 through `LAYER_COUNT - 1`, innermost on top. All layers use the current lap color.
+
+**Paint canvas clip** applies to all layer canvases identically — same annular clip geometry as the default stroke. No layer can bleed outside the track.
 
 ---
 
