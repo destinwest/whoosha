@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import IntroScreen from './IntroScreen'
 import StrokeSelector from './StrokeSelector'
+import * as taperedStroke from './strokes/taperedStroke'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const BASE_COLOR = '#F5EFE6'
@@ -169,11 +170,10 @@ export default function SquareGame({ onExit }) {
   const sessionStartRef = useRef(Date.now())
   const gameStartRef    = useRef(null)
 
-  const startedRef     = useRef(false)
-  const touchRef       = useRef(false)
-  const childPosRef    = useRef(null)
-  const prevPosRef     = useRef(null)
-  const lastChildPos   = useRef(null)
+  const startedRef   = useRef(false)
+  const touchRef     = useRef(false)
+  const childPosRef  = useRef(null)
+  const lastChildPos = useRef(null)
 
   const lapColorIdxRef = useRef(0)
   const prevFracRef    = useRef(null)
@@ -187,7 +187,8 @@ export default function SquareGame({ onExit }) {
   const pulseAlpha      = useRef(1)
   const startLabelAlpha = useRef(1)
 
-  const dprRef = useRef(window.devicePixelRatio || 1)
+  const dprRef         = useRef(window.devicePixelRatio || 1)
+  const lastMoveTimeRef = useRef(0)
 
   const strokeModeRef = useRef('classic')
 
@@ -197,10 +198,9 @@ export default function SquareGame({ onExit }) {
   function resetToStartState() {
     const pCanvas = paintRef.current
     if (pCanvas && geoRef.current) {
-      // Reassigning .width clears all canvas content AND resets context state
-      // (including any prior clip), so we must reapply the permanent annular clip.
-      const w = pCanvas.width
-      pCanvas.width = w
+      // taperedStroke.clear() resets the canvas via width reassignment (which wipes
+      // all content and context state including the clip). Reapply the clip after.
+      taperedStroke.clear()
       const dpr = dprRef.current
       const { cx, cy, half, lw: cssLw, r } = geoRef.current
       applyPaintClip(pCanvas.getContext('2d'), {
@@ -212,11 +212,10 @@ export default function SquareGame({ onExit }) {
       })
     }
 
-    startedRef.current       = false
-    touchRef.current         = false
-    childPosRef.current      = null
-    prevPosRef.current       = null
-    lastChildPos.current     = null
+    startedRef.current   = false
+    touchRef.current     = false
+    childPosRef.current  = null
+    lastChildPos.current = null
     prevFracRef.current      = null
     gameStartRef.current     = null
     lapColorIdxRef.current   = 0
@@ -483,37 +482,18 @@ export default function SquareGame({ onExit }) {
     onExit(dur)
   }
 
-  // ── Paint ──────────────────────────────────────────────────────────────────
-  function paintSegment(from, to) {
-    const pCanvas = paintRef.current
-    const geo     = geoRef.current
-    if (!pCanvas || !geo) return
-    const dpr  = dprRef.current
-    const pCtx = pCanvas.getContext('2d')
-
-    pCtx.save()
-
-    // Annular clip is applied permanently in resize() — no need to reapply here.
-
-    // Interpolate from current lap color toward next based on progress through
-    // the lap (to.fraction / 4 goes 0→1 over one full lap), so the color
-    // arrives at the next lap color exactly as the lap completes — no jump.
-    const lapIdx = lapColorIdxRef.current
-    const color  = lerpColor(
-      LAP_COLORS[lapIdx       % LAP_COLORS.length],
-      LAP_COLORS[(lapIdx + 1) % LAP_COLORS.length],
-      to.fraction / 4
+  // ── Lap color ─────────────────────────────────────────────────────────────
+  // Compute the interpolated stroke color for the current path position.
+  // Interpolates continuously from the current lap color to the next across
+  // one full lap, so the color arrives at the next value exactly at the
+  // lap boundary — no discrete jump.
+  function getLapColor(fraction) {
+    const idx = lapColorIdxRef.current
+    return lerpColor(
+      LAP_COLORS[idx       % LAP_COLORS.length],
+      LAP_COLORS[(idx + 1) % LAP_COLORS.length],
+      fraction / 4,
     )
-
-    pCtx.beginPath()
-    pCtx.moveTo(from.x * dpr, from.y * dpr)
-    pCtx.lineTo(to.x   * dpr, to.y   * dpr)
-    pCtx.strokeStyle = color
-    pCtx.lineWidth   = geo.lw * dpr
-    pCtx.lineCap     = 'round'
-    pCtx.stroke()
-
-    pCtx.restore()
   }
 
   // ── Pointer handlers ───────────────────────────────────────────────────────
@@ -529,22 +509,25 @@ export default function SquareGame({ onExit }) {
     if (!startedRef.current) {
       const dist = Math.hypot(px - geo.startPt.x, py - geo.startPt.y)
       if (dist <= geo.lw) {
-        startedRef.current   = true
-        gameStartRef.current = performance.now()
-        touchRef.current     = true
-        const pos            = project(px, py)
-        childPosRef.current  = pos
-        prevPosRef.current   = pos
-        lastChildPos.current = pos
-        prevFracRef.current  = pos?.fraction ?? null
+        startedRef.current      = true
+        gameStartRef.current    = performance.now()
+        touchRef.current        = true
+        lastMoveTimeRef.current = performance.now()
+        const pos               = project(px, py)
+        childPosRef.current     = pos
+        lastChildPos.current    = pos
+        prevFracRef.current     = pos?.fraction ?? null
+        // Register the touch-down position as the stroke anchor (no segment drawn).
+        if (pos) taperedStroke.addPoint(pos.x, pos.y, 0)
       }
     } else {
-      touchRef.current     = true
-      const pos            = project(px, py)
-      childPosRef.current  = pos
-      prevPosRef.current   = pos
-      lastChildPos.current = pos
-      prevFracRef.current  = pos?.fraction ?? null
+      touchRef.current        = true
+      lastMoveTimeRef.current = performance.now()
+      const pos               = project(px, py)
+      childPosRef.current     = pos
+      lastChildPos.current    = pos
+      prevFracRef.current     = pos?.fraction ?? null
+      if (pos) taperedStroke.addPoint(pos.x, pos.y, 0)
     }
   }
 
@@ -552,21 +535,29 @@ export default function SquareGame({ onExit }) {
     if (!startedRef.current || !touchRef.current) return
     const last = lastChildPos.current
     if (last && Math.hypot(px - last.x, py - last.y) < 0.5) return
-    const pos  = project(px, py)
-    const prev = prevPosRef.current
-    // Update position and lap index before painting so the color interpolation
-    // in paintSegment uses the correct (already-incremented) lap index when a
-    // lap boundary is crossed.
+
+    // Velocity in CSS px/ms — used by watercolor module; tapered ignores it.
+    const now  = performance.now()
+    const dt   = now - lastMoveTimeRef.current
+    const dist = last ? Math.hypot(px - last.x, py - last.y) : 0
+    const vel  = dt > 0 ? dist / dt : 0
+    lastMoveTimeRef.current = now
+
+    const pos = project(px, py)
+    // Update position and lap index before painting so the interpolated color
+    // is correct when a lap boundary is crossed mid-move.
     childPosRef.current  = pos
     lastChildPos.current = pos
     checkLap(pos)
-    if (prev) paintSegment(prev, pos)
-    prevPosRef.current   = pos
+    if (pos) {
+      taperedStroke.updateColor(getLapColor(pos.fraction), lapColorIdxRef.current)
+      taperedStroke.addPoint(pos.x, pos.y, vel)
+    }
   }
 
   function onPointerUp() {
-    touchRef.current   = false
-    prevPosRef.current = null
+    touchRef.current = false
+    taperedStroke.lift()
   }
 
   function handleMouseDown(e)  { const p = getRawPos(e); onPointerDown(p.x, p.y) }
@@ -601,14 +592,23 @@ export default function SquareGame({ onExit }) {
       geoRef.current     = buildGeo(rect)
 
       // Resizing resets the paint canvas state (including any prior clip).
-      // Reapply the permanent annular clip every time dimensions change.
+      // Reapply the permanent annular clip, then re-init the stroke module so
+      // it picks up the new geometry and fresh context state.
       const { cx, cy, half, lw: cssLw, r } = geoRef.current
-      applyPaintClip(paintCanvas.getContext('2d'), {
+      const paintCtx = paintCanvas.getContext('2d')
+      applyPaintClip(paintCtx, {
         left: (cx - half - cssLw / 2) * dpr,
         top:  (cy - half - cssLw / 2) * dpr,
         sqW:  (half * 2 + cssLw) * dpr,
         cr:   (r + cssLw / 2) * dpr,
         lw:   cssLw * dpr,
+      })
+      taperedStroke.init({
+        paintCtx,
+        lw:          cssLw,
+        dpr,
+        color:       getLapColor(0),
+        lapColorIdx: lapColorIdxRef.current,
       })
     }
 
@@ -715,10 +715,9 @@ export default function SquareGame({ onExit }) {
       if (enc) {
         const t = (now - enc.startTime) / 2_000
         if (t < 1) {
-          const alpha    = 1 - t
-          const glowR    = half * 1.2
-          const labelGap = lw * 1.1
-          const grad     = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
+          const alpha = 1 - t
+          const glowR = half * 1.2
+          const grad  = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
           grad.addColorStop(0, `rgba(212,160,86,${(alpha * 0.3).toFixed(3)})`)
           grad.addColorStop(1, 'rgba(212,160,86,0)')
           ctx.beginPath()
@@ -734,7 +733,7 @@ export default function SquareGame({ onExit }) {
           ctx.shadowBlur   = 8
           ctx.shadowColor  = 'rgba(255,255,255,0.6)'
           ctx.fillStyle    = `rgba(255,255,255,${(alpha * 0.92).toFixed(3)})`
-          ctx.fillText('Beautiful work 🌟', cx, cy + half + lw / 2 + labelGap + fs * 2)
+          ctx.fillText('Beautiful work 🌟', cx, cy)
           ctx.restore()
         } else {
           encouragementRef.current = null
