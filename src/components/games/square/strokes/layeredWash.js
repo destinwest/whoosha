@@ -1,49 +1,67 @@
 // ── layeredWash.js ────────────────────────────────────────────────────────────
 // Watercolor-effect stroke — LAYER_COUNT offscreen canvases composited back-
-// to-front. Each layer has jitter in width and opacity. Velocity EMA drives
-// stroke weight. Catmull-Rom spline smoothing for organic curves. Wet-edge
-// overdraw on outer layers simulates pigment buildup at stroke edges.
+// to-front. Each layer accumulates paint with per-layer position jitter, width,
+// and alpha. Velocity EMA drives opacity and stroke weight. Catmull-Rom spline
+// smoothing for organic curves.
 //
 // These canvases are separate from the shared taperedStroke paint canvas.
 // The annular clip is applied to each layer canvas internally on init().
 // clear() uses clearRect (NOT canvas.width reassignment) so the clip persists.
 //
 // Exported interface (module-level singleton):
-//   init({ paintCtx, lw, dpr, color, lapColorIdx, clipArgs })
+//   init(config)
 //   addPoint(x, y, vel)
 //   updateColor(color, lapColorIdx)
 //   lift()
 //   clear()
-//   getLayers()  →  { canvas, ctx }[]
+//   getLayers()  →  { canvas, ctx, points }[]
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── Named constants ───────────────────────────────────────────────────────────
-const LAYER_COUNT       = 5     // number of offscreen layer canvases
-const INNER_WIDTH_RATIO = 0.35  // inner layer width as fraction of track lw (≈ amber circle radius = half its diameter)
-const VEL_WIDTH_MIN     = 0.20  // outer layer width fraction at max velocity (thinnest possible stroke)
-const BASE_ALPHA        = 0.18  // base per-stroke opacity for each layer
-const VEL_ALPHA_RANGE   = 0.22  // additional alpha contributed at slow velocity
-const VEL_EMA_K         = 0.2   // EMA smoothing factor for velocity
-const VEL_SCALE         = 0.80  // CSS px/ms considered "fast" for normalization
-const WET_EDGE_ALPHA  = 0.55    // wet edge overdraw opacity multiplier
-const WET_EDGE_WIDTH  = 0.45    // wet edge width as fraction of layer stroke width
-const TEX_GRAIN       = false   // texture grain pass (disabled by default)
-const TENSION         = 0.4     // Catmull-Rom tension coefficient
-const SUBDIV_MAX      = 20      // max bezier subdivisions per Catmull-Rom segment (reserved)
+// ─── Tuning constants ─────────────────────────────────────────────────────────
+// Edit these values to adjust the watercolor stroke appearance.
+// See BRIEFING.md Section 6.4 Visual Polish — 1b for full documentation.
+
+// Layers
+const LAYER_COUNT     = 5
+const WIDTH_SPREAD    = 2.0
+const INNER_WIDTH     = 0.5
+const OUTER_ALPHA     = 0.02
+const INNER_ALPHA     = 0.3
+const EDGE_JITTER     = 2.0
+
+// Stroke body
+const BASE_WIDTH      = 40
+const MIN_WIDTH_FRAC  = 0.3
+const GLOBAL_OPACITY  = 0.3
+const SUBDIV_MAX      = 20   // reserved for future adaptive subdivision
+
+// Velocity response
+const VEL_ENABLED     = true
+const VEL_SENSITIVITY = 12
+const OPACITY_MIN     = 0.35
+const OPACITY_MAX     = 0.5
+
+// Wet edge
+const WET_EDGE        = true
+const WET_EDGE_WIDTH  = 0.3
+const WET_EDGE_STR    = 1.0
+
+// Texture grain
+const TEX_GRAIN       = false
+const GRAIN_PASSES    = 4
+const GRAIN_OPACITY   = 0.06
+const GRAIN_SCATTER   = 0.70
 
 // ── Module-level state ────────────────────────────────────────────────────────
-let layers  = []    // { canvas, ctx }[]
-let velEma  = 0
-let _color  = '#000'
-let _lapIdx = 0
-let _lw     = 0     // CSS px track width
-let _dpr    = 1     // device pixel ratio
-let _prev   = null  // { x, y } previous point in CSS px — null = pen up
-let _pprev  = null  // { x, y } point before prev — used for C-R tangent
+let layers        = []         // { canvas, ctx, points }[]
+let velEma        = 0
+let currentColor  = '#7DB89A'
+let currentLapIdx = 0
+let _dpr          = 1          // device pixel ratio — used to scale CSS px → physical px
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Converts a hex color string to an [r, g, b] array.
+// Converts a hex color string to an [r, g, b] integer array.
 export function hexToRgb(hex) {
   return [
     parseInt(hex.slice(1, 3), 16),
@@ -52,29 +70,34 @@ export function hexToRgb(hex) {
   ]
 }
 
-// Returns the two Bezier control points for a Catmull-Rom segment from p1→p2.
-// p0 and p3 are the flanking points used to compute the tangent at p1 and p2.
-// All points are in physical pixels.
-function catmullCP(p0, p1, p2, p3, t = TENSION) {
+// Catmull-Rom control points for the p1→p2 segment.
+// p0 and p3 are the flanking points used for tangent computation.
+// tension=0.4 gives a moderately tight spline.
+function catmullCP(p0, p1, p2, p3, tension = 0.4) {
   return {
     cp1: {
-      x: p1.x + (p2.x - p0.x) * t / 3,
-      y: p1.y + (p2.y - p0.y) * t / 3,
+      x: p1.x + (p2.x - p0.x) * tension / 3,
+      y: p1.y + (p2.y - p0.y) * tension / 3,
     },
     cp2: {
-      x: p2.x - (p3.x - p1.x) * t / 3,
-      y: p2.y - (p3.y - p1.y) * t / 3,
+      x: p2.x - (p3.x - p1.x) * tension / 3,
+      y: p2.y - (p3.y - p1.y) * tension / 3,
     },
   }
 }
 
-// Draws a thin high-alpha overdraw along the same bezier path, simulating
-// pigment buildup at the stroke edge. Called only on outer-half layers.
+// Draws a thin overdraw along the same bezier path, simulating pigment
+// buildup at the stroke edge. Only called on outer-half layers.
+// All coordinates and widths are in physical pixels.
 function drawWetEdge(lCtx, p1, p2, cp1, cp2, layerW, layerAlpha) {
+  const hw        = layerW / 2
+  const edgeW     = hw * WET_EDGE_WIDTH
+  const edgeAlpha = layerAlpha * WET_EDGE_STR * 2.2
+
   lCtx.save()
-  lCtx.strokeStyle = _color
-  lCtx.lineWidth   = layerW * WET_EDGE_WIDTH
-  lCtx.globalAlpha = layerAlpha * WET_EDGE_ALPHA
+  lCtx.globalAlpha = edgeAlpha
+  lCtx.strokeStyle = currentColor
+  lCtx.lineWidth   = edgeW
   lCtx.lineCap     = 'round'
   lCtx.beginPath()
   lCtx.moveTo(p1.x, p1.y)
@@ -83,42 +106,48 @@ function drawWetEdge(lCtx, p1, p2, cp1, cp2, layerW, layerAlpha) {
   lCtx.restore()
 }
 
-// Scatters small ellipses along the segment to simulate paper texture grain.
+// Scatters small ellipses near the segment to simulate paper texture grain.
 // Only active when TEX_GRAIN is true. Applied to inner-half layers.
+// All coordinates and widths are in physical pixels.
 function drawGrain(lCtx, p1, p2, layerW, layerAlpha) {
-  if (!TEX_GRAIN) return
-  const dist  = Math.hypot(p2.x - p1.x, p2.y - p1.y)
-  const steps = Math.max(2, Math.floor(dist / (layerW * 0.5)))
-  lCtx.save()
-  lCtx.fillStyle  = _color
-  lCtx.globalAlpha = layerAlpha * 0.35
-  for (let i = 0; i < steps; i++) {
-    const t  = i / steps
-    const gx = p1.x + (p2.x - p1.x) * t + (Math.random() - 0.5) * layerW * 0.8
-    const gy = p1.y + (p2.y - p1.y) * t + (Math.random() - 0.5) * layerW * 0.4
+  const hw        = layerW / 2
+  const [r, g, b] = hexToRgb(currentColor)
+
+  for (let p = 0; p < GRAIN_PASSES; p++) {
+    const t      = Math.random()
+    const gx     = p1.x + (p2.x - p1.x) * t
+    const gy     = p1.y + (p2.y - p1.y) * t
+    const radial = hw * (GRAIN_SCATTER * 0.5 + Math.random() * GRAIN_SCATTER * 0.5)
+    const angle  = Math.random() * Math.PI * 2
+    const ex     = gx + Math.cos(angle) * radial
+    const ey     = gy + Math.sin(angle) * radial
+    const ew     = 1 + Math.random() * 2
+    const eh     = 0.5 + Math.random() * 1.5
+
+    lCtx.save()
+    lCtx.globalAlpha = GRAIN_OPACITY
+    lCtx.fillStyle   = `rgb(${r},${g},${b})`
+    lCtx.translate(ex, ey)
+    lCtx.rotate(Math.random() * Math.PI)
     lCtx.beginPath()
-    lCtx.ellipse(gx, gy, layerW * 0.18, layerW * 0.08, Math.random() * Math.PI, 0, Math.PI * 2)
+    lCtx.ellipse(0, 0, ew, eh, 0, 0, Math.PI * 2)
     lCtx.fill()
+    lCtx.restore()
   }
-  lCtx.restore()
 }
 
 // ── init ─────────────────────────────────────────────────────────────────────
-// Creates LAYER_COUNT offscreen canvases sized to match paintCtx.canvas,
-// applies the annular clip to each, and resets module state.
+// Creates LAYER_COUNT offscreen canvases sized to match paintCtx.canvas
+// (physical pixels), applies the annular clip to each, and resets all state.
 // clipArgs: { left, top, sqW, cr, lw } — all in physical pixels.
-// Does NOT use paintCtx for drawing; only uses its canvas dimensions.
 export function init({ paintCtx, lw, dpr, color, lapColorIdx, clipArgs }) {
-  _lw     = lw
-  _dpr    = dpr
-  _color  = color
-  _lapIdx = lapColorIdx ?? 0
-  _prev   = null
-  _pprev  = null
-  velEma  = 0
+  _dpr          = dpr ?? 1
+  currentColor  = color ?? currentColor
+  currentLapIdx = lapColorIdx ?? 0
+  velEma        = 0
 
-  const W = paintCtx.canvas.width
-  const H = paintCtx.canvas.height
+  const W = paintCtx.canvas.width    // physical px
+  const H = paintCtx.canvas.height   // physical px
 
   layers = Array.from({ length: LAYER_COUNT }, () => {
     const cv   = document.createElement('canvas')
@@ -140,115 +169,140 @@ export function init({ paintCtx, lw, dpr, color, lapColorIdx, clipArgs }) {
       lCtx.clip('evenodd')
     }
 
-    return { canvas: cv, ctx: lCtx }
+    return { canvas: cv, ctx: lCtx, points: [] }
   })
 }
 
 // ── addPoint ─────────────────────────────────────────────────────────────────
 // x, y in CSS px; vel in CSS px/ms.
-// First call after init/lift stores the anchor without drawing.
-// Subsequent calls draw a Catmull-Rom bezier segment from _prev → current.
+// Per-layer jitter is applied to position before storing in points[].
+// Drawing uses the last 4 buffered points for Catmull-Rom smoothing.
+// All canvas drawing is in physical pixels (_dpr scaling applied here).
 export function addPoint(x, y, vel) {
   if (!layers.length) return
 
-  // Update velocity EMA — slower speed → wider and more opaque strokes.
-  velEma = velEma * (1 - VEL_EMA_K) + vel * VEL_EMA_K
-  const velNorm      = Math.min(1, velEma / VEL_SCALE)
-  const velAlphaMult = 1 + VEL_ALPHA_RANGE * (1 - velNorm)
-  // At vel=0: velWidthMult=1.0 → outer layer = lw (classic width).
-  // At vel=max: velWidthMult=VEL_WIDTH_MIN → stroke thins significantly.
-  const velWidthMult = VEL_WIDTH_MIN + (1 - VEL_WIDTH_MIN) * (1 - velNorm)
+  // 1. Update velocity EMA — slower speed → wider, more opaque strokes.
+  velEma = velEma * 0.8 + vel * 0.2
 
-  if (_prev === null) {
-    _prev  = { x, y }
-    _pprev = { x, y }
-    return
+  // 2. Opacity multiplier from velocity.
+  let velAlphaMult
+  if (VEL_ENABLED) {
+    const normVel = Math.min(1, velEma / (VEL_SENSITIVITY * 3))
+    velAlphaMult = (OPACITY_MAX - normVel * (OPACITY_MAX - OPACITY_MIN)) * GLOBAL_OPACITY
+  } else {
+    velAlphaMult = OPACITY_MAX * GLOBAL_OPACITY
   }
 
-  // Catmull-Rom control points (working in CSS px, scale later).
-  const p0 = _pprev
-  const p1 = _prev
-  const p2 = { x, y }
-  // Lookahead extrapolated from p1→p2 direction.
-  const p3 = { x: x + (x - p1.x), y: y + (y - p1.y) }
-
-  // Scale to physical pixels for drawing.
-  const d  = _dpr
-  const P0 = { x: p0.x * d, y: p0.y * d }
-  const P1 = { x: p1.x * d, y: p1.y * d }
-  const P2 = { x: p2.x * d, y: p2.y * d }
-  const P3 = { x: p3.x * d, y: p3.y * d }
-
-  const { cp1, cp2 } = catmullCP(P0, P1, P2, P3)
-
-  const baseStrokeW = _lw * d
-
-  for (let li = 0; li < LAYER_COUNT; li++) {
-    const { ctx: lCtx } = layers[li]
-
-    // Inner layers (li=0): narrowest (≈ amber radius), most opaque.
-    // Outer layers (li=LAYER_COUNT-1): widest (≈ classic lw at slow vel), most transparent.
-    const t          = li / (LAYER_COUNT - 1)
-    const layerWFact = INNER_WIDTH_RATIO + (1 - INNER_WIDTH_RATIO) * t
-    const strokeW    = baseStrokeW * velWidthMult * layerWFact
-    const layerAlpha = BASE_ALPHA * velAlphaMult * (1 - t * 0.4)
-
-    lCtx.save()
-    lCtx.strokeStyle = _color
-    lCtx.lineWidth   = strokeW
-    lCtx.globalAlpha = layerAlpha
-    lCtx.lineCap     = 'round'
-    lCtx.lineJoin    = 'round'
-    lCtx.beginPath()
-    lCtx.moveTo(P1.x, P1.y)
-    lCtx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, P2.x, P2.y)
-    lCtx.stroke()
-    lCtx.restore()
-
-    // Wet edge on outer half of layers only.
-    if (li >= Math.floor(LAYER_COUNT / 2)) {
-      drawWetEdge(lCtx, P1, P2, cp1, cp2, strokeW, layerAlpha)
-    }
-
-    // Texture grain on inner half of layers only.
-    if (li < Math.floor(LAYER_COUNT / 2)) {
-      drawGrain(lCtx, P1, P2, strokeW, layerAlpha)
-    }
+  // 3. Stroke width in CSS px — velocity thins it at speed.
+  let strokeW
+  if (VEL_ENABLED) {
+    const normVel = Math.min(1, velEma / (VEL_SENSITIVITY * 3))
+    strokeW = BASE_WIDTH * (MIN_WIDTH_FRAC + (1 - MIN_WIDTH_FRAC) * (1 - normVel))
+  } else {
+    strokeW = BASE_WIDTH
   }
 
-  _pprev = _prev
-  _prev  = { x, y }
+  const d = _dpr
+
+  // 4. Draw each layer (0 = outermost/widest, LAYER_COUNT-1 = innermost/narrowest).
+  for (let i = 0; i < LAYER_COUNT; i++) {
+    const layer = layers[i]
+    const t     = i / (LAYER_COUNT - 1)   // 0.0 at outer, 1.0 at inner
+
+    const wMult  = WIDTH_SPREAD - t * (WIDTH_SPREAD - INNER_WIDTH)
+    const layerW = strokeW * wMult   // CSS px width for this layer
+
+    const layerAlpha = (OUTER_ALPHA + t * (INNER_ALPHA - OUTER_ALPHA)) * velAlphaMult
+
+    // Outer layers get full jitter; inner layers get none — sharpens center.
+    const jScale = 1 - t
+    const jx     = (Math.random() * 2 - 1) * EDGE_JITTER * jScale
+    const jy     = (Math.random() * 2 - 1) * EDGE_JITTER * jScale
+
+    layer.points.push({ x: x + jx, y: y + jy })
+
+    if (layer.points.length < 2) continue
+
+    // Scale the last up-to-4 points to physical pixels for drawing.
+    const pts = layer.points
+    const len = pts.length
+
+    let p1, p2, cp1, cp2
+    if (len >= 4) {
+      // Full Catmull-Rom: use 4 buffered points.
+      // Drawn segment is pts[len-3] → pts[len-2]; pts[len-4] and pts[len-1]
+      // provide the tangent context — no extrapolation needed.
+      const P0 = { x: pts[len - 4].x * d, y: pts[len - 4].y * d }
+      const P1 = { x: pts[len - 3].x * d, y: pts[len - 3].y * d }
+      const P2 = { x: pts[len - 2].x * d, y: pts[len - 2].y * d }
+      const P3 = { x: pts[len - 1].x * d, y: pts[len - 1].y * d }
+      const cps = catmullCP(P0, P1, P2, P3)
+      p1 = P1; p2 = P2; cp1 = cps.cp1; cp2 = cps.cp2
+    } else {
+      // Fallback: straight line from second-to-last → last point.
+      p1  = { x: pts[len - 2].x * d, y: pts[len - 2].y * d }
+      p2  = { x: pts[len - 1].x * d, y: pts[len - 1].y * d }
+      cp1 = p1
+      cp2 = p2
+    }
+
+    const physW = layerW * d   // physical px lineWidth
+
+    layer.ctx.save()
+    layer.ctx.globalAlpha = layerAlpha
+    layer.ctx.strokeStyle = currentColor
+    layer.ctx.lineWidth   = physW
+    layer.ctx.lineCap     = 'round'
+    layer.ctx.lineJoin    = 'round'
+    layer.ctx.beginPath()
+    layer.ctx.moveTo(p1.x, p1.y)
+    layer.ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, p2.x, p2.y)
+    layer.ctx.stroke()
+    layer.ctx.restore()
+
+    // Wet-edge overdraw on outer-half layers (i < LAYER_COUNT/2).
+    if (WET_EDGE && i < LAYER_COUNT / 2) {
+      drawWetEdge(layer.ctx, p1, p2, cp1, cp2, physW, layerAlpha)
+    }
+
+    // Texture grain on inner-half layers (i >= LAYER_COUNT/2).
+    if (TEX_GRAIN && i >= LAYER_COUNT / 2) {
+      drawGrain(layer.ctx, p1, p2, physW, layerAlpha)
+    }
+  }
 }
 
 // ── updateColor ───────────────────────────────────────────────────────────────
 export function updateColor(color, lapColorIdx) {
-  _color  = color
-  _lapIdx = lapColorIdx ?? _lapIdx
+  currentColor  = color
+  currentLapIdx = lapColorIdx ?? currentLapIdx
 }
 
-// ── lift ─────────────────────────────────────────────────────────────────────
-// Resets the pen anchor so the next touch-down starts a fresh segment.
+// ── lift ──────────────────────────────────────────────────────────────────────
+// Called on pointer up. Resets each layer's point buffer so the next
+// touch-down starts a fresh Catmull-Rom chain rather than connecting back
+// to the previous stroke.
 export function lift() {
-  _prev  = null
-  _pprev = null
+  for (const layer of layers) {
+    layer.points = []
+  }
 }
 
 // ── clear ─────────────────────────────────────────────────────────────────────
-// Wipes all painted content via clearRect. Does NOT use canvas.width reassignment
-// because the clip was applied with save() that is never restored — clearRect
-// preserves the existing clip path. Resets the pen position and velocity EMA.
+// Wipes all painted content via clearRect and empties all point buffers.
+// The annular clip on each layer canvas is preserved — clearRect does not
+// reset a clip that was applied with save() that was never restored.
 export function clear() {
-  for (const { ctx, canvas } of layers) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+  for (const layer of layers) {
+    layer.ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height)
+    layer.points = []
   }
-  _prev  = null
-  _pprev = null
   velEma = 0
 }
 
 // ── getLayers ────────────────────────────────────────────────────────────────
-// Returns the array of { canvas, ctx } objects for compositing in the frame loop.
-// Caller should drawImage each canvas back-to-front (index 0 first).
+// Returns the layer array for back-to-front compositing in the frame loop.
+// Caller draws each layer.canvas with drawImage, outermost (index 0) first.
 export function getLayers() {
   return layers
 }
