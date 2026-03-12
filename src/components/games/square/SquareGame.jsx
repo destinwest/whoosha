@@ -443,7 +443,7 @@ export default function SquareGame({ onExit }) {
     if (pacing && child) {
       // Compare centerline positions — lateral drift does not affect this check.
       const dist = Math.hypot(child.clx - pacing.x, child.cly - pacing.y)
-      if (dist <= 60 && now - lastEncouragementRef.current > 30_000) {
+      if (lapColorIdxRef.current > 1 && dist <= 60 && now - lastEncouragementRef.current > 30_000) {
         encouragementRef.current     = { startTime: now }
         lastEncouragementRef.current = now
       }
