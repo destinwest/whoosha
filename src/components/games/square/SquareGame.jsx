@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import IntroScreen from './IntroScreen'
 import StrokeSelector from './StrokeSelector'
-import * as taperedStroke from './strokes/taperedStroke'
+import SquareCanvas from './SquareCanvas'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const BASE_COLOR = '#F5EFE6'
@@ -123,29 +123,6 @@ function buildGeo(rect) {
   }
 }
 
-// ── applyPaintClip ────────────────────────────────────────────────────────────
-// Permanently clips a paint canvas context to the annular track region.
-// All geometry values must already be in physical pixels (CSS px × DPR).
-// paintCtx.save() is called but intentionally never restored — the clip
-// must persist across all subsequent draw calls on this context.
-// Must be called again after every resize because resizing resets canvas state.
-function applyPaintClip(paintCtx, { left, top, sqW, cr, lw }) {
-  paintCtx.save()   // NOTE: do not restore — clip must persist
-  paintCtx.beginPath()
-  // Outer boundary — full track outer edge
-  paintCtx.roundRect(left, top, sqW, sqW, cr)
-  // Inner boundary — track inner edge (creates the hole)
-  paintCtx.roundRect(
-    left + lw,
-    top  + lw,
-    sqW  - lw * 2,
-    sqW  - lw * 2,
-    Math.max(0, cr - lw)
-  )
-  // evenodd fill rule punches the inner rect out of the outer rect
-  paintCtx.clip('evenodd')
-}
-
 // ── SquareGame ────────────────────────────────────────────────────────────────
 export default function SquareGame({ onExit }) {
 
@@ -190,20 +167,18 @@ export default function SquareGame({ onExit }) {
   const dprRef         = useRef(window.devicePixelRatio || 1)
   const lastMoveTimeRef = useRef(0)
 
-  const strokeModeRef = useRef('classic')
+  const strokeModeRef     = useRef('classic')
+  const squareCanvasRef   = useRef(null)
 
   // ── Reset to start state ───────────────────────────────────────────────────
   // Clears the paint canvas, reapplies the clip, and resets all game-state refs
   // back to their initial values. Called when the stroke style is changed.
   function resetToStartState() {
     const pCanvas = paintRef.current
-    if (pCanvas && geoRef.current) {
-      // taperedStroke.clear() resets the canvas via width reassignment (which wipes
-      // all content and context state including the clip). Reapply the clip after.
-      taperedStroke.clear()
+    if (pCanvas && geoRef.current && squareCanvasRef.current) {
       const dpr = dprRef.current
       const { cx, cy, half, lw: cssLw, r } = geoRef.current
-      applyPaintClip(pCanvas.getContext('2d'), {
+      squareCanvasRef.current.clearAll(pCanvas.getContext('2d'), {
         left: (cx - half - cssLw / 2) * dpr,
         top:  (cy - half - cssLw / 2) * dpr,
         sqW:  (half * 2 + cssLw) * dpr,
@@ -518,7 +493,7 @@ export default function SquareGame({ onExit }) {
         lastChildPos.current    = pos
         prevFracRef.current     = pos?.fraction ?? null
         // Register the touch-down position as the stroke anchor (no segment drawn).
-        if (pos) taperedStroke.addPoint(pos.x, pos.y, 0)
+        if (pos) squareCanvasRef.current?.addPoint(pos.x, pos.y, 0)
       }
     } else {
       touchRef.current        = true
@@ -550,14 +525,14 @@ export default function SquareGame({ onExit }) {
     lastChildPos.current = pos
     checkLap(pos)
     if (pos) {
-      taperedStroke.updateColor(getLapColor(pos.fraction), lapColorIdxRef.current)
-      taperedStroke.addPoint(pos.x, pos.y, vel)
+      squareCanvasRef.current?.updateColor(getLapColor(pos.fraction), lapColorIdxRef.current)
+      squareCanvasRef.current?.addPoint(pos.x, pos.y, vel)
     }
   }
 
   function onPointerUp() {
     touchRef.current = false
-    taperedStroke.lift()
+    squareCanvasRef.current?.lift()
   }
 
   function handleMouseDown(e)  { const p = getRawPos(e); onPointerDown(p.x, p.y) }
@@ -592,23 +567,23 @@ export default function SquareGame({ onExit }) {
       geoRef.current     = buildGeo(rect)
 
       // Resizing resets the paint canvas state (including any prior clip).
-      // Reapply the permanent annular clip, then re-init the stroke module so
-      // it picks up the new geometry and fresh context state.
+      // SquareCanvas.init() applies the clip then re-inits both stroke modules
+      // with the new geometry and fresh context state.
       const { cx, cy, half, lw: cssLw, r } = geoRef.current
       const paintCtx = paintCanvas.getContext('2d')
-      applyPaintClip(paintCtx, {
-        left: (cx - half - cssLw / 2) * dpr,
-        top:  (cy - half - cssLw / 2) * dpr,
-        sqW:  (half * 2 + cssLw) * dpr,
-        cr:   (r + cssLw / 2) * dpr,
-        lw:   cssLw * dpr,
-      })
-      taperedStroke.init({
+      squareCanvasRef.current?.init({
         paintCtx,
-        lw:          cssLw,
+        cssLw,
         dpr,
         color:       getLapColor(0),
         lapColorIdx: lapColorIdxRef.current,
+        clipArgs: {
+          left: (cx - half - cssLw / 2) * dpr,
+          top:  (cy - half - cssLw / 2) * dpr,
+          sqW:  (half * 2 + cssLw) * dpr,
+          cr:   (r + cssLw / 2) * dpr,
+          lw:   cssLw * dpr,
+        },
       })
     }
 
@@ -644,7 +619,14 @@ export default function SquareGame({ onExit }) {
       ctx.stroke()
 
       // ── 3. Paint layer ───────────────────────────────────────────────────
-      ctx.drawImage(paintCanvas, 0, 0, W, H)
+      if (strokeModeRef.current === 'watercolor') {
+        const wLayers = squareCanvasRef.current?.getWatercolorLayers() ?? []
+        for (const { canvas: lc } of wLayers) {
+          ctx.drawImage(lc, 0, 0, W, H)
+        }
+      } else {
+        ctx.drawImage(paintCanvas, 0, 0, W, H)
+      }
 
       // ── 3. Labels ────────────────────────────────────────────────────────
       drawLabels(ctx, geo, now)
@@ -798,6 +780,9 @@ export default function SquareGame({ onExit }) {
       {showIntro && (
         <IntroScreen onSkip={skipIntro} textRef={textRef} line1Ref={line1Ref} line2Ref={line2Ref} />
       )}
+
+      {/* Headless — mounts the stroke module orchestrator so squareCanvasRef is populated */}
+      <SquareCanvas ref={squareCanvasRef} strokeModeRef={strokeModeRef} />
     </div>
   )
 }
