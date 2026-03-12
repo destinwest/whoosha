@@ -12,9 +12,9 @@
 //     — Updates color in both modules (called on every pointer move).
 //   lift()
 //     — Lifts the pen in both modules.
-//   clearAll(paintCtx, clipArgs)
-//     — Clears both modules. taperedStroke.clear() also wipes the clip, so
-//       the clip is reapplied to paintCtx before returning.
+//   reset()
+//     — Clears both modules using internally stored refs. taperedStroke.clear()
+//       wipes the clip via width reassignment; clip is reapplied immediately.
 //   getWatercolorLayers()
 //     — Returns layeredWash.getLayers() for frame-loop compositing.
 //
@@ -22,7 +22,7 @@
 //   strokeModeRef  — { current: 'classic' | 'watercolor' }
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { forwardRef, useImperativeHandle } from 'react'
+import { forwardRef, useImperativeHandle, useRef } from 'react'
 import * as taperedStroke from './strokes/taperedStroke'
 import * as layeredWash   from './strokes/layeredWash'
 
@@ -44,12 +44,19 @@ function applyPaintClip(ctx, { left, top, sqW, cr, lw }) {
 }
 
 const SquareCanvas = forwardRef(function SquareCanvas({ strokeModeRef }, ref) {
+  const paintCtxRef = useRef(null)
+  const clipArgsRef = useRef(null)
 
   useImperativeHandle(ref, () => ({
 
     // ── init ──────────────────────────────────────────────────────────────────
     // clipArgs: { left, top, sqW, cr, lw } — all in physical pixels.
+    // Stores paintCtx and clipArgs internally so reset() can use them without
+    // requiring SquareGame to pass canvas state.
     init({ paintCtx, cssLw, dpr, color, lapColorIdx, clipArgs }) {
+      paintCtxRef.current = paintCtx
+      clipArgsRef.current = clipArgs
+
       // Apply clip to the shared paint canvas before handing it to taperedStroke.
       applyPaintClip(paintCtx, clipArgs)
 
@@ -82,13 +89,14 @@ const SquareCanvas = forwardRef(function SquareCanvas({ strokeModeRef }, ref) {
       layeredWash.lift()
     },
 
-    // ── clearAll ──────────────────────────────────────────────────────────────
+    // ── reset ─────────────────────────────────────────────────────────────────
+    // Clears all painted content and returns both stroke modules to pen-up state.
     // taperedStroke.clear() wipes the shared paint canvas via width reassignment,
-    // which destroys the clip. Reapply immediately after. layeredWash.clear()
-    // uses clearRect so its per-layer clips survive intact.
-    clearAll(paintCtx, clipArgs) {
+    // which destroys the clip — reapply immediately after using stored refs.
+    // layeredWash.clear() uses clearRect so its per-layer clips survive intact.
+    reset() {
       taperedStroke.clear()
-      applyPaintClip(paintCtx, clipArgs)
+      applyPaintClip(paintCtxRef.current, clipArgsRef.current)
       layeredWash.clear()
     },
 

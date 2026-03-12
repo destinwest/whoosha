@@ -171,21 +171,10 @@ export default function SquareGame({ onExit }) {
   const squareCanvasRef   = useRef(null)
 
   // ── Reset to start state ───────────────────────────────────────────────────
-  // Clears the paint canvas, reapplies the clip, and resets all game-state refs
-  // back to their initial values. Called when the stroke style is changed.
+  // Delegates canvas-level cleanup to SquareCanvas, then resets all game-state
+  // refs back to their initial values. Called when the stroke style is changed.
   function resetToStartState() {
-    const pCanvas = paintRef.current
-    if (pCanvas && geoRef.current && squareCanvasRef.current) {
-      const dpr = dprRef.current
-      const { cx, cy, half, lw: cssLw, r } = geoRef.current
-      squareCanvasRef.current.clearAll(pCanvas.getContext('2d'), {
-        left: (cx - half - cssLw / 2) * dpr,
-        top:  (cy - half - cssLw / 2) * dpr,
-        sqW:  (half * 2 + cssLw) * dpr,
-        cr:   (r + cssLw / 2) * dpr,
-        lw:   cssLw * dpr,
-      })
-    }
+    squareCanvasRef.current?.reset()
 
     startedRef.current   = false
     touchRef.current     = false
@@ -502,7 +491,7 @@ export default function SquareGame({ onExit }) {
       childPosRef.current     = pos
       lastChildPos.current    = pos
       prevFracRef.current     = pos?.fraction ?? null
-      if (pos) taperedStroke.addPoint(pos.x, pos.y, 0)
+      if (pos) squareCanvasRef.current?.addPoint(pos.x, pos.y, 0)
     }
   }
 
