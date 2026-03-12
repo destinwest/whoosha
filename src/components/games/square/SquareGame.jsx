@@ -683,12 +683,12 @@ export default function SquareGame({ onExit }) {
         ctx.fill()
 
         if (startLabelAlpha.current > 0) {
-          const startFs = Math.max(12, lw * 0.38 + 2)
-          ctx.font         = `600 ${startFs}px 'Nunito', sans-serif`
+          const startFs = Math.max(14, lw * 0.44)
+          ctx.font         = `800 ${startFs}px 'Nunito', sans-serif`
           ctx.textAlign    = 'center'
           ctx.textBaseline = 'middle'
           ctx.strokeStyle  = `rgba(212,160,86,${startLabelAlpha.current.toFixed(3)})`
-          ctx.lineWidth    = 3
+          ctx.lineWidth    = 6
           ctx.lineJoin     = 'round'
           ctx.strokeText('start', displayPos.x, displayPos.y)
           ctx.fillStyle    = `rgba(255,255,255,${startLabelAlpha.current.toFixed(3)})`
