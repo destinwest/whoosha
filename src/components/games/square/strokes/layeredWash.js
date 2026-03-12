@@ -18,12 +18,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Named constants ───────────────────────────────────────────────────────────
-const LAYER_COUNT     = 5       // number of offscreen layer canvases
-const WIDTH_SPREAD    = 2.0     // outer layer width multiplier: inner=1x, outer=(1+SPREAD)x
-const BASE_ALPHA      = 0.18    // base per-stroke opacity for each layer
-const VEL_ALPHA_RANGE = 0.22    // additional alpha contributed at slow velocity
-const VEL_EMA_K       = 0.2     // EMA smoothing factor for velocity
-const VEL_SCALE       = 0.12    // CSS px/ms considered "fast" for normalization
+const LAYER_COUNT       = 5     // number of offscreen layer canvases
+const INNER_WIDTH_RATIO = 0.35  // inner layer width as fraction of track lw (≈ amber circle radius = half its diameter)
+const VEL_WIDTH_MIN     = 0.20  // outer layer width fraction at max velocity (thinnest possible stroke)
+const BASE_ALPHA        = 0.18  // base per-stroke opacity for each layer
+const VEL_ALPHA_RANGE   = 0.22  // additional alpha contributed at slow velocity
+const VEL_EMA_K         = 0.2   // EMA smoothing factor for velocity
+const VEL_SCALE         = 0.30  // CSS px/ms considered "fast" for normalization
 const WET_EDGE_ALPHA  = 0.55    // wet edge overdraw opacity multiplier
 const WET_EDGE_WIDTH  = 0.45    // wet edge width as fraction of layer stroke width
 const TEX_GRAIN       = false   // texture grain pass (disabled by default)
@@ -150,10 +151,13 @@ export function init({ paintCtx, lw, dpr, color, lapColorIdx, clipArgs }) {
 export function addPoint(x, y, vel) {
   if (!layers.length) return
 
-  // Update velocity EMA — slower speed → more opaque strokes.
+  // Update velocity EMA — slower speed → wider and more opaque strokes.
   velEma = velEma * (1 - VEL_EMA_K) + vel * VEL_EMA_K
   const velNorm      = Math.min(1, velEma / VEL_SCALE)
   const velAlphaMult = 1 + VEL_ALPHA_RANGE * (1 - velNorm)
+  // At vel=0: velWidthMult=1.0 → outer layer = lw (classic width).
+  // At vel=max: velWidthMult=VEL_WIDTH_MIN → stroke thins significantly.
+  const velWidthMult = VEL_WIDTH_MIN + (1 - VEL_WIDTH_MIN) * (1 - velNorm)
 
   if (_prev === null) {
     _prev  = { x, y }
@@ -182,10 +186,11 @@ export function addPoint(x, y, vel) {
   for (let li = 0; li < LAYER_COUNT; li++) {
     const { ctx: lCtx } = layers[li]
 
-    // Inner layers (li=0): narrowest, most opaque.
-    // Outer layers (li=LAYER_COUNT-1): widest, most transparent.
+    // Inner layers (li=0): narrowest (≈ amber radius), most opaque.
+    // Outer layers (li=LAYER_COUNT-1): widest (≈ classic lw at slow vel), most transparent.
     const t          = li / (LAYER_COUNT - 1)
-    const strokeW    = baseStrokeW * (1 + WIDTH_SPREAD * t)
+    const layerWFact = INNER_WIDTH_RATIO + (1 - INNER_WIDTH_RATIO) * t
+    const strokeW    = baseStrokeW * velWidthMult * layerWFact
     const layerAlpha = BASE_ALPHA * velAlphaMult * (1 - t * 0.4)
 
     lCtx.save()
