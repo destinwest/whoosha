@@ -679,11 +679,14 @@ export default function SquareGame({ onExit }) {
 
         ctx.beginPath()
         ctx.arc(displayPos.x, displayPos.y, amberRadius, 0, Math.PI * 2)
-        ctx.fillStyle = '#D4A056'
+        ctx.fillStyle   = '#D4A056'
         ctx.fill()
+        ctx.strokeStyle = '#D4A056'
+        ctx.lineWidth   = 2
+        ctx.stroke()
 
         if (startLabelAlpha.current > 0) {
-          const startFs = Math.max(10, lw * 0.38)
+          const startFs = Math.max(12, lw * 0.38 + 2)
           ctx.font         = `600 ${startFs}px 'Nunito', sans-serif`
           ctx.textAlign    = 'center'
           ctx.textBaseline = 'middle'
