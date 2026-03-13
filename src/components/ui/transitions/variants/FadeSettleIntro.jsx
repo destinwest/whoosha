@@ -58,8 +58,8 @@ export default function FadeSettleIntro({ onComplete }) {
   }
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--intro-blur',  '7px');
-    document.documentElement.style.setProperty('--intro-scale', '1.05');
+    document.documentElement.style.setProperty('--intro-blur',  '8px');
+    document.documentElement.style.setProperty('--intro-scale', '1.09');
 
     // Wrap setTimeout so its cancel function lives in the same collection
     // as the RAF cancel functions. handleSkip can then cancel everything
@@ -69,31 +69,37 @@ export default function FadeSettleIntro({ onComplete }) {
       cancelFns.current.push(() => clearTimeout(id));
     }
 
-    // Step 1 — overlay color fade (CSS transition, triggered once)
-    wait(150, () => {
+    // Hold dark 700ms — linger in the space after the dive.
+
+    // Step 1 — scale settles while still mostly dark (700ms)
+    // Felt as the momentum of the dive decaying; done before the light arrives.
+    wait(700, () => {
+      const cancel = animVal(1.09, 1.0, 500, easeOutQuart, (v) => {
+        document.documentElement.style.setProperty('--intro-scale', `${v.toFixed(4)}`);
+      }, null);
+      cancelFns.current.push(cancel);
+    });
+
+    // Step 2 — overlay fades (750ms) — light begins to emerge
+    wait(750, () => {
       if (!overlayRef.current) return;
       overlayRef.current.style.transition =
-        'opacity 1800ms cubic-bezier(0.4, 0, 0.2, 1)';
+        'opacity 1100ms cubic-bezier(0.4, 0, 0.2, 1)';
       overlayRef.current.style.opacity = '0';
     });
 
-    // Step 2 — blur clears (RAF, starts at 1200ms)
-    wait(1200, () => {
-      const cancel = animVal(7, 0, 1600, easeOutSoft, (v) => {
+    // Step 3 — blur clears (800ms) — eyes adjust as light grows
+    wait(800, () => {
+      const cancel = animVal(8, 0, 1000, easeOutSoft, (v) => {
         document.documentElement.style.setProperty('--intro-blur', `${v.toFixed(2)}px`);
       }, null);
       cancelFns.current.push(cancel);
     });
 
-    // Step 3 — scale settles (RAF, starts at 1500ms), fires onComplete when done
-    wait(1500, () => {
-      const cancel = animVal(1.05, 1.0, 1400, easeOutQuart, (v) => {
-        document.documentElement.style.setProperty('--intro-scale', `${v.toFixed(4)}`);
-      }, () => {
-        resetProps();
-        onComplete?.();
-      });
-      cancelFns.current.push(cancel);
+    // onComplete after all three have landed (~1850ms total)
+    wait(1900, () => {
+      resetProps();
+      onComplete?.();
     });
 
     return () => {
