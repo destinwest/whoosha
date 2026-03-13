@@ -53,7 +53,7 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
         position: 'absolute',
         inset: 0,
         filter: 'blur(var(--intro-blur, 0px))',
-        transform: 'scale(var(--intro-scale, 1))',
+        transform: 'translateY(var(--intro-y, 0px)) scale(var(--intro-scale, 1))',
         transformOrigin: 'center center',
         willChange: 'transform, filter',
       }}>

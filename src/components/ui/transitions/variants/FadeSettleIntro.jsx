@@ -37,6 +37,7 @@ export default function FadeSettleIntro({ onComplete }) {
   function resetProps() {
     document.documentElement.style.setProperty('--intro-blur',  '0px');
     document.documentElement.style.setProperty('--intro-scale', '1');
+    document.documentElement.style.setProperty('--intro-y',     '0px');
   }
 
   function cancelAll() {
@@ -59,7 +60,8 @@ export default function FadeSettleIntro({ onComplete }) {
 
   useEffect(() => {
     document.documentElement.style.setProperty('--intro-blur',  '8px');
-    document.documentElement.style.setProperty('--intro-scale', '1.09');
+    document.documentElement.style.setProperty('--intro-scale', '0.96');
+    document.documentElement.style.setProperty('--intro-y',     '-12px');
 
     // Wrap setTimeout so its cancel function lives in the same collection
     // as the RAF cancel functions. handleSkip can then cancel everything
@@ -71,16 +73,7 @@ export default function FadeSettleIntro({ onComplete }) {
 
     // Hold dark 700ms — linger in the space after the dive.
 
-    // Step 1 — scale settles while still mostly dark (700ms)
-    // Felt as the momentum of the dive decaying; done before the light arrives.
-    wait(700, () => {
-      const cancel = animVal(1.09, 1.0, 500, easeOutQuart, (v) => {
-        document.documentElement.style.setProperty('--intro-scale', `${v.toFixed(4)}`);
-      }, null);
-      cancelFns.current.push(cancel);
-    });
-
-    // Step 2 — overlay fades (750ms) — light begins to emerge
+    // Step 1 — overlay fades (750ms) — light begins to emerge
     wait(750, () => {
       if (!overlayRef.current) return;
       overlayRef.current.style.transition =
@@ -88,16 +81,31 @@ export default function FadeSettleIntro({ onComplete }) {
       overlayRef.current.style.opacity = '0';
     });
 
-    // Step 3 — blur clears (800ms) — eyes adjust as light grows
+    // Step 2 — blur clears + world drifts into position (800ms)
+    // Both use the same easing so they read as a single "eyes adjusting" sensation.
     wait(800, () => {
-      const cancel = animVal(8, 0, 1000, easeOutSoft, (v) => {
+      const cancelBlur = animVal(8, 0, 1000, easeOutSoft, (v) => {
         document.documentElement.style.setProperty('--intro-blur', `${v.toFixed(2)}px`);
+      }, null);
+      cancelFns.current.push(cancelBlur);
+
+      const cancelY = animVal(-12, 0, 1000, easeOutSoft, (v) => {
+        document.documentElement.style.setProperty('--intro-y', `${v.toFixed(2)}px`);
+      }, null);
+      cancelFns.current.push(cancelY);
+    });
+
+    // Step 3 — scale approaches (1050ms) — world arrives at correct distance,
+    // visible in the partially-lit overlay window (A: 0.96→1.0, C: timed late)
+    wait(1050, () => {
+      const cancel = animVal(0.96, 1.0, 500, easeOutQuart, (v) => {
+        document.documentElement.style.setProperty('--intro-scale', `${v.toFixed(4)}`);
       }, null);
       cancelFns.current.push(cancel);
     });
 
     // onComplete after all three have landed (~1850ms total)
-    wait(1900, () => {
+    wait(1950, () => {
       resetProps();
       onComplete?.();
     });
