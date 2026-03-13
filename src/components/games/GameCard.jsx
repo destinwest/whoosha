@@ -94,21 +94,31 @@ export default function GameCard({
     onZoomStart?.()
 
     requestAnimationFrame(() => {
+      // Set initial rect fill before animVal starts — avoids a single-frame
+      // transparent flash between ZoomOverlay mounting and first tick firing
+      const rectEl = cloneRef.current?.querySelector('rect')
+      if (rectEl) {
+        rectEl.setAttribute('fill', `rgb(${BG_FROM.r},${BG_FROM.g},${BG_FROM.b})`)
+      }
+
       const cancelAnim = animVal(1, targetScale, 650, easeInQuart, (s) => {
         // Normalized progress — same curve as scale since we derived s from it
         const p = targetScale === 1 ? 1 : (s - 1) / (targetScale - 1)
+
+        const r = Math.round(BG_FROM.r + (BG_TO.r - BG_FROM.r) * p)
+        const g = Math.round(BG_FROM.g + (BG_TO.g - BG_FROM.g) * p)
+        const b = Math.round(BG_FROM.b + (BG_TO.b - BG_FROM.b) * p)
 
         // Translate focal point toward viewport center + scale from focal point
         if (cloneRef.current) {
           cloneRef.current.style.transform =
             `translate(${dxFinal * p}px, ${dyFinal * p}px) scale(${s})`
+          // Rect fill transitions eucalyptus → game-intro dark alongside zoom
+          cloneRef.current.querySelector('rect')?.setAttribute('fill', `rgb(${r},${g},${b})`)
         }
 
-        // Background lerps from eucalyptus → game-intro dark in sync with zoom
+        // Overlay background transitions in sync — covers area outside the rect
         if (bgRef.current) {
-          const r = Math.round(BG_FROM.r + (BG_TO.r - BG_FROM.r) * p)
-          const g = Math.round(BG_FROM.g + (BG_TO.g - BG_FROM.g) * p)
-          const b = Math.round(BG_FROM.b + (BG_TO.b - BG_FROM.b) * p)
           bgRef.current.style.background = `rgb(${r},${g},${b})`
         }
       }, () => {

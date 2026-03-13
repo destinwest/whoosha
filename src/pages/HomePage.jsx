@@ -78,9 +78,6 @@ const GAMES = [
     route: '/games/square',
     bg: 'bg-secondary',
     icon: <SquareIcon />,
-    // Clone shown during zoom: rect filled with game-intro dark so the interior
-    // is solid as it expands. Card icon stays fill="none".
-    zoomIcon: <SquareIcon fill="#2C4A3E" />,
     // Bottom-right corner of the rect (arc midpoint at 45°):
     // viewBox (46+8·cos45°, 46+8·sin45°) = (51.66, 51.66) → 51.66/64 × 56 = 45.2px → 45.2/56 = 0.807
     focalPoint: { x: 0.807, y: 0.807 },
