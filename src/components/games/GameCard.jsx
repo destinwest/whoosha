@@ -17,6 +17,10 @@ function animVal(from, to, dur, ease, onTick, onDone) {
   return () => cancelAnimationFrame(h)
 }
 
+// Background color lerp: #9FBFB4 → #2C4A3E
+const BG_FROM = { r: 159, g: 191, b: 180 }
+const BG_TO   = { r: 44,  g: 74,  b: 62  }
+
 // ── LockIcon ──────────────────────────────────────────────────────────────────
 function LockIcon() {
   return (
@@ -33,33 +37,39 @@ function LockIcon() {
 //   id          — string e.g. 'square'
 //   label       — string e.g. 'Square Breathing'
 //   description — string e.g. 'Trace the square and breathe'
-//   icon        — ReactNode — the SVG icon element (must use inline stroke colors)
+//   icon        — ReactNode — SVG shown on the card (inline stroke colors)
+//   zoomIcon    — ReactNode — optional alternate SVG for the zoom clone
+//                 (use when the clone needs different fill/stroke than the card icon)
 //   route       — string e.g. '/games/square'
 //   active      — boolean — false = locked, pointer-events none
 //   bg          — string — Tailwind bg class e.g. 'bg-secondary'
-//   onZoomStart — () => void — called when zoom sequence begins (parent fades)
-export default function GameCard({ id, label, description, icon, route, active, bg, onZoomStart }) {
+//   onZoomStart — () => void — called when zoom begins (parent fades home screen)
+//   focalPoint  — { x, y } as fractions of icon size — the point on the icon the
+//                 zoom anchors to and translates toward viewport center.
+//                 Default: { x: 0.5, y: 0.5 } (icon center)
+export default function GameCard({
+  id, label, description, icon, zoomIcon, route, active, bg,
+  onZoomStart, focalPoint = { x: 0.5, y: 0.5 },
+}) {
   const navigate       = useNavigate()
   const iconWrapperRef = useRef(null)
   const cloneRef       = useRef(null)
+  const bgRef          = useRef(null)
   const zoomActiveRef  = useRef(false)
-  const cancelRef      = useRef(null)
-  const navTimerRef    = useRef(null)
   const mountedRef     = useRef(true)
+  const cancels        = useRef([])   // all cancel/clearTimeout fns — drained on unmount
   const [zoomState, setZoomState] = useState(null)
 
   useEffect(() => {
     return () => {
       mountedRef.current = false
-      cancelRef.current?.()
-      if (navTimerRef.current) clearTimeout(navTimerRef.current)
+      cancels.current.forEach(fn => fn())
     }
   }, [])
 
   function handleTap() {
     if (!active || zoomActiveRef.current) return
 
-    // Respect reduced-motion preference — skip animation, navigate directly
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       navigate(route)
       return
@@ -71,33 +81,54 @@ export default function GameCard({ id, label, description, icon, route, active, 
     const diagonal    = Math.hypot(window.innerWidth, window.innerHeight)
     const targetScale = (diagonal / rect.width) * 2.6
 
-    // Mount the overlay clone before starting the animation
-    setZoomState({ originRect: rect, targetScale })
+    // The focal point in screen coordinates — this is what translates to
+    // the viewport center during the zoom (the "anchor" of the dive)
+    const focalScreenX = rect.left + focalPoint.x * rect.width
+    const focalScreenY = rect.top  + focalPoint.y * rect.height
+    const dxFinal = window.innerWidth  / 2 - focalScreenX
+    const dyFinal = window.innerHeight / 2 - focalScreenY
+
+    const transformOrigin = `${focalPoint.x * 100}% ${focalPoint.y * 100}%`
+
+    setZoomState({ originRect: rect, transformOrigin })
     onZoomStart?.()
 
-    // One rAF delay ensures ZoomOverlay has mounted and cloneRef is set
     requestAnimationFrame(() => {
-      cancelRef.current = animVal(1, targetScale, 650, easeInQuart, (s) => {
-        if (cloneRef.current) cloneRef.current.style.transform = `scale(${s})`
+      const cancelAnim = animVal(1, targetScale, 650, easeInQuart, (s) => {
+        // Normalized progress — same curve as scale since we derived s from it
+        const p = targetScale === 1 ? 1 : (s - 1) / (targetScale - 1)
+
+        // Translate focal point toward viewport center + scale from focal point
+        if (cloneRef.current) {
+          cloneRef.current.style.transform =
+            `translate(${dxFinal * p}px, ${dyFinal * p}px) scale(${s})`
+        }
+
+        // Background lerps from eucalyptus → game-intro dark in sync with zoom
+        if (bgRef.current) {
+          const r = Math.round(BG_FROM.r + (BG_TO.r - BG_FROM.r) * p)
+          const g = Math.round(BG_FROM.g + (BG_TO.g - BG_FROM.g) * p)
+          const b = Math.round(BG_FROM.b + (BG_TO.b - BG_FROM.b) * p)
+          bgRef.current.style.background = `rgb(${r},${g},${b})`
+        }
       }, () => {
         if (cloneRef.current) cloneRef.current.style.opacity = '0'
       })
+      cancels.current.push(cancelAnim)
 
       // Navigate at 85% of zoom duration — game route mounts dark, no flash
-      navTimerRef.current = setTimeout(() => navigate(route), 552)
+      const navId = setTimeout(() => navigate(route), 552)
+      cancels.current.push(() => clearTimeout(navId))
 
-      // Fallback: if navigation failed and we're still mounted after 800ms,
-      // reset fading state so the home screen is usable again
-      setTimeout(() => {
+      // Fallback: if navigation never fires, restore home screen after 900ms
+      const fallbackId = setTimeout(() => {
         if (mountedRef.current) {
-          cancelRef.current?.()
+          cancels.current.forEach(fn => fn())
           setZoomState(null)
           zoomActiveRef.current = false
-          // Signal parent to restore opacity — reuse onZoomStart with reset flag
-          // via a dedicated reset callback is cleaner, but the simplest approach:
-          // the parent uses a mountedRef reset pattern (see HomePage)
         }
-      }, 800)
+      }, 900)
+      cancels.current.push(() => clearTimeout(fallbackId))
     })
   }
 
@@ -117,7 +148,7 @@ export default function GameCard({ id, label, description, icon, route, active, 
         style={{ pointerEvents: active ? 'auto' : 'none' }}
         aria-label={active ? `Play ${label}` : `${label} — coming soon`}
       >
-        {/* icon wrapper — display:inline-block ensures it sizes to SVG, not card width */}
+        {/* display:inline-block ensures wrapper sizes to SVG, not card width */}
         <div ref={iconWrapperRef} style={{ display: 'inline-block' }}>
           {icon}
         </div>
@@ -139,9 +170,11 @@ export default function GameCard({ id, label, description, icon, route, active, 
 
       {zoomState && (
         <ZoomOverlay
-          iconNode={icon}
+          iconNode={zoomIcon ?? icon}
           originRect={zoomState.originRect}
           cloneRef={cloneRef}
+          bgRef={bgRef}
+          transformOrigin={zoomState.transformOrigin}
         />
       )}
     </>

@@ -14,11 +14,11 @@ async function logout(navigate) {
 // in the zoom portal, which has no CSS color context.
 // #3E5E52 = text-forest — visually identical to the previous currentColor approach.
 
-function SquareIcon() {
+function SquareIcon({ fill = 'none' }) {
   return (
     <svg viewBox="0 0 64 64" fill="none" stroke="#3E5E52" strokeWidth="3.5"
       strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="w-14 h-14">
-      <rect x="10" y="10" width="44" height="44" rx="8" />
+      <rect x="10" y="10" width="44" height="44" rx="8" fill={fill} />
     </svg>
   )
 }
@@ -78,6 +78,12 @@ const GAMES = [
     route: '/games/square',
     bg: 'bg-secondary',
     icon: <SquareIcon />,
+    // Clone shown during zoom: rect filled with game-intro dark so the interior
+    // is solid as it expands. Card icon stays fill="none".
+    zoomIcon: <SquareIcon fill="#2C4A3E" />,
+    // Bottom-right corner of the rect (arc midpoint at 45°):
+    // viewBox (46+8·cos45°, 46+8·sin45°) = (51.66, 51.66) → 51.66/64 × 56 = 45.2px → 45.2/56 = 0.807
+    focalPoint: { x: 0.807, y: 0.807 },
   },
   {
     id: 'infinity',
@@ -234,10 +240,12 @@ export default function HomePage() {
                 label={game.label}
                 description={game.description}
                 icon={game.icon}
+                zoomIcon={game.zoomIcon}
                 route={game.route}
                 bg={game.bg}
                 active={isGameActive(game.id)}
                 onZoomStart={handleZoomStart}
+                focalPoint={game.focalPoint}
               />
             ))}
           </div>

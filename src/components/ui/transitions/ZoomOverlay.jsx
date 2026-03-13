@@ -1,17 +1,21 @@
 import { createPortal } from 'react-dom';
 
 // Renders the zooming icon clone in a fixed portal above everything.
-// GameCard drives the scale animation by writing to cloneRef directly —
+// GameCard drives the animation by writing to cloneRef and bgRef directly —
 // no React re-renders occur during animation.
-export default function ZoomOverlay({ iconNode, originRect, cloneRef }) {
+export default function ZoomOverlay({ iconNode, originRect, cloneRef, bgRef, transformOrigin }) {
   return createPortal(
-    <div style={{
-      position: 'fixed',
-      inset: 0,
-      pointerEvents: 'none',
-      zIndex: 9999,
-      overflow: 'hidden',
-    }}>
+    <div
+      ref={bgRef}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        pointerEvents: 'none',
+        zIndex: 9999,
+        overflow: 'hidden',
+        background: '#9FBFB4', // matches home screen — animated to #2C4A3E by GameCard
+      }}
+    >
       <div
         ref={cloneRef}
         style={{
@@ -20,7 +24,7 @@ export default function ZoomOverlay({ iconNode, originRect, cloneRef }) {
           height: originRect.height + 'px',
           left:   originRect.left   + 'px',
           top:    originRect.top    + 'px',
-          transformOrigin: 'center center',
+          transformOrigin: transformOrigin ?? 'center center',
           willChange: 'transform',
         }}
       >
