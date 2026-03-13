@@ -115,6 +115,15 @@ function buildGeo(rect) {
   }
 }
 
+// ── buildBgGradient ───────────────────────────────────────────────────────────
+// Computed once per resize, cached in bgGradientRef. W, H in CSS px.
+function buildBgGradient(ctx, W, H) {
+  const grad = ctx.createLinearGradient(0, 0, W, H)
+  grad.addColorStop(0, '#B0CECA')   // top-left — lighter, cooler sage
+  grad.addColorStop(1, '#7A9E99')   // bottom-right — darker, warmer sage
+  return grad
+}
+
 // ── drawVignette ──────────────────────────────────────────────────────────────
 function drawVignette(ctx, W, H) {
   const grad = ctx.createRadialGradient(
@@ -137,14 +146,21 @@ function drawVignette(ctx, W, H) {
 // Called once per resize — returns a radial gradient for Pass B.
 // Must use the display canvas ctx (the gradient is consumed there each frame).
 function buildTrackGradient(ctx, { left, top, sqW, lw }) {
-  const cx     = left + sqW / 2
-  const cy     = top  + sqW / 2
-  const innerR = sqW / 2 - lw
-  const outerR = sqW / 2
-  const grad   = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
-  grad.addColorStop(0,   '#FAF5EE')
-  grad.addColorStop(0.4, '#F5EFE6')
-  grad.addColorStop(1,   '#EDE5D8')
+  const cx = left + sqW / 2
+  const cy = top  + sqW / 2
+
+  // innerR = inner edge of the straight sides (closest track surface to center).
+  // outerR = beyond corner outer edges (~sqW*0.70 from center) so corners
+  // fall within the gradient range and are not clamped to the darkest stop.
+  const innerR = sqW / 2 - lw / 2
+  const outerR = sqW * 0.75
+
+  // Position stops so the transition spans from straight inner edge (t=0)
+  // through straight outer edge (~t=0.46) to corner outer edges (~t=0.88).
+  const grad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
+  grad.addColorStop(0,   '#FAF5EE')   // inner edge of straights — lightest
+  grad.addColorStop(0.4, '#F5EFE6')   // straight outer edge — base cream
+  grad.addColorStop(1,   '#EDE5D8')   // corner outer edges — darkest
   return grad
 }
 
@@ -176,11 +192,11 @@ function drawTrackHighlight(ctx, { left, top, sqW, cr, lw }) {
   ctx.save()
   ctx.beginPath()
   ctx.roundRect(
-    left + lw * 0.4,
-    top  + lw * 0.4,
-    sqW  - lw * 0.8,
-    sqW  - lw * 0.8,
-    cr   - lw * 0.4,
+    left + lw * 0.5,
+    top  + lw * 0.5,
+    sqW  - lw,
+    sqW  - lw,
+    cr   - lw * 0.5,
   )
   ctx.lineWidth   = lw * 0.15
   ctx.strokeStyle = 'rgba(255,252,245,0.55)'
@@ -239,6 +255,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const clipArgsRef      = useRef(null)
   const trackGeoRef      = useRef(null)   // CSS px track centerline geometry
   const trackGradientRef = useRef(null)   // cached Pass B gradient (rebuilt on resize)
+  const bgGradientRef    = useRef(null)   // cached background gradient (rebuilt on resize)
 
   // ── Game state refs ────────────────────────────────────────────────────────
   const gameStartRef         = useRef(null)
@@ -551,6 +568,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const trackGeo = { left: cx - half, top: cy - half, sqW: sq, cr: r, lw }
       trackGeoRef.current      = trackGeo
       trackGradientRef.current = buildTrackGradient(ctx, trackGeo)
+      bgGradientRef.current    = buildBgGradient(ctx, rect.width, rect.height)
 
       const idx   = lapColorIdxRef.current
       const color = lerpColor(
@@ -584,7 +602,11 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, W, H)
 
-      // ── 0. Background vignette ────────────────────────────────────────────
+      // ── 0. Background fill ────────────────────────────────────────────────
+      ctx.fillStyle = bgGradientRef.current ?? '#9FBFB4'
+      ctx.fillRect(0, 0, W, H)
+
+      // ── 0b. Background vignette ───────────────────────────────────────────
       drawVignette(ctx, W, H)
 
       // ── 1. Racetrack — four passes ────────────────────────────────────────
@@ -592,11 +614,16 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       if (trackGeo) {
         drawTrackShadow(ctx, trackGeo)
         drawTrackBody(ctx, trackGeo, trackGradientRef.current)
-        drawTrackHighlight(ctx, trackGeo)
+        // drawTrackHighlight(ctx, trackGeo)
         drawTrackInnerWall(ctx, trackGeo)
       }
 
       // ── 2. Paint layer ────────────────────────────────────────────────────
+      // multiply composites the paint against the track surface beneath it,
+      // so the track gradient stays visible through the paint — outer edge
+      // darkens slightly, inner edge stays bright, giving a 3D painted feel.
+      ctx.save()
+      ctx.globalCompositeOperation = 'multiply'
       if (strokeModeRef.current === 'watercolor') {
         const wLayers = layeredWash.getLayers()
         for (const { canvas: lc } of wLayers) {
@@ -605,6 +632,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       } else {
         ctx.drawImage(paintCanvas, 0, 0, W, H)
       }
+      ctx.restore()
 
       // ── 3. Labels ─────────────────────────────────────────────────────────
       drawLabels(ctx, geo, now)
