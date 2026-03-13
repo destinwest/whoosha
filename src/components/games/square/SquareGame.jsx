@@ -34,7 +34,7 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
   return (
     <div
       className="absolute inset-0 bg-bg-eucalyptus overflow-hidden select-none"
-      style={{ position: 'relative', touchAction: 'none' }}
+      style={{ touchAction: 'none' }}
     >
       {/* back button */}
       <button
