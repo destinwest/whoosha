@@ -29,21 +29,31 @@ function animVal(from, to, duration, ease, onTick, onDone) {
 // ── FadeSettleIntro ────────────────────────────────────────────────────────
 export default function FadeSettleIntro({ onComplete }) {
   const overlayRef = useRef(null);
-  const cancelFns  = useRef([]);
+  // Single collection for all cancel functions — both timeouts and RAF handles.
+  // handleSkip and useEffect cleanup both drain this same array, so neither
+  // can leave a rogue animation or timeout running after the other fires.
+  const cancelFns = useRef([]);
 
   function resetProps() {
     document.documentElement.style.setProperty('--intro-blur',  '0px');
     document.documentElement.style.setProperty('--intro-scale', '1');
   }
 
-  function handleSkip() {
+  function cancelAll() {
     cancelFns.current.forEach(fn => fn());
     cancelFns.current = [];
+  }
+
+  function handleSkip() {
+    cancelAll();
     resetProps();
     if (overlayRef.current) {
       overlayRef.current.style.transition = 'opacity 250ms ease';
       overlayRef.current.style.opacity    = '0';
     }
+    // This final timeout is intentionally short and not cancel-tracked —
+    // once skip fires, the overlay fade is the last thing happening and
+    // onComplete fires 10ms after it ends.
     setTimeout(() => onComplete?.(), 260);
   }
 
@@ -51,14 +61,15 @@ export default function FadeSettleIntro({ onComplete }) {
     document.documentElement.style.setProperty('--intro-blur',  '7px');
     document.documentElement.style.setProperty('--intro-scale', '1.05');
 
-    const timeouts = [];
-
+    // Wrap setTimeout so its cancel function lives in the same collection
+    // as the RAF cancel functions. handleSkip can then cancel everything
+    // in one call, even if it fires before a scheduled step has started.
     function wait(ms, fn) {
       const id = setTimeout(fn, ms);
-      timeouts.push(id);
+      cancelFns.current.push(() => clearTimeout(id));
     }
 
-    // Step 1 — overlay color fade (CSS transition, set once)
+    // Step 1 — overlay color fade (CSS transition, triggered once)
     wait(150, () => {
       if (!overlayRef.current) return;
       overlayRef.current.style.transition =
@@ -86,11 +97,10 @@ export default function FadeSettleIntro({ onComplete }) {
     });
 
     return () => {
-      timeouts.forEach(clearTimeout);
-      cancelFns.current.forEach(fn => fn());
+      cancelAll();
       resetProps();
     };
-  }, [onComplete]);
+  }, [onComplete]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'none' }}>
