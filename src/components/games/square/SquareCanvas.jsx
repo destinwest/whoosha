@@ -259,6 +259,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const bgGradientRef    = useRef(null)   // cached background gradient (rebuilt on resize)
 
   // ── Game state refs ────────────────────────────────────────────────────────
+  const pacingStartRef       = useRef(null)    // clock for pacing circle — starts at mount
   const gameStartRef         = useRef(null)
   const startedRef           = useRef(false)
   const touchRef             = useRef(false)
@@ -279,8 +280,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const lastTouchRef         = useRef({ x: 0, y: 0 })  // last clamped touch position
   const bloomFadeRef         = useRef(1)                // bloom opacity: 1=full, 0=gone
   const bloomFadingRef       = useRef(false)            // true during post-lift fade
+  const bloomAttackRef       = useRef(0)                // 0→1 over attack duration, resets on touch
   const dismissRafRef        = useRef(null)             // RAF handle for dismiss tick
   const bloomFadeRafRef      = useRef(null)             // RAF handle for bloom fade tick
+  const bloomAttackRafRef    = useRef(null)             // RAF handle for bloom attack tick
 
   // ── Fingerprint image loader ────────────────────────────────────────────────
   useEffect(() => {
@@ -310,6 +313,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       lastChildPos.current         = null
       prevFracRef.current          = null
       gameStartRef.current         = null
+      pacingStartRef.current       = performance.now()
       lapColorIdxRef.current       = 0
       lastEncouragementRef.current = -Infinity
       encouragementRef.current     = null
@@ -322,8 +326,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       bloomFadeRef.current         = 1
       bloomFadingRef.current       = false
       lastTouchRef.current         = { x: 0, y: 0 }
+      bloomAttackRef.current       = 0
       cancelAnimationFrame(dismissRafRef.current)
       cancelAnimationFrame(bloomFadeRafRef.current)
+      cancelAnimationFrame(bloomAttackRafRef.current)
     },
   }), [])
 
@@ -464,6 +470,18 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         touchActiveRef.current       = true
         if (pos) lastTouchRef.current = { x: pos.x, y: pos.y }
 
+        // Bloom attack
+        bloomAttackRef.current = 0
+        cancelAnimationFrame(bloomAttackRafRef.current)
+        const attackStart1 = performance.now()
+        function attackTick1(ts) {
+          const t = Math.min(1, (ts - attackStart1) / 180)
+          bloomAttackRef.current = easeOutSoft(t)
+          if (t < 1) bloomAttackRafRef.current = requestAnimationFrame(attackTick1)
+          else bloomAttackRef.current = 1
+        }
+        bloomAttackRafRef.current = requestAnimationFrame(attackTick1)
+
         cancelAnimationFrame(dismissRafRef.current)
         const dismissStart = performance.now()
         function dismissTick(ts) {
@@ -493,6 +511,18 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       bloomFadeRef.current   = 1
       cancelAnimationFrame(bloomFadeRafRef.current)
       if (pos) lastTouchRef.current = { x: pos.x, y: pos.y }
+
+      // Bloom attack
+      bloomAttackRef.current = 0
+      cancelAnimationFrame(bloomAttackRafRef.current)
+      const attackStart2 = performance.now()
+      function attackTick2(ts) {
+        const t = Math.min(1, (ts - attackStart2) / 180)
+        bloomAttackRef.current = easeOutSoft(t)
+        if (t < 1) bloomAttackRafRef.current = requestAnimationFrame(attackTick2)
+        else bloomAttackRef.current = 1
+      }
+      bloomAttackRafRef.current = requestAnimationFrame(attackTick2)
     }
   }
 
@@ -655,6 +685,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       layeredWash.init({ paintCtx, lw, dpr, color, lapColorIdx: idx, clipArgs })
     }
 
+    pacingStartRef.current = performance.now()
     resize()
     const ro = new ResizeObserver(resize)
     ro.observe(canvas)
@@ -710,9 +741,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       ctx.restore()
 
       // ── Pacing position (computed once, shared by fingerprint + pacing circle) ─
-      const pacingPos = startedRef.current
-        ? getPacing(now - gameStartRef.current)
-        : { x: startPt.x, y: startPt.y }
+      // Pacing starts at mount — independent of first touch.
+      const pacingPos = getPacing(now - pacingStartRef.current)
       if (pacingPos) pacingPosRef.current = pacingPos
 
       // ── 3. Touch bloom ────────────────────────────────────────────────────
@@ -721,16 +751,17 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         if (showBloom) {
           const { x: tx, y: ty } = lastTouchRef.current
           const bloomScale = fpDismissingRef.current ? fpDismissTRef.current : 1
-          const bloomAlpha = bloomFadeRef.current
+          const alpha      = bloomAttackRef.current * bloomFadeRef.current
 
           const innerR = lw * 0.4 * bloomScale
           const outerR = lw * 1.1 * bloomScale
 
           if (innerR > 0.5) {
             const inner = ctx.createRadialGradient(tx, ty, 0, tx, ty, innerR)
-            inner.addColorStop(0,   `rgba(255,220,140,${(0.75 * bloomAlpha).toFixed(3)})`)
-            inner.addColorStop(0.4, `rgba(212,160,86,${(0.45 * bloomAlpha).toFixed(3)})`)
-            inner.addColorStop(1,   'rgba(212,160,86,0)')
+            inner.addColorStop(0,    `rgba(255,230,160,${(0.85 * alpha).toFixed(3)})`)
+            inner.addColorStop(0.15, `rgba(255,210,120,${(0.65 * alpha).toFixed(3)})`)
+            inner.addColorStop(0.45, `rgba(212,160,86,${(0.25 * alpha).toFixed(3)})`)
+            inner.addColorStop(1,    'rgba(212,160,86,0)')
             ctx.fillStyle = inner
             ctx.beginPath()
             ctx.arc(tx, ty, innerR, 0, Math.PI * 2)
@@ -739,9 +770,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
 
           if (outerR > 0.5) {
             const outer = ctx.createRadialGradient(tx, ty, innerR * 0.5, tx, ty, outerR)
-            outer.addColorStop(0,   `rgba(212,160,86,${(0.28 * bloomAlpha).toFixed(3)})`)
-            outer.addColorStop(0.5, `rgba(212,160,86,${(0.10 * bloomAlpha).toFixed(3)})`)
-            outer.addColorStop(1,   'rgba(212,160,86,0)')
+            outer.addColorStop(0,    `rgba(212,160,86,${(0.18 * alpha).toFixed(3)})`)
+            outer.addColorStop(0.25, `rgba(212,160,86,${(0.10 * alpha).toFixed(3)})`)
+            outer.addColorStop(0.6,  `rgba(212,160,86,${(0.04 * alpha).toFixed(3)})`)
+            outer.addColorStop(1,    'rgba(212,160,86,0)')
             ctx.fillStyle = outer
             ctx.beginPath()
             ctx.arc(tx, ty, outerR, 0, Math.PI * 2)
@@ -751,8 +783,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       }
 
       // ── 4. Fingerprint indicator ──────────────────────────────────────────
-      if (fpImgReadyRef.current && (fingerprintActiveRef.current || fpDismissingRef.current) && pacingPos) {
-        const { x, y } = pacingPos
+      if (fpImgReadyRef.current && (fingerprintActiveRef.current || fpDismissingRef.current)) {
+        const { x, y } = startPt
         const baseR    = lw * 0.45
         const dismissT = fpDismissTRef.current
         const fpR      = baseR * (1 - dismissT)
@@ -824,6 +856,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       cancelAnimationFrame(rafRef.current)
       cancelAnimationFrame(dismissRafRef.current)
       cancelAnimationFrame(bloomFadeRafRef.current)
+      cancelAnimationFrame(bloomAttackRafRef.current)
       ro.disconnect()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
