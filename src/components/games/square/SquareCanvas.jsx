@@ -281,9 +281,11 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const bloomFadeRef         = useRef(1)                // bloom opacity: 1=full, 0=gone
   const bloomFadingRef       = useRef(false)            // true during post-lift fade
   const bloomAttackRef       = useRef(0)                // 0→1 over attack duration, resets on touch
+  const paintPressureRef     = useRef(0)                // 0→1, ramps up on each new touch
   const dismissRafRef        = useRef(null)             // RAF handle for dismiss tick
   const bloomFadeRafRef      = useRef(null)             // RAF handle for bloom fade tick
   const bloomAttackRafRef    = useRef(null)             // RAF handle for bloom attack tick
+  const paintPressureRafRef  = useRef(null)             // RAF handle for paint pressure ramp
 
   // ── Fingerprint image loader ────────────────────────────────────────────────
   useEffect(() => {
@@ -327,9 +329,11 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       bloomFadingRef.current       = false
       lastTouchRef.current         = { x: 0, y: 0 }
       bloomAttackRef.current       = 0
+      paintPressureRef.current     = 0
       cancelAnimationFrame(dismissRafRef.current)
       cancelAnimationFrame(bloomFadeRafRef.current)
       cancelAnimationFrame(bloomAttackRafRef.current)
+      cancelAnimationFrame(paintPressureRafRef.current)
     },
   }), [])
 
@@ -436,8 +440,24 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     if (strokeModeRef.current === 'watercolor') {
       layeredWash.addPoint(x, y, vel)
     } else {
-      taperedStroke.addPoint(x, y, vel)
+      const jitter = 0.92 + Math.random() * 0.08
+      taperedStroke.addPoint(x, y, vel, paintPressureRef.current, jitter)
     }
+  }
+
+  // ── Paint pressure ramp ────────────────────────────────────────────────────
+  // Called on every pointerdown. Resets pressure to 0 and ramps to 1 over 100ms.
+  function startPressureRamp() {
+    paintPressureRef.current = 0
+    cancelAnimationFrame(paintPressureRafRef.current)
+    const pressureStart = performance.now()
+    function pressureTick(now) {
+      const t = Math.min(1, (now - pressureStart) / 100)
+      paintPressureRef.current = easeOutSoft(t)
+      if (t < 1) paintPressureRafRef.current = requestAnimationFrame(pressureTick)
+      else paintPressureRef.current = 1
+    }
+    paintPressureRafRef.current = requestAnimationFrame(pressureTick)
   }
 
   // ── Pointer handlers ───────────────────────────────────────────────────────
@@ -462,6 +482,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         lastChildPos.current = pos
         prevFracRef.current  = pos?.fraction ?? null
         if (pos) addStrokePoint(pos.x, pos.y, 0)
+        startPressureRamp()
 
         // Dismiss fingerprint, init bloom
         fingerprintActiveRef.current = false
@@ -504,6 +525,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       lastChildPos.current    = pos
       prevFracRef.current     = pos?.fraction ?? null
       if (pos) addStrokePoint(pos.x, pos.y, 0)
+      startPressureRamp()
 
       // Cancel any running bloom fade, restore full bloom
       touchActiveRef.current = true
@@ -857,6 +879,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       cancelAnimationFrame(dismissRafRef.current)
       cancelAnimationFrame(bloomFadeRafRef.current)
       cancelAnimationFrame(bloomAttackRafRef.current)
+      cancelAnimationFrame(paintPressureRafRef.current)
       ro.disconnect()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

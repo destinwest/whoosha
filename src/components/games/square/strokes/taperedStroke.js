@@ -34,7 +34,9 @@ export function init({ paintCtx, lw, dpr, color, lapColorIdx }) {
 // current velocity (CSS px/ms). Velocity is accepted for interface parity with
 // layeredWash but is not used by this module.
 // The first call after init/lift/clear stores the anchor without drawing.
-export function addPoint(x, y, _vel) {
+// pressure (0→1): scales lineWidth and globalAlpha — used for ramp-in on touch.
+// jitter  (0→1): per-point opacity multiplier — used for organic variation.
+export function addPoint(x, y, _vel, pressure = 1, jitter = 1) {
   if (!_ctx) return
   if (_prev === null) {
     _prev = { x, y }
@@ -46,7 +48,8 @@ export function addPoint(x, y, _vel) {
   _ctx.moveTo(_prev.x * d, _prev.y * d)
   _ctx.lineTo(x * d, y * d)
   _ctx.strokeStyle = _color
-  _ctx.lineWidth   = _lw * d
+  _ctx.lineWidth   = _lw * d * pressure
+  _ctx.globalAlpha = pressure * jitter
   _ctx.lineCap     = 'round'
   _ctx.stroke()
   _ctx.restore()
