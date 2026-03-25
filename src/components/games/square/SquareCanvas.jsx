@@ -270,6 +270,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const lastMoveTimeRef      = useRef(0)
   const fpImgRef             = useRef(null)    // loaded Image object
   const fpImgReadyRef        = useRef(false)   // true once image has loaded
+  const fingerprintActiveRef = useRef(true)    // true until first touch
+  const fpDismissTRef        = useRef(0)       // 0→1, used in P3 dismiss animation
+  const fpDismissingRef      = useRef(false)   // true during P3 dismiss animation
 
   // ── Fingerprint image loader ────────────────────────────────────────────────
   useEffect(() => {
@@ -639,24 +642,43 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       }
       ctx.restore()
 
-      // ── 3. Labels ─────────────────────────────────────────────────────────
-      drawLabels(ctx, geo, now)
+      // ── Pacing position (computed once, shared by fingerprint + pacing circle) ─
+      const pacingPos = startedRef.current
+        ? getPacing(now - gameStartRef.current)
+        : { x: startPt.x, y: startPt.y }
+      if (pacingPos) pacingPosRef.current = pacingPos
 
-      // ── 4. Pacing circle ──────────────────────────────────────────────────
-      {
-        const pacingPos = startedRef.current
-          ? getPacing(now - gameStartRef.current)
-          : { x: startPt.x, y: startPt.y }
-        if (pacingPos) {
-          pacingPosRef.current = pacingPos
-          ctx.beginPath()
-          ctx.arc(pacingPos.x, pacingPos.y, lw * 0.62, 0, Math.PI * 2)
-          ctx.fillStyle = 'rgba(255,255,255,0.9)'
-          ctx.fill()
-        }
+      // ── 3. Fingerprint indicator ──────────────────────────────────────────
+      if (fpImgReadyRef.current && fingerprintActiveRef.current && pacingPos) {
+        const { x, y } = pacingPos
+        const fpR = lw * 0.45
+
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, fpR * 1.6)
+        glow.addColorStop(0, 'rgba(212,160,86,0.22)')
+        glow.addColorStop(1, 'rgba(212,160,86,0)')
+        ctx.beginPath()
+        ctx.arc(x, y, fpR * 1.6, 0, Math.PI * 2)
+        ctx.fillStyle = glow
+        ctx.fill()
+
+        const pulse = 0.85 + 0.15 * Math.sin(now / 1000 * Math.PI)
+        ctx.globalAlpha = pulse
+        ctx.drawImage(fpImgRef.current, x - fpR, y - fpR, fpR * 2, fpR * 2)
+        ctx.globalAlpha = 1
       }
 
-      // ── 5. Encouragement moment ───────────────────────────────────────────
+      // ── 4. Labels ─────────────────────────────────────────────────────────
+      drawLabels(ctx, geo, now)
+
+      // ── 5. Pacing circle ──────────────────────────────────────────────────
+      if (pacingPos) {
+        ctx.beginPath()
+        ctx.arc(pacingPos.x, pacingPos.y, lw * 0.62, 0, Math.PI * 2)
+        ctx.fillStyle = 'rgba(255,255,255,0.9)'
+        ctx.fill()
+      }
+
+      // ── 6. Encouragement moment ───────────────────────────────────────────
       const enc = encouragementRef.current
       if (enc) {
         const t = (now - enc.startTime) / 2_000
