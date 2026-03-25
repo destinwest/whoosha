@@ -282,6 +282,11 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const bloomFadingRef       = useRef(false)            // true during post-lift fade
   const bloomAttackRef       = useRef(0)                // 0→1 over attack duration, resets on touch
   const paintPressureRef     = useRef(0)                // 0→1, ramps up on each new touch
+  const particlesRef         = useRef([])               // active particle objects
+  const particleFrameRef     = useRef(0)                // frame counter for emission throttle
+  const lastTouchTimeRef     = useRef(0)                // timestamp of last pointermove
+  const fingerSpeedRef       = useRef(0)                // px/ms, smoothed finger speed
+  const trackTangentRef      = useRef({ x: 1, y: 0 })  // unit vector along track at touch point
   const dismissRafRef        = useRef(null)             // RAF handle for dismiss tick
   const bloomFadeRafRef      = useRef(null)             // RAF handle for bloom fade tick
   const bloomAttackRafRef    = useRef(null)             // RAF handle for bloom attack tick
@@ -330,6 +335,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       lastTouchRef.current         = { x: 0, y: 0 }
       bloomAttackRef.current       = 0
       paintPressureRef.current     = 0
+      particlesRef.current         = []
+      particleFrameRef.current     = 0
+      fingerSpeedRef.current       = 0
       cancelAnimationFrame(dismissRafRef.current)
       cancelAnimationFrame(bloomFadeRafRef.current)
       cancelAnimationFrame(bloomAttackRafRef.current)
@@ -568,13 +576,28 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       taperedStroke.updateColor(color, lapColorIdxRef.current)
       layeredWash.updateColor(color, lapColorIdxRef.current)
       addStrokePoint(pos.x, pos.y, vel)
+
+      // Speed + tangent — capture prev before overwriting
+      const prevTouch = lastTouchRef.current
       lastTouchRef.current = { x: pos.x, y: pos.y }
+
+      const moveDt = now - lastTouchTimeRef.current
+      if (moveDt > 0 && moveDt < 100) {
+        const dx = pos.x - prevTouch.x
+        const dy = pos.y - prevTouch.y
+        const rawSpeed = Math.hypot(dx, dy) / moveDt
+        fingerSpeedRef.current = fingerSpeedRef.current * 0.7 + rawSpeed * 0.3
+        const len = Math.hypot(dx, dy)
+        if (len > 0.5) trackTangentRef.current = { x: dx / len, y: dy / len }
+      }
+      lastTouchTimeRef.current = now
     }
   }
 
   function onPointerUp() {
     touchRef.current       = false
     touchActiveRef.current = false
+    particleFrameRef.current = 0
     taperedStroke.lift()
     layeredWash.lift()
 
@@ -651,6 +674,60 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     }
   }
 
+  // ── Particle helpers ───────────────────────────────────────────────────────
+  function emitParticle(x, y, moving, lw) {
+    const tangent = trackTangentRef.current
+    const normal  = { x: -tangent.y, y: tangent.x }
+
+    let vx, vy
+    if (moving) {
+      const speed       = 0.04 + Math.random() * 0.06
+      const tangentBias = (Math.random() - 0.5) * 2
+      const normalBias  = (Math.random() - 0.5) * 0.6
+      vx = (tangent.x * tangentBias + normal.x * normalBias) * speed
+      vy = (tangent.y * tangentBias + normal.y * normalBias) * speed
+    } else {
+      const angle = Math.random() * Math.PI * 2
+      const speed = 0.02 + Math.random() * 0.03
+      vx = Math.cos(angle) * speed
+      vy = Math.sin(angle) * speed
+    }
+
+    const life = moving
+      ? 500 + Math.random() * 300
+      : 700 + Math.random() * 400
+
+    particlesRef.current.push({ x, y, vx, vy, life, maxLife: life,
+      size: lw * (0.04 + Math.random() * 0.04) })
+
+    if (particlesRef.current.length > 40) particlesRef.current.shift()
+  }
+
+  function updateAndDrawParticles(ctx, lw, dt) {
+    particlesRef.current = particlesRef.current.filter(p => p.life > 0)
+
+    for (const p of particlesRef.current) {
+      p.x    += p.vx * dt
+      p.y    += p.vy * dt
+      p.life -= dt
+      p.vy   -= 0.0002
+
+      const lifeT          = p.life / p.maxLife
+      const particleAlpha  = Math.min(1, lifeT * 3) * lifeT
+      if (particleAlpha < 0.01) continue
+
+      const radius = p.size * (0.6 + lifeT * 0.4)
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius)
+      g.addColorStop(0,   `rgba(255,220,140,${(particleAlpha * 0.9).toFixed(3)})`)
+      g.addColorStop(0.5, `rgba(212,160,86,${(particleAlpha * 0.5).toFixed(3)})`)
+      g.addColorStop(1,   'rgba(212,160,86,0)')
+      ctx.fillStyle = g
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
   // ── Main animation loop ────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current
@@ -712,6 +789,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     const ro = new ResizeObserver(resize)
     ro.observe(canvas)
 
+    let prevFrameTime = 0
+
     function frame() {
       rafRef.current = requestAnimationFrame(frame)
 
@@ -719,6 +798,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       if (!geo) return
 
       const now = performance.now()
+      const dt  = prevFrameTime > 0 ? Math.min(now - prevFrameTime, 50) : 16.67
+      prevFrameTime = now
       onTick?.(now)
 
       const dpr = dprRef.current
@@ -804,7 +885,30 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         }
       }
 
-      // ── 4. Fingerprint indicator ──────────────────────────────────────────
+      // ── 4. Particles ──────────────────────────────────────────────────────
+      if (startedRef.current) {
+        // Decay speed toward zero when finger is still
+        if (touchActiveRef.current && now - lastTouchTimeRef.current > 80) {
+          fingerSpeedRef.current *= 0.85
+        }
+
+        // Emit while finger is down
+        if (touchActiveRef.current) {
+          particleFrameRef.current++
+          const moving       = fingerSpeedRef.current > 0.08
+          const emitInterval = moving ? 2 : 4
+          if (particleFrameRef.current % emitInterval === 0) {
+            emitParticle(lastTouchRef.current.x, lastTouchRef.current.y, moving, lw)
+          }
+        }
+
+        // Update + draw all living particles (even after lift)
+        if (particlesRef.current.length > 0) {
+          updateAndDrawParticles(ctx, lw, dt)
+        }
+      }
+
+      // ── 5. Fingerprint indicator ──────────────────────────────────────────
       if (fpImgReadyRef.current && (fingerprintActiveRef.current || fpDismissingRef.current)) {
         const { x, y } = startPt
         const baseR    = lw * 0.45
@@ -828,10 +932,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         }
       }
 
-      // ── 5. Labels ─────────────────────────────────────────────────────────
+      // ── 6. Labels ─────────────────────────────────────────────────────────
       drawLabels(ctx, geo, now)
 
-      // ── 6. Pacing circle ──────────────────────────────────────────────────
+      // ── 7. Pacing circle ──────────────────────────────────────────────────
       if (pacingPos) {
         ctx.beginPath()
         ctx.arc(pacingPos.x, pacingPos.y, lw * 0.62, 0, Math.PI * 2)
@@ -839,7 +943,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         ctx.fill()
       }
 
-      // ── 7. Encouragement moment ───────────────────────────────────────────
+      // ── 8. Encouragement moment ───────────────────────────────────────────
       const enc = encouragementRef.current
       if (enc) {
         const t = (now - enc.startTime) / 2_000
