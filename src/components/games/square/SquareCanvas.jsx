@@ -51,8 +51,7 @@ function buildGeo(rect) {
   const circleR = sq * 0.0728
   const lw      = circleR * 2 + 8
 
-  const travelPx    = lw * 0.15
-  const amberRadius = lw * 0.35
+  const travelPx = lw * 0.15
 
   const LS = sq - 2 * r
   const LA = (Math.PI * r) / 2
@@ -107,7 +106,7 @@ function buildGeo(rect) {
 
   return {
     cx, cy, sq, half, lw, r, sf,
-    travelPx, amberRadius,
+    travelPx,
     arcCenters, arcStartAngles,
     straightFrom, straightTo,
     startPt, points, labelMids,
@@ -268,10 +267,19 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const pacingPosRef         = useRef(null)
   const lastEncouragementRef = useRef(-Infinity)
   const encouragementRef     = useRef(null)
-  const pulseRef             = useRef(0)
-  const pulseAlpha           = useRef(1)
-  const startLabelAlpha      = useRef(1)
   const lastMoveTimeRef      = useRef(0)
+  const fpImgRef             = useRef(null)    // loaded Image object
+  const fpImgReadyRef        = useRef(false)   // true once image has loaded
+
+  // ── Fingerprint image loader ────────────────────────────────────────────────
+  useEffect(() => {
+    const img = new Image()
+    img.onload = () => {
+      fpImgRef.current      = img
+      fpImgReadyRef.current = true
+    }
+    img.src = '/assets/fingerprint.png'
+  }, [])
 
   // ── Imperative API ─────────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
@@ -292,9 +300,6 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       prevFracRef.current          = null
       gameStartRef.current         = null
       lapColorIdxRef.current       = 0
-      pulseRef.current             = 0
-      pulseAlpha.current           = 1
-      startLabelAlpha.current      = 1
       lastEncouragementRef.current = -Infinity
       encouragementRef.current     = null
     },
@@ -596,7 +601,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const dpr = dprRef.current
       const W   = canvas.width  / dpr
       const H   = canvas.height / dpr
-      const { cx, cy, sq, half, lw, amberRadius, r, startPt } = geo
+      const { cx, cy, sq, half, lw, r, startPt } = geo
 
       ctx.save()
       ctx.scale(dpr, dpr)
@@ -651,55 +656,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         }
       }
 
-      // ── 5. Amber circle ───────────────────────────────────────────────────
-      {
-        const FADE_RATE = 0.033
-        if (startedRef.current) {
-          pulseAlpha.current      = Math.max(0, pulseAlpha.current      - FADE_RATE)
-          startLabelAlpha.current = Math.max(0, startLabelAlpha.current - FADE_RATE)
-        }
-
-        pulseRef.current += 0.05
-        const p = Math.sin(pulseRef.current)
-
-        const displayPos = !startedRef.current
-          ? { x: startPt.x, y: startPt.y }
-          : (lastChildPos.current || { x: startPt.x, y: startPt.y })
-
-        if (pulseAlpha.current > 0) {
-          ctx.beginPath()
-          ctx.arc(displayPos.x, displayPos.y, amberRadius * 1.7 + p * amberRadius * 0.15, 0, Math.PI * 2)
-          ctx.strokeStyle = `rgba(212,160,86,${((0.25 + p * 0.1) * pulseAlpha.current).toFixed(3)})`
-          ctx.lineWidth   = 2.5
-          ctx.stroke()
-
-          ctx.beginPath()
-          ctx.arc(displayPos.x, displayPos.y, amberRadius * 2.3 + p * amberRadius * 0.15, 0, Math.PI * 2)
-          ctx.strokeStyle = `rgba(212,160,86,${((0.12 + p * 0.05) * pulseAlpha.current).toFixed(3)})`
-          ctx.lineWidth   = 2
-          ctx.stroke()
-        }
-
-        ctx.beginPath()
-        ctx.arc(displayPos.x, displayPos.y, amberRadius, 0, Math.PI * 2)
-        ctx.fillStyle = '#D4A056'
-        ctx.fill()
-
-        if (startLabelAlpha.current > 0) {
-          const startFs = Math.max(14, lw * 0.44)
-          ctx.font         = `800 ${startFs}px 'Nunito', sans-serif`
-          ctx.textAlign    = 'center'
-          ctx.textBaseline = 'middle'
-          ctx.strokeStyle  = `rgba(212,160,86,${startLabelAlpha.current.toFixed(3)})`
-          ctx.lineWidth    = 6
-          ctx.lineJoin     = 'round'
-          ctx.strokeText('start', displayPos.x, displayPos.y)
-          ctx.fillStyle    = `rgba(255,255,255,${startLabelAlpha.current.toFixed(3)})`
-          ctx.fillText('start', displayPos.x, displayPos.y)
-        }
-      }
-
-      // ── 6. Encouragement moment ───────────────────────────────────────────
+      // ── 5. Encouragement moment ───────────────────────────────────────────
       const enc = encouragementRef.current
       if (enc) {
         const t = (now - enc.startTime) / 2_000
