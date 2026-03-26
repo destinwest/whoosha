@@ -27,6 +27,7 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
 
   // ── Exit ───────────────────────────────────────────────────────────────────
   function handleExit() {
+    document.documentElement.style.setProperty('--game-saturation', '1')
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     onExit(dur)
   }
@@ -57,12 +58,20 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
         transformOrigin: 'center center',
         willChange: 'transform, filter',
       }}>
-        <SquareCanvas
-          ref={squareCanvasRef}
-          strokeModeRef={strokeModeRef}
-          onGameStart={() => { sessionStartRef.current = Date.now() }}
-          interactive={phase === 'game'}
-        />
+        {/* saturation wrapper — driven by heat gauge via --game-saturation */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          filter: 'saturate(var(--game-saturation, 1))',
+          willChange: 'filter',
+        }}>
+          <SquareCanvas
+            ref={squareCanvasRef}
+            strokeModeRef={strokeModeRef}
+            onGameStart={() => { sessionStartRef.current = Date.now() }}
+            interactive={phase === 'game'}
+          />
+        </div>
       </div>
 
       {/* stroke selector — game phase only */}

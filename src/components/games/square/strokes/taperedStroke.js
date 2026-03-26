@@ -17,6 +17,7 @@ let _lw          = 0      // track width in CSS px
 let _dpr         = 1      // device pixel ratio
 let _color       = '#000' // current stroke color (CSS string)
 let _prev        = null   // { x, y } previous point in CSS px, null = pen up
+let _strokeScale = 1      // 0→1 multiplier applied to line width — set by heat gauge each frame
 
 // ── init ─────────────────────────────────────────────────────────────────────
 // Called once on mount and again whenever geometry changes (resize).
@@ -43,17 +44,26 @@ export function addPoint(x, y, _vel, pressure = 1, jitter = 1) {
     return
   }
   const d = _dpr
+  const strokeWidth = _lw * d * _strokeScale
+  if (strokeWidth < 0.5) { _prev = { x, y }; return }
   _ctx.save()
   _ctx.beginPath()
   _ctx.moveTo(_prev.x * d, _prev.y * d)
   _ctx.lineTo(x * d, y * d)
   _ctx.strokeStyle = _color
-  _ctx.lineWidth   = _lw * d
+  _ctx.lineWidth   = strokeWidth * pressure
   _ctx.globalAlpha = pressure * jitter
   _ctx.lineCap     = 'round'
   _ctx.stroke()
   _ctx.restore()
   _prev = { x, y }
+}
+
+// ── setStrokeScale ────────────────────────────────────────────────────────────
+// Called once per frame by the heat gauge system. All subsequent addPoint calls
+// use this scale until it is updated again. 1 = full width, 0 = no stroke.
+export function setStrokeScale(scale) {
+  _strokeScale = scale
 }
 
 // ── updateColor ───────────────────────────────────────────────────────────────

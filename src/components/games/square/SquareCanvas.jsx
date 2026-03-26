@@ -298,11 +298,12 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const bloomAttackRafRef    = useRef(null)             // RAF handle for bloom attack tick
   const paintPressureRafRef  = useRef(null)             // RAF handle for paint pressure ramp
 
-  // ── Cumulative distance tracking (for heat gauge — used in R3) ─────────────
+  // ── Cumulative distance tracking + heat gauge ─────────────────────────────
   const pacingDistRef        = useRef(0)     // total path length traveled by pacing circle since game start
   const childDistRef         = useRef(0)     // total path length traced by child since game start
   const lastChildPathPosRef  = useRef(null)  // previous frame's normalized path position (0–1)
   const leadDistRef          = useRef(0)     // childDist - pacingDist; positive = child ahead
+  const heatGaugeRef         = useRef(0)     // 0.0–1.0, invisible gauge — charges when child races ahead
 
   // ── Fingerprint image loader ────────────────────────────────────────────────
   useEffect(() => {
@@ -359,6 +360,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       childDistRef.current        = 0
       lastChildPathPosRef.current = null
       leadDistRef.current         = 0
+      heatGaugeRef.current        = 0
+      taperedStroke.setStrokeScale(1)
+      document.documentElement.style.setProperty('--game-saturation', '1')
     },
   }), [])
 
@@ -825,6 +829,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const H   = canvas.height / dpr
       const { cx, cy, sq, half, lw, r, startPt } = geo
 
+      // ── Heat gauge effect (computed from previous frame's gauge value) ────
+      const _g          = heatGaugeRef.current
+      const gaugeEffect = _g < 0.3 ? 0 : Math.pow((_g - 0.3) / 0.7, 2)
+
       ctx.save()
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, W, H)
@@ -849,8 +857,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       // multiply composites the paint against the track surface beneath it,
       // so the track gradient stays visible through the paint — outer edge
       // darkens slightly, inner edge stays bright, giving a 3D painted feel.
+      // globalAlpha drains as heat gauge climbs — paint fades from track.
       ctx.save()
       ctx.globalCompositeOperation = 'multiply'
+      ctx.globalAlpha = 1 - gaugeEffect * 0.95
       if (strokeModeRef.current === 'watercolor') {
         const wLayers = layeredWash.getLayers()
         for (const { canvas: lc } of wLayers) {
@@ -890,6 +900,37 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         }
 
         leadDistRef.current = childDistRef.current - pacingDistRef.current
+
+        // ── Heat gauge update ──────────────────────────────────────────────
+        const childLapCount = Math.floor(childDistRef.current / totalPathLength)
+
+        const gaugeAlreadyDone = childLapCount >= 6 && heatGaugeRef.current === 0
+        if (!gaugeAlreadyDone) {
+          if (childLapCount >= 6) {
+            // Lap 6 complete — drain to zero over 2 seconds regardless of position
+            heatGaugeRef.current = Math.max(0, heatGaugeRef.current - (1 / 2000) * dt)
+          } else {
+            const lead           = leadDistRef.current
+            const leadLaps       = lead / totalPathLength
+            const CLOSE_THRESHOLD = 0.1
+            const MAX_CHARGE_RATE = 1 / 32000
+            const DRAIN_RATE      = 1 / 16000
+
+            if (leadLaps > CLOSE_THRESHOLD) {
+              const chargeFactor = Math.min(leadLaps / 2, 1)
+              heatGaugeRef.current = Math.min(1, heatGaugeRef.current + MAX_CHARGE_RATE * chargeFactor * dt)
+            } else {
+              heatGaugeRef.current = Math.max(0, heatGaugeRef.current - DRAIN_RATE * dt)
+            }
+            heatGaugeRef.current = Math.max(0, Math.min(1, heatGaugeRef.current))
+          }
+        }
+
+        // Stroke scale and world saturation — updated each frame for next pointer event
+        const newG   = heatGaugeRef.current
+        const newGFx = newG < 0.3 ? 0 : Math.pow((newG - 0.3) / 0.7, 2)
+        taperedStroke.setStrokeScale(1 - newGFx)
+        document.documentElement.style.setProperty('--game-saturation', (1 - newGFx * 0.55).toFixed(3))
       }
 
       // ── 3. Touch bloom ────────────────────────────────────────────────────
