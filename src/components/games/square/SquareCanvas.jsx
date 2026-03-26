@@ -106,12 +106,18 @@ function buildGeo(rect) {
     y: (a.y + straightTo[i].y) / 2,
   }))
 
+  let totalPathLength = 0
+  for (let i = 0; i < N; i++) {
+    totalPathLength += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y)
+  }
+
   return {
     cx, cy, sq, half, lw, r, sf,
     travelPx,
     arcCenters, arcStartAngles,
     straightFrom, straightTo,
     startPt, points, labelMids,
+    totalPathLength,
     w, h,
   }
 }
@@ -292,6 +298,12 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const bloomAttackRafRef    = useRef(null)             // RAF handle for bloom attack tick
   const paintPressureRafRef  = useRef(null)             // RAF handle for paint pressure ramp
 
+  // ── Cumulative distance tracking (for heat gauge — used in R3) ─────────────
+  const pacingDistRef        = useRef(0)     // total path length traveled by pacing circle since game start
+  const childDistRef         = useRef(0)     // total path length traced by child since game start
+  const lastChildPathPosRef  = useRef(null)  // previous frame's normalized path position (0–1)
+  const leadDistRef          = useRef(0)     // childDist - pacingDist; positive = child ahead
+
   // ── Fingerprint image loader ────────────────────────────────────────────────
   useEffect(() => {
     const img = new Image()
@@ -342,6 +354,11 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       cancelAnimationFrame(bloomFadeRafRef.current)
       cancelAnimationFrame(bloomAttackRafRef.current)
       cancelAnimationFrame(paintPressureRafRef.current)
+
+      pacingDistRef.current       = 0
+      childDistRef.current        = 0
+      lastChildPathPosRef.current = null
+      leadDistRef.current         = 0
     },
   }), [])
 
@@ -595,9 +612,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   }
 
   function onPointerUp() {
-    touchRef.current       = false
-    touchActiveRef.current = false
-    particleFrameRef.current = 0
+    touchRef.current            = false
+    touchActiveRef.current      = false
+    particleFrameRef.current    = 0
+    lastChildPathPosRef.current = null
     taperedStroke.lift()
     layeredWash.lift()
 
@@ -847,6 +865,32 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       // Pacing starts at mount — independent of first touch.
       const pacingPos = getPacing(now - pacingStartRef.current)
       if (pacingPos) pacingPosRef.current = pacingPos
+
+      // ── Cumulative distance tracking ──────────────────────────────────────
+      if (startedRef.current) {
+        const { totalPathLength } = geo
+        const elapsed = now - gameStartRef.current
+
+        // Pacing circle: deterministic linear advance since first touch
+        pacingDistRef.current = (elapsed / CYCLE_MS) * totalPathLength
+
+        // Child: accumulate only forward movement while touching
+        const childPos = childPosRef.current
+        if (touchRef.current && childPos) {
+          const childPathT = childPos.fraction / 4
+          if (lastChildPathPosRef.current !== null) {
+            let delta = childPathT - lastChildPathPosRef.current
+            if (delta < -0.5) delta += 1  // crossed lap boundary forward
+            if (delta > 0.5)  delta -= 1  // guard against backward wrap
+            if (delta > 0) {
+              childDistRef.current += delta * totalPathLength
+            }
+          }
+          lastChildPathPosRef.current = childPathT
+        }
+
+        leadDistRef.current = childDistRef.current - pacingDistRef.current
+      }
 
       // ── 3. Touch bloom ────────────────────────────────────────────────────
       {

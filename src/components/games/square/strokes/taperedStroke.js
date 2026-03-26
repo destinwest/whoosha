@@ -48,7 +48,7 @@ export function addPoint(x, y, _vel, pressure = 1, jitter = 1) {
   _ctx.moveTo(_prev.x * d, _prev.y * d)
   _ctx.lineTo(x * d, y * d)
   _ctx.strokeStyle = _color
-  _ctx.lineWidth   = _lw * d * pressure
+  _ctx.lineWidth   = _lw * d
   _ctx.globalAlpha = pressure * jitter
   _ctx.lineCap     = 'round'
   _ctx.stroke()
