@@ -19,6 +19,22 @@ import * as layeredWash   from './strokes/layeredWash'
 // ── Constants ─────────────────────────────────────────────────────────────────
 const LAP_COLORS   = ['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']
 const CYCLE_MS     = 16_000
+
+// ── Heat gauge tuning — adjust these without touching any other code ──────────
+// Charge: how fast gauge fills when child is ahead of pacing circle
+//   MAX_CHARGE_RATE: gauge units per ms at 2-lap lead. 1/32000 = fills in 32s at max.
+//   Increase to charge faster (more punishing). Decrease to charge slower.
+const GAUGE_MAX_CHARGE_RATE = 1 / 3200   // 10× faster than spec for testing; restore to 1/32000
+// Drain: how fast gauge empties when child is following closely
+//   DRAIN_RATE: gauge units per ms. 1/16000 = drains in 16s = ~1 lap.
+//   Increase for quicker recovery. Decrease for slower recovery.
+const GAUGE_DRAIN_RATE      = 1 / 4000  // slightly faster drain; restore to 1/16000
+// Lead threshold: how far ahead (in lap fractions) before gauge starts charging
+//   CLOSE_THRESHOLD: 0.1 = must be 10% of a lap ahead before charging begins.
+const GAUGE_CLOSE_THRESHOLD = 0.05      // more sensitive for testing; restore to 0.1
+// Effect threshold: gauge value below which NO visible effect appears
+//   Increase to delay effects longer. Decrease to show effects sooner.
+const GAUGE_EFFECT_THRESHOLD = 0.2      // lower for testing; restore to 0.3
 const LABEL_TEXTS  = ['breathe in', 'hold', 'breathe out', 'hold']
 const LABEL_ANGLES = [0, -Math.PI / 2, 0, Math.PI / 2]
 const ALPHA_ACTIVE = 0.75
@@ -831,7 +847,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
 
       // ── Heat gauge effect (computed from previous frame's gauge value) ────
       const _g          = heatGaugeRef.current
-      const gaugeEffect = _g < 0.3 ? 0 : Math.pow((_g - 0.3) / 0.7, 2)
+      const _th         = GAUGE_EFFECT_THRESHOLD
+      const gaugeEffect = _g < _th ? 0 : Math.pow((_g - _th) / (1 - _th), 2)
 
       ctx.save()
       ctx.scale(dpr, dpr)
@@ -910,17 +927,14 @@ const SquareCanvas = forwardRef(function SquareCanvas(
             // Lap 6 complete — drain to zero over 2 seconds regardless of position
             heatGaugeRef.current = Math.max(0, heatGaugeRef.current - (1 / 2000) * dt)
           } else {
-            const lead           = leadDistRef.current
-            const leadLaps       = lead / totalPathLength
-            const CLOSE_THRESHOLD = 0.1
-            const MAX_CHARGE_RATE = 1 / 32000
-            const DRAIN_RATE      = 1 / 16000
+            const lead     = leadDistRef.current
+            const leadLaps = lead / totalPathLength
 
-            if (leadLaps > CLOSE_THRESHOLD) {
+            if (leadLaps > GAUGE_CLOSE_THRESHOLD) {
               const chargeFactor = Math.min(leadLaps / 2, 1)
-              heatGaugeRef.current = Math.min(1, heatGaugeRef.current + MAX_CHARGE_RATE * chargeFactor * dt)
+              heatGaugeRef.current = Math.min(1, heatGaugeRef.current + GAUGE_MAX_CHARGE_RATE * chargeFactor * dt)
             } else {
-              heatGaugeRef.current = Math.max(0, heatGaugeRef.current - DRAIN_RATE * dt)
+              heatGaugeRef.current = Math.max(0, heatGaugeRef.current - GAUGE_DRAIN_RATE * dt)
             }
             heatGaugeRef.current = Math.max(0, Math.min(1, heatGaugeRef.current))
           }
@@ -928,7 +942,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
 
         // Stroke scale and world saturation — updated each frame for next pointer event
         const newG   = heatGaugeRef.current
-        const newGFx = newG < 0.3 ? 0 : Math.pow((newG - 0.3) / 0.7, 2)
+        const newGFx = newG < _th ? 0 : Math.pow((newG - _th) / (1 - _th), 2)
         taperedStroke.setStrokeScale(1 - newGFx)
         document.documentElement.style.setProperty('--game-saturation', (1 - newGFx * 0.55).toFixed(3))
       }
