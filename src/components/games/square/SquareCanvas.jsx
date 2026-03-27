@@ -526,7 +526,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         childPosRef.current  = pos
         lastChildPos.current = pos
         prevFracRef.current  = pos?.fraction ?? null
-        if (pos) addStrokePoint(pos.x, pos.y, 0)
+        if (pos) addStrokePoint(pos.clx, pos.cly, 0)
         startPressureRamp()
 
         // Dismiss fingerprint, init bloom
@@ -569,7 +569,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       childPosRef.current     = pos
       lastChildPos.current    = pos
       prevFracRef.current     = pos?.fraction ?? null
-      if (pos) addStrokePoint(pos.x, pos.y, 0)
+      if (pos) addStrokePoint(pos.clx, pos.cly, 0)
       startPressureRamp()
 
       // Cancel any running bloom fade, restore full bloom
@@ -612,7 +612,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const color = getLapColor(pos.fraction)
       taperedStroke.updateColor(color, lapColorIdxRef.current)
       layeredWash.updateColor(color, lapColorIdxRef.current)
-      addStrokePoint(pos.x, pos.y, vel)
+      addStrokePoint(pos.clx, pos.cly, vel)
 
       // Speed + tangent — capture prev before overwriting
       const prevTouch = lastTouchRef.current
