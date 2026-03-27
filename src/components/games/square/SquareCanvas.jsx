@@ -991,7 +991,18 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         }
       }
 
-      // ── 5. Fingerprint indicator ──────────────────────────────────────────
+      // ── 5. Labels ─────────────────────────────────────────────────────────
+      drawLabels(ctx, geo, now)
+
+      // ── 6. Pacing circle ──────────────────────────────────────────────────
+      if (pacingPos) {
+        ctx.beginPath()
+        ctx.arc(pacingPos.x, pacingPos.y, lw * 0.62, 0, Math.PI * 2)
+        ctx.fillStyle = 'rgba(255,255,255,0.9)'
+        ctx.fill()
+      }
+
+      // ── 7. Fingerprint indicator (above pacing circle) ────────────────────
       if (fpImgReadyRef.current && pacingPos && (fingerprintActiveRef.current || fpDismissingRef.current)) {
         const { x, y } = pacingPos
         const baseR    = lw * 0.45
@@ -1013,17 +1024,6 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           ctx.drawImage(fpImgRef.current, x - fpR, y - fpR, fpR * 2, fpR * 2)
           ctx.globalAlpha = 1
         }
-      }
-
-      // ── 6. Labels ─────────────────────────────────────────────────────────
-      drawLabels(ctx, geo, now)
-
-      // ── 7. Pacing circle ──────────────────────────────────────────────────
-      if (pacingPos) {
-        ctx.beginPath()
-        ctx.arc(pacingPos.x, pacingPos.y, lw * 0.62, 0, Math.PI * 2)
-        ctx.fillStyle = 'rgba(255,255,255,0.9)'
-        ctx.fill()
       }
 
       // ── 8. Encouragement moment ───────────────────────────────────────────
