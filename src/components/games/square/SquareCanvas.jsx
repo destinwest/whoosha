@@ -69,8 +69,6 @@ function buildGeo(rect) {
   const circleR = sq * 0.0728
   const lw      = circleR * 2 + 8
 
-  const travelPx = lw * 0.15
-
   const LS = sq - 2 * r
   const LA = (Math.PI * r) / 2
   const sf = LS / (LS + LA)
@@ -115,8 +113,6 @@ function buildGeo(rect) {
     }
   }
 
-  const startPt = { x: straightFrom[0].x, y: straightFrom[0].y }
-
   const labelMids = straightFrom.map((a, i) => ({
     x: (a.x + straightTo[i].x) / 2,
     y: (a.y + straightTo[i].y) / 2,
@@ -129,10 +125,9 @@ function buildGeo(rect) {
 
   return {
     cx, cy, sq, half, lw, r, sf,
-    travelPx,
     arcCenters, arcStartAngles,
     straightFrom, straightTo,
-    startPt, points, labelMids,
+    points, labelMids,
     totalPathLength,
     w, h,
   }
@@ -415,13 +410,15 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     }
   }
 
-  // ── Project finger onto path, clamp lateral drift ─────────────────────────
+  // ── Project finger onto path ───────────────────────────────────────────────
+  // Returns the nearest centerline point plus fraction. Returns null if the
+  // touch is outside the acceptance zone (lw * 0.75 from centerline).
   function project(px, py) {
     const geo = geoRef.current
     if (!geo) return null
-    const { points, travelPx } = geo
+    const { points, lw } = geo
     const N    = points.length - 1
-    let   best = { dist: Infinity, x: 0, y: 0, fraction: 0, tdx: 1, tdy: 0 }
+    let   best = { dist: Infinity, x: 0, y: 0, fraction: 0 }
 
     for (let i = 0; i < N; i++) {
       const a   = points[i]
@@ -435,26 +432,20 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const ny = a.y + t * dy
       const d  = Math.hypot(px - nx, py - ny)
       if (d < best.dist) {
-        best = { dist: d, x: nx, y: ny, fraction: (i + t) / N * 4, tdx: dx, tdy: dy }
+        best = { dist: d, x: nx, y: ny, fraction: (i + t) / N * 4 }
       }
     }
 
-    const { x: clx, y: cly, fraction, tdx, tdy } = best
-    const tLen = Math.hypot(tdx, tdy)
-    const tx   = tdx / tLen
-    const ty   = tdy / tLen
-    const nx   = -ty
-    const ny   =  tx
-
-    const lateralOffset = (px - clx) * nx + (py - cly) * ny
-    const clampedOffset = Math.max(-travelPx, Math.min(travelPx, lateralOffset))
+    // Reject touches outside the track acceptance zone
+    if (best.dist > lw * 0.75) return null
 
     return {
-      dist: best.dist,
-      x: clx + nx * clampedOffset,
-      y: cly + ny * clampedOffset,
-      clx, cly,
-      fraction,
+      dist:     best.dist,
+      x:        best.x,
+      y:        best.y,
+      clx:      best.x,
+      cly:      best.y,
+      fraction: best.fraction,
     }
   }
 
@@ -505,6 +496,21 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     paintPressureRafRef.current = requestAnimationFrame(pressureTick)
   }
 
+  // ── Bloom attack ramp ──────────────────────────────────────────────────────
+  // Called on every pointerdown. Ramps bloomAttackRef from 0 to 1 over 180ms.
+  function startBloomAttack() {
+    bloomAttackRef.current = 0
+    cancelAnimationFrame(bloomAttackRafRef.current)
+    const attackStart = performance.now()
+    function attackTick(ts) {
+      const t = Math.min(1, (ts - attackStart) / 180)
+      bloomAttackRef.current = easeOutSoft(t)
+      if (t < 1) bloomAttackRafRef.current = requestAnimationFrame(attackTick)
+      else bloomAttackRef.current = 1
+    }
+    bloomAttackRafRef.current = requestAnimationFrame(attackTick)
+  }
+
   // ── Pointer handlers ───────────────────────────────────────────────────────
   function getRawPos(e) {
     const rect = canvasRef.current.getBoundingClientRect()
@@ -513,83 +519,61 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   }
 
   function onPointerDown(px, py) {
-    const geo = geoRef.current
-    if (!geo) return
+    if (!geoRef.current) return
+
+    const pos = project(px, py)
+    if (!pos) return   // outside acceptance zone — silent rejection
+
     if (!startedRef.current) {
-      if (Math.hypot(px - geo.startPt.x, py - geo.startPt.y) <= geo.lw) {
-        startedRef.current      = true
-        gameStartRef.current    = performance.now()
-        touchRef.current        = true
-        lastMoveTimeRef.current = performance.now()
-        onGameStart?.()
-        const pos = project(px, py)
-        childPosRef.current  = pos
-        lastChildPos.current = pos
-        prevFracRef.current  = pos?.fraction ?? null
-        if (pos) addStrokePoint(pos.clx, pos.cly, 0)
-        startPressureRamp()
+      startedRef.current      = true
+      gameStartRef.current    = performance.now()
+      touchRef.current        = true
+      lastMoveTimeRef.current = performance.now()
+      onGameStart?.()
+      childPosRef.current  = pos
+      lastChildPos.current = pos
+      prevFracRef.current  = pos.fraction
+      addStrokePoint(pos.clx, pos.cly, 0)
+      startPressureRamp()
 
-        // Dismiss fingerprint, init bloom
-        fingerprintActiveRef.current = false
-        fpDismissingRef.current      = true
-        fpDismissTRef.current        = 0
-        touchActiveRef.current       = true
-        if (pos) lastTouchRef.current = { x: pos.x, y: pos.y }
+      fingerprintActiveRef.current = false
+      fpDismissingRef.current      = true
+      fpDismissTRef.current        = 0
+      touchActiveRef.current       = true
+      lastTouchRef.current         = { x: pos.x, y: pos.y }
 
-        // Bloom attack
-        bloomAttackRef.current = 0
-        cancelAnimationFrame(bloomAttackRafRef.current)
-        const attackStart1 = performance.now()
-        function attackTick1(ts) {
-          const t = Math.min(1, (ts - attackStart1) / 180)
-          bloomAttackRef.current = easeOutSoft(t)
-          if (t < 1) bloomAttackRafRef.current = requestAnimationFrame(attackTick1)
-          else bloomAttackRef.current = 1
+      startBloomAttack()
+
+      cancelAnimationFrame(dismissRafRef.current)
+      const dismissStart = performance.now()
+      function dismissTick(ts) {
+        const t = Math.min(1, (ts - dismissStart) / 400)
+        fpDismissTRef.current = easeIn(t)
+        if (t < 1) {
+          dismissRafRef.current = requestAnimationFrame(dismissTick)
+        } else {
+          fpDismissingRef.current = false
+          fpDismissTRef.current   = 1
         }
-        bloomAttackRafRef.current = requestAnimationFrame(attackTick1)
-
-        cancelAnimationFrame(dismissRafRef.current)
-        const dismissStart = performance.now()
-        function dismissTick(ts) {
-          const t = Math.min(1, (ts - dismissStart) / 400)
-          fpDismissTRef.current = easeIn(t)
-          if (t < 1) {
-            dismissRafRef.current = requestAnimationFrame(dismissTick)
-          } else {
-            fpDismissingRef.current = false
-            fpDismissTRef.current   = 1
-          }
-        }
-        dismissRafRef.current = requestAnimationFrame(dismissTick)
       }
+      dismissRafRef.current = requestAnimationFrame(dismissTick)
+
     } else {
       touchRef.current        = true
       lastMoveTimeRef.current = performance.now()
-      const pos               = project(px, py)
       childPosRef.current     = pos
       lastChildPos.current    = pos
-      prevFracRef.current     = pos?.fraction ?? null
-      if (pos) addStrokePoint(pos.clx, pos.cly, 0)
+      prevFracRef.current     = pos.fraction
+      addStrokePoint(pos.clx, pos.cly, 0)
       startPressureRamp()
 
-      // Cancel any running bloom fade, restore full bloom
       touchActiveRef.current = true
       bloomFadingRef.current = false
       bloomFadeRef.current   = 1
       cancelAnimationFrame(bloomFadeRafRef.current)
-      if (pos) lastTouchRef.current = { x: pos.x, y: pos.y }
+      lastTouchRef.current   = { x: pos.x, y: pos.y }
 
-      // Bloom attack
-      bloomAttackRef.current = 0
-      cancelAnimationFrame(bloomAttackRafRef.current)
-      const attackStart2 = performance.now()
-      function attackTick2(ts) {
-        const t = Math.min(1, (ts - attackStart2) / 180)
-        bloomAttackRef.current = easeOutSoft(t)
-        if (t < 1) bloomAttackRafRef.current = requestAnimationFrame(attackTick2)
-        else bloomAttackRef.current = 1
-      }
-      bloomAttackRafRef.current = requestAnimationFrame(attackTick2)
+      startBloomAttack()
     }
   }
 
@@ -843,7 +827,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const dpr = dprRef.current
       const W   = canvas.width  / dpr
       const H   = canvas.height / dpr
-      const { cx, cy, sq, half, lw, r, startPt } = geo
+      const { cx, cy, sq, half, lw, r } = geo
 
       // ── Heat gauge effect (computed from previous frame's gauge value) ────
       const _g          = heatGaugeRef.current
@@ -1008,8 +992,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       }
 
       // ── 5. Fingerprint indicator ──────────────────────────────────────────
-      if (fpImgReadyRef.current && (fingerprintActiveRef.current || fpDismissingRef.current)) {
-        const { x, y } = startPt
+      if (fpImgReadyRef.current && pacingPos && (fingerprintActiveRef.current || fpDismissingRef.current)) {
+        const { x, y } = pacingPos
         const baseR    = lw * 0.45
         const dismissT = fpDismissTRef.current
         const fpR      = baseR * (1 - dismissT)
