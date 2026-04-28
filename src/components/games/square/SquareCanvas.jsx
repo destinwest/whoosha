@@ -20,6 +20,10 @@ import * as layeredWash   from './strokes/layeredWash'
 const LAP_COLORS   = ['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']
 const CYCLE_MS     = 16_000
 
+// Time for one full LAP_COLORS cycle in ms of active tracing.
+// 72 000ms = ~72 seconds — roughly four laps at pacing speed.
+const COLOR_CYCLE_MS = 72_000
+
 // Maximum path advancement per pointer event — prevents corner-cut visual gaps.
 // Expressed as a multiplier of lw; 0.5 = half a track width of path per event.
 // At normal tracing speed and 60fps this cap is never reached.
@@ -276,7 +280,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const touchRef             = useRef(false)
   const childPosRef          = useRef(null)
   const lastChildPos         = useRef(null)
-  const lapColorIdxRef       = useRef(0)
+  const lapCountRef          = useRef(0)   // laps completed — used only for encouragement gate
+  const colorTimeRef         = useRef(0)   // ms of active tracing time — drives color drift
   const prevFracRef          = useRef(null)
   const pacingPosRef         = useRef(null)
   const lastEncouragementRef = useRef(-Infinity)
@@ -340,7 +345,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       prevFracRef.current          = null
       gameStartRef.current         = null
       pacingStartRef.current       = performance.now()
-      lapColorIdxRef.current       = 0
+      lapCountRef.current          = 0
+      colorTimeRef.current         = 0
       lastEncouragementRef.current = -Infinity
       encouragementRef.current     = null
 
@@ -373,13 +379,13 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   }), [])
 
   // ── Lap color ──────────────────────────────────────────────────────────────
-  function getLapColor(fraction) {
-    const idx = lapColorIdxRef.current
-    return lerpColor(
-      LAP_COLORS[idx       % LAP_COLORS.length],
-      LAP_COLORS[(idx + 1) % LAP_COLORS.length],
-      fraction / 4,
-    )
+  function getDriftColor(colorTime) {
+    const n          = LAP_COLORS.length
+    const colorPos   = ((colorTime % COLOR_CYCLE_MS) / COLOR_CYCLE_MS) * n
+    const colorIdxA  = Math.floor(colorPos) % n
+    const colorIdxB  = (colorIdxA + 1) % n
+    const colorBlend = colorPos - Math.floor(colorPos)
+    return lerpColor(LAP_COLORS[colorIdxA], LAP_COLORS[colorIdxB], colorBlend)
   }
 
   // ── Pacing circle position ─────────────────────────────────────────────────
@@ -496,13 +502,13 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   }
 
   function onLapComplete() {
-    lapColorIdxRef.current++
+    lapCountRef.current++
     const now    = performance.now()
     const pacing = pacingPosRef.current
     const child  = childPosRef.current
     if (pacing && child) {
       const dist = Math.hypot(child.clx - pacing.x, child.cly - pacing.y)
-      if (lapColorIdxRef.current > 1 && dist <= 60 && now - lastEncouragementRef.current > 30_000) {
+      if (lapCountRef.current > 1 && dist <= 60 && now - lastEncouragementRef.current > 30_000) {
         encouragementRef.current     = { startTime: now }
         lastEncouragementRef.current = now
       }
@@ -661,9 +667,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       childPosRef.current = { x: paintX, y: paintY, clx: paintX, cly: paintY, fraction: capped.fraction }
       prevFracRef.current = capped.fraction
 
-      const color = getLapColor(pos.fraction)
-      stampStroke.updateColor(color, lapColorIdxRef.current)
-      layeredWash.updateColor(color, lapColorIdxRef.current)
+      const color = getDriftColor(colorTimeRef.current)
+      stampStroke.updateColor(color)
+      layeredWash.updateColor(color)
       addStrokePoint(paintX, paintY, vel)
 
       // Speed + tangent — capture prev before overwriting
@@ -818,14 +824,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       trackGradientRef.current = buildTrackGradient(ctx, trackGeo)
       bgGradientRef.current    = buildBgGradient(ctx, rect.width, rect.height)
 
-      const idx   = lapColorIdxRef.current
-      const color = lerpColor(
-        LAP_COLORS[idx       % LAP_COLORS.length],
-        LAP_COLORS[(idx + 1) % LAP_COLORS.length],
-        0,
-      )
-      stampStroke.init({ paintCtx, lw, dpr, color, lapColorIdx: idx })
-      layeredWash.init({ paintCtx, lw, dpr, color, lapColorIdx: idx, clipArgs })
+      const color = getDriftColor(colorTimeRef.current)
+      stampStroke.init({ paintCtx, lw, dpr, color })
+      layeredWash.init({ paintCtx, lw, dpr, color, clipArgs })
     }
 
     pacingStartRef.current = performance.now()
@@ -895,6 +896,18 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       // Pacing starts at mount — independent of first touch.
       const pacingPos = getPacing(now - pacingStartRef.current)
       if (pacingPos) pacingPosRef.current = pacingPos
+
+      // ── Color drift ───────────────────────────────────────────────────────
+      // Advance timer only while finger is on track; compute color every frame
+      // so stamps always use the current drifted value.
+      if (startedRef.current && touchRef.current) {
+        colorTimeRef.current += dt
+      }
+      if (startedRef.current) {
+        const driftColor = getDriftColor(colorTimeRef.current)
+        stampStroke.updateColor(driftColor)
+        layeredWash.updateColor(driftColor)
+      }
 
       // ── Heat gauge update ─────────────────────────────────────────────────
       if (startedRef.current) {
