@@ -23,11 +23,24 @@ function SquareIcon({ fill = 'none' }) {
   )
 }
 
-function InfinityIcon() {
+function DragonIcon() {
   return (
     <svg viewBox="0 0 64 64" fill="none" stroke="#3E5E52" strokeWidth="3.5"
       strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="w-14 h-14">
-      <path d="M32 32 C40 22 54 22 54 32 C54 42 40 42 32 32 C24 22 10 22 10 32 C10 42 24 42 32 32 Z" />
+      {/* Body */}
+      <ellipse cx="30" cy="38" rx="16" ry="12" />
+      {/* Head */}
+      <circle cx="44" cy="24" r="9" />
+      {/* Snout */}
+      <path d="M50 22 Q56 20 56 26 Q56 30 50 28" />
+      {/* Eye */}
+      <circle cx="46" cy="22" r="1.5" fill="#3E5E52" stroke="none" />
+      {/* Wing */}
+      <path d="M22 32 Q12 20 16 12 Q22 18 26 28" />
+      {/* Tail */}
+      <path d="M16 42 Q8 46 10 54 Q16 50 20 44" />
+      {/* Flame — small, from snout */}
+      <path d="M56 24 Q62 22 60 18 Q58 22 56 20 Q60 16 57 12 Q54 16 55 20 Q52 16 54 24" fill="#3E5E52" stroke="none" />
     </svg>
   )
 }
@@ -83,12 +96,13 @@ const GAMES = [
     focalPoint: { x: 0.807, y: 0.807 },
   },
   {
-    id: 'infinity',
-    label: 'Infinity Breathing',
-    description: 'Follow the endless flow',
-    route: '/games/infinity',
+    id: 'dragon',
+    label: 'Dragon Breath',
+    description: 'Breathe with the dragon',
+    route: '/games/dragon',
     bg: 'bg-accent-lavender',
-    icon: <InfinityIcon />,
+    icon: <DragonIcon />,
+    focalPoint: { x: 0.82, y: 0.35 },
   },
   {
     id: 'hexagon',
@@ -154,7 +168,8 @@ export default function HomePage() {
   // Section 10c: Square Breathing is always free; everything else requires paid.
   function isGameActive(id) {
     if (tier === 'paid') return true
-    return id === 'square'
+    // TODO: remove 'dragon' from free tier after spike validation
+    return id === 'square' || id === 'dragon'
   }
 
   // Called by GameCard when the zoom sequence begins.

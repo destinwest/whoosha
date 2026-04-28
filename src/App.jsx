@@ -12,6 +12,7 @@ import HomePage from './pages/HomePage'
 import DashboardPage from './pages/DashboardPage'
 import AccountPage from './pages/AccountPage'
 import SquarePage from './pages/games/SquarePage'
+import DragonPage from './pages/games/DragonPage'
 
 // ── TESTING BYPASS — reinstate when testing is done ──────────────────────────
 // ProtectedRoute auth/onboarding gates are commented out for local game testing.
@@ -104,6 +105,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SquarePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/games/dragon"
+        element={
+          <ProtectedRoute>
+            <DragonPage />
           </ProtectedRoute>
         }
       />
