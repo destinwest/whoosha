@@ -3,6 +3,9 @@ import GameIntro     from '../../ui/transitions/GameIntro'
 import StrokeSelector from './StrokeSelector'
 import SquareCanvas   from './SquareCanvas'
 
+const LABEL_TEXTS  = ['breathe in', 'hold', 'breathe out', 'hold']
+const LABEL_ANGLES = [0, -Math.PI / 2, 0, Math.PI / 2]
+
 // ── SquareGame ────────────────────────────────────────────────────────────────
 // Phase manager — owns intro/game phase, stroke selection, session timing, exit.
 // All canvas drawing, game geometry, and pointer handling live in SquareCanvas.
@@ -11,6 +14,7 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
   // ── Phase ──────────────────────────────────────────────────────────────────
   const [phase, setPhase]           = useState('intro')   // 'intro' | 'game'
   const [activeStroke, setActiveStroke] = useState('classic')
+  const [labelGeo, setLabelGeo]     = useState(null)      // { labelMids, sq }
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef = useRef(null)
@@ -69,9 +73,39 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
             ref={squareCanvasRef}
             strokeModeRef={strokeModeRef}
             onGameStart={() => { sessionStartRef.current = Date.now() }}
+            onResize={setLabelGeo}
             interactive={phase === 'game'}
           />
         </div>
+
+        {/* label overlay — DOM text, positioned from canvas geometry */}
+        {labelGeo && (() => {
+          const fs = Math.max(13, labelGeo.sq * 0.048)
+          return (
+            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+              {LABEL_TEXTS.map((text, i) => (
+                <div
+                  key={i}
+                  style={{
+                    position:   'absolute',
+                    left:       labelGeo.labelMids[i].x,
+                    top:        labelGeo.labelMids[i].y,
+                    transform:  `translate(-50%, -50%) rotate(${LABEL_ANGLES[i]}rad) scale(var(--label-${i}-scale, 1))`,
+                    opacity:    `var(--label-${i}-alpha, 0.75)`,
+                    fontFamily: "'Nunito', sans-serif",
+                    fontWeight: 700,
+                    fontSize:   `${fs}px`,
+                    color:      'rgba(44,74,62,1)',
+                    whiteSpace: 'nowrap',
+                    willChange: 'transform, opacity',
+                  }}
+                >
+                  {text}
+                </div>
+              ))}
+            </div>
+          )
+        })()}
       </div>
 
       {/* stroke selector — game phase only */}

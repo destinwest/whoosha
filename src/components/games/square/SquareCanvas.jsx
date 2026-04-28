@@ -13,33 +13,22 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
-import * as taperedStroke from './strokes/taperedStroke'
+import * as stampStroke   from './strokes/stampStroke'
 import * as layeredWash   from './strokes/layeredWash'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const LAP_COLORS   = ['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']
 const CYCLE_MS     = 16_000
 
-// ── Heat gauge tuning — adjust these without touching any other code ──────────
-// Charge: how fast gauge fills when child is ahead of pacing circle
-//   MAX_CHARGE_RATE: gauge units per ms at 2-lap lead. 1/32000 = fills in 32s at max.
-//   Increase to charge faster (more punishing). Decrease to charge slower.
-const GAUGE_MAX_CHARGE_RATE = 1 / 3200   // 10× faster than spec for testing; restore to 1/32000
-// Drain: how fast gauge empties when child is following closely
-//   DRAIN_RATE: gauge units per ms. 1/16000 = drains in 16s = ~1 lap.
-//   Increase for quicker recovery. Decrease for slower recovery.
-const GAUGE_DRAIN_RATE      = 1 / 4000  // slightly faster drain; restore to 1/16000
-// Lead threshold: how far ahead (in lap fractions) before gauge starts charging
-//   CLOSE_THRESHOLD: 0.1 = must be 10% of a lap ahead before charging begins.
-const GAUGE_CLOSE_THRESHOLD = 0.05      // more sensitive for testing; restore to 0.1
-// Effect threshold: gauge value below which NO visible effect appears
-//   Increase to delay effects longer. Decrease to show effects sooner.
-const GAUGE_EFFECT_THRESHOLD = 0.2      // lower for testing; restore to 0.3
-const LABEL_TEXTS  = ['breathe in', 'hold', 'breathe out', 'hold']
-const LABEL_ANGLES = [0, -Math.PI / 2, 0, Math.PI / 2]
+// ── Heat gauge tuning ─────────────────────────────────────────────────────────
+const GAUGE_SPEED_THRESHOLD   = 1.2   // path rate ratio above which gauge charges
+const GAUGE_RECOVER_THRESHOLD = 3.0   // path rate ratio above which recovery timer resets — only true racing blocks recovery
+const GAUGE_CHARGE_DELAY      = 4000  // ms of sustained too-fast before desaturation begins
+const GAUGE_DRAIN_DELAY       = 1000  // ms of sustained recoverable-pace before recovery begins
+const GAUGE_EFFECT_THRESHOLD = 0.3    // gauge value below which no visible effect appears
 const ALPHA_ACTIVE = 0.75
 const ALPHA_FLOOR  = 0.18
-const SCALE_ACTIVE = 1.08
+const SCALE_ACTIVE = 1.5
 const BLEND_MS     = 600
 
 const smoothstep   = t => t * t * (3 - 2 * t)
@@ -260,7 +249,7 @@ function applyPaintClip(ctx, { left, top, sqW, cr, lw }) {
 
 // ── SquareCanvas ──────────────────────────────────────────────────────────────
 const SquareCanvas = forwardRef(function SquareCanvas(
-  { strokeModeRef, onTick, onGameStart, interactive },
+  { strokeModeRef, onTick, onGameStart, onResize, interactive },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -309,12 +298,13 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const bloomAttackRafRef    = useRef(null)             // RAF handle for bloom attack tick
   const paintPressureRafRef  = useRef(null)             // RAF handle for paint pressure ramp
 
-  // ── Cumulative distance tracking + heat gauge ─────────────────────────────
-  const pacingDistRef        = useRef(0)     // total path length traveled by pacing circle since game start
-  const childDistRef         = useRef(0)     // total path length traced by child since game start
-  const lastChildPathPosRef  = useRef(null)  // previous frame's normalized path position (0–1)
-  const leadDistRef          = useRef(0)     // childDist - pacingDist; positive = child ahead
-  const heatGaugeRef         = useRef(0)     // 0.0–1.0, invisible gauge — charges when child races ahead
+  // ── Heat gauge ────────────────────────────────────────────────────────────
+  const heatGaugeRef         = useRef(0)     // 0.0–1.0, invisible gauge
+  const tooFastTimerRef      = useRef(0)     // ms accumulated above speed threshold
+  const goodPaceTimerRef     = useRef(0)     // ms accumulated at or below speed threshold
+  const gaugeActiveRef       = useRef(false) // true once desaturation has fully fired
+  const gaugeEffectRef       = useRef(0)     // computed gFx, written by gauge block, read by draw loop
+  const childPathRateRef     = useRef(0)     // path fraction-units/ms, smoothed
 
   // ── Fingerprint image loader ────────────────────────────────────────────────
   useEffect(() => {
@@ -329,9 +319,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   // ── Imperative API ─────────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
     reset() {
-      // Clear canvas content — taperedStroke.clear() wipes via canvas.width
+      // Clear canvas content — stampStroke.clear() wipes via canvas.width
       // reassignment (destroying the clip), so we reapply it immediately.
-      taperedStroke.clear()
+      stampStroke.clear()
       if (paintCtxRef.current && clipArgsRef.current) {
         applyPaintClip(paintCtxRef.current, clipArgsRef.current)
       }
@@ -367,12 +357,12 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       cancelAnimationFrame(bloomAttackRafRef.current)
       cancelAnimationFrame(paintPressureRafRef.current)
 
-      pacingDistRef.current       = 0
-      childDistRef.current        = 0
-      lastChildPathPosRef.current = null
-      leadDistRef.current         = 0
       heatGaugeRef.current        = 0
-      taperedStroke.setStrokeScale(1)
+      tooFastTimerRef.current     = 0
+      goodPaceTimerRef.current    = 0
+      gaugeActiveRef.current      = false
+      gaugeEffectRef.current      = 0
+      childPathRateRef.current    = 0
       document.documentElement.style.setProperty('--game-saturation', '1')
     },
   }), [])
@@ -473,11 +463,11 @@ const SquareCanvas = forwardRef(function SquareCanvas(
 
   // ── Stroke delegation ──────────────────────────────────────────────────────
   function addStrokePoint(x, y, vel) {
+    if (gaugeActiveRef.current) return  // floor reached — no paint until recovery completes
     if (strokeModeRef.current === 'watercolor') {
       layeredWash.addPoint(x, y, vel)
     } else {
-      const jitter = 0.92 + Math.random() * 0.08
-      taperedStroke.addPoint(x, y, vel, paintPressureRef.current, jitter)
+      stampStroke.addPoint(x, y, vel, paintPressureRef.current)
     }
   }
 
@@ -588,13 +578,24 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     const vel  = dt > 0 ? dist / dt : 0
     lastMoveTimeRef.current = now
 
+    const prevFrac = prevFracRef.current  // capture before checkLap overwrites it
+
     const pos = project(px, py)
     childPosRef.current  = pos
     lastChildPos.current = pos
     checkLap(pos)
+
+    if (pos && prevFrac !== null && dt > 0) {
+      let dfrac = pos.fraction - prevFrac
+      if (dfrac < -2) dfrac += 4   // forward lap wrap
+      if (dfrac >= 0) {
+        childPathRateRef.current = childPathRateRef.current * 0.5 + (dfrac / dt) * 0.5
+      }
+    }
+
     if (pos) {
       const color = getLapColor(pos.fraction)
-      taperedStroke.updateColor(color, lapColorIdxRef.current)
+      stampStroke.updateColor(color, lapColorIdxRef.current)
       layeredWash.updateColor(color, lapColorIdxRef.current)
       addStrokePoint(pos.clx, pos.cly, vel)
 
@@ -616,11 +617,11 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   }
 
   function onPointerUp() {
-    touchRef.current            = false
-    touchActiveRef.current      = false
-    particleFrameRef.current    = 0
-    lastChildPathPosRef.current = null
-    taperedStroke.lift()
+    touchRef.current         = false
+    touchActiveRef.current   = false
+    particleFrameRef.current = 0
+    childPathRateRef.current = 0
+    stampStroke.lift()
     layeredWash.lift()
 
     // Start bloom fade
@@ -648,53 +649,6 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   function handleTouchStart(e) { e.preventDefault(); const p = getRawPos(e); onPointerDown(p.x, p.y) }
   function handleTouchMove(e)  { e.preventDefault(); const p = getRawPos(e); onPointerMove(p.x, p.y) }
   function handleTouchEnd(e)   { e.preventDefault(); onPointerUp() }
-
-  // ── drawLabels ─────────────────────────────────────────────────────────────
-  function drawLabels(ctx, geo, now) {
-    const { labelMids, sq, sf } = geo
-    const fs = Math.max(13, sq * 0.048)
-
-    const pacFrac  = startedRef.current
-      ? (((now - gameStartRef.current) % CYCLE_MS) / CYCLE_MS) * 4
-      : 0
-    const rawBlend = startedRef.current
-      ? Math.min(1, (now - gameStartRef.current) / BLEND_MS)
-      : 0
-    const blend = smoothstep(rawBlend)
-
-    for (let i = 0; i < 4; i++) {
-      const localFrac = ((pacFrac - i) % 4 + 4) % 4
-
-      let proximity
-      if (localFrac <= sf / 2) {
-        proximity = 1
-      } else if (localFrac <= sf) {
-        proximity = smoothstep(1 - (localFrac - sf / 2) / (sf / 2))
-      } else if (localFrac >= 3 + sf / 2) {
-        proximity = smoothstep((localFrac - (3 + sf / 2)) / (1 - sf / 2))
-      } else {
-        proximity = 0
-      }
-
-      const alphaProx = ALPHA_FLOOR + (ALPHA_ACTIVE - ALPHA_FLOOR) * proximity
-      const scaleProx = 1.0 + (SCALE_ACTIVE - 1.0) * proximity
-      const alpha     = ALPHA_ACTIVE + (alphaProx - ALPHA_ACTIVE) * blend
-      const scale     = 1.0          + (scaleProx - 1.0)          * blend
-
-      const mid = labelMids[i]
-      ctx.save()
-      ctx.globalAlpha = alpha
-      ctx.translate(mid.x, mid.y)
-      ctx.rotate(LABEL_ANGLES[i])
-      ctx.scale(scale, scale)
-      ctx.font         = `700 ${fs}px 'Nunito', sans-serif`
-      ctx.textAlign    = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillStyle    = 'rgba(44,74,62,1)'
-      ctx.fillText(LABEL_TEXTS[i], 0, 0)
-      ctx.restore()
-    }
-  }
 
   // ── Particle helpers ───────────────────────────────────────────────────────
   function emitParticle(x, y, moving, lw) {
@@ -763,7 +717,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     function resize() {
       dprRef.current = window.devicePixelRatio || 1
       const dpr      = dprRef.current
-      const rect     = canvas.getBoundingClientRect()
+      const rect     = { width: canvas.offsetWidth, height: canvas.offsetHeight }
       if (rect.width === 0 || rect.height === 0) return
       if (rect.width === lastW && rect.height === lastH) return
       lastW = rect.width
@@ -774,6 +728,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       paintCanvas.width  = rect.width  * dpr
       paintCanvas.height = rect.height * dpr
       geoRef.current     = buildGeo(rect)
+      onResize?.({ labelMids: geoRef.current.labelMids, sq: geoRef.current.sq })
 
       const { cx, cy, sq, half, lw, r } = geoRef.current
       const paintCtx = paintCanvas.getContext('2d')
@@ -802,7 +757,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         LAP_COLORS[(idx + 1) % LAP_COLORS.length],
         0,
       )
-      taperedStroke.init({ paintCtx, lw, dpr, color, lapColorIdx: idx })
+      stampStroke.init({ paintCtx, lw, dpr, color, lapColorIdx: idx })
       layeredWash.init({ paintCtx, lw, dpr, color, lapColorIdx: idx, clipArgs })
     }
 
@@ -829,10 +784,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const H   = canvas.height / dpr
       const { cx, cy, sq, half, lw, r } = geo
 
-      // ── Heat gauge effect (computed from previous frame's gauge value) ────
-      const _g          = heatGaugeRef.current
-      const _th         = GAUGE_EFFECT_THRESHOLD
-      const gaugeEffect = _g < _th ? 0 : Math.pow((_g - _th) / (1 - _th), 2)
+      // ── Heat gauge effect — written by gauge block each frame, read here ────
+      const gaugeEffect = gaugeEffectRef.current
 
       ctx.save()
       ctx.scale(dpr, dpr)
@@ -855,19 +808,18 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       }
 
       // ── 2. Paint layer ────────────────────────────────────────────────────
-      // multiply composites the paint against the track surface beneath it,
-      // so the track gradient stays visible through the paint — outer edge
-      // darkens slightly, inner edge stays bright, giving a 3D painted feel.
-      // globalAlpha drains as heat gauge climbs — paint fades from track.
+      // source-over composites the paint above the track. globalAlpha drains
+      // as heat gauge climbs — paint fades from the track surface.
       ctx.save()
-      ctx.globalCompositeOperation = 'multiply'
-      ctx.globalAlpha = 1 - gaugeEffect * 0.95
+      ctx.globalCompositeOperation = 'source-over'
       if (strokeModeRef.current === 'watercolor') {
+        ctx.globalAlpha = 1 - gaugeEffect
         const wLayers = layeredWash.getLayers()
         for (const { canvas: lc } of wLayers) {
           ctx.drawImage(lc, 0, 0, W, H)
         }
       } else {
+        ctx.globalAlpha = stampStroke.COMPOSITE_ALPHA * (1 - gaugeEffect)
         ctx.drawImage(paintCanvas, 0, 0, W, H)
       }
       ctx.restore()
@@ -877,58 +829,69 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const pacingPos = getPacing(now - pacingStartRef.current)
       if (pacingPos) pacingPosRef.current = pacingPos
 
-      // ── Cumulative distance tracking ──────────────────────────────────────
+      // ── Heat gauge update ─────────────────────────────────────────────────
       if (startedRef.current) {
-        const { totalPathLength } = geo
-        const elapsed = now - gameStartRef.current
+        // ── Speed ratio ────────────────────────────────────────────────────
+        // Pacing rate is constant — 4 fraction-units per lap per CYCLE_MS.
+        const pacingRate = 4 / CYCLE_MS
+        const speedRatio = childPathRateRef.current / pacingRate
 
-        // Pacing circle: deterministic linear advance since first touch
-        pacingDistRef.current = (elapsed / CYCLE_MS) * totalPathLength
+        const isTooFast  = touchRef.current && speedRatio > GAUGE_SPEED_THRESHOLD
+        const isGoodPace = !touchRef.current || speedRatio <= GAUGE_SPEED_THRESHOLD
 
-        // Child: accumulate only forward movement while touching
-        const childPos = childPosRef.current
-        if (touchRef.current && childPos) {
-          const childPathT = childPos.fraction / 4
-          if (lastChildPathPosRef.current !== null) {
-            let delta = childPathT - lastChildPathPosRef.current
-            if (delta < -0.5) delta += 1  // crossed lap boundary forward
-            if (delta > 0.5)  delta -= 1  // guard against backward wrap
-            if (delta > 0) {
-              childDistRef.current += delta * totalPathLength
-            }
-          }
-          lastChildPathPosRef.current = childPathT
+        // ── Charge timer — 1.2× threshold ─────────────────────────────────
+        if (isTooFast) {
+          tooFastTimerRef.current = Math.min(GAUGE_CHARGE_DELAY, tooFastTimerRef.current + dt)
+        } else if (isGoodPace && !gaugeActiveRef.current) {
+          // Slowing before floor — slowly decay the charge timer
+          tooFastTimerRef.current = Math.max(0, tooFastTimerRef.current - dt * 0.5)
         }
 
-        leadDistRef.current = childDistRef.current - pacingDistRef.current
+        // ── Recovery timer — 3× threshold ─────────────────────────────────
+        // Only genuinely racing (> 3× pacing) resets recovery. Normal variation
+        // and moderate speed above 1.2× doesn't block the recovery window.
+        const isTrulyRacing = touchRef.current && speedRatio > GAUGE_RECOVER_THRESHOLD
+        if (isTrulyRacing) {
+          goodPaceTimerRef.current = 0
+        } else {
+          goodPaceTimerRef.current = Math.min(GAUGE_DRAIN_DELAY, goodPaceTimerRef.current + dt)
+        }
 
-        // ── Heat gauge update ──────────────────────────────────────────────
-        const childLapCount = Math.floor(childDistRef.current / totalPathLength)
-
-        const gaugeAlreadyDone = childLapCount >= 6 && heatGaugeRef.current === 0
-        if (!gaugeAlreadyDone) {
-          if (childLapCount >= 6) {
-            // Lap 6 complete — drain to zero over 2 seconds regardless of position
-            heatGaugeRef.current = Math.max(0, heatGaugeRef.current - (1 / 2000) * dt)
-          } else {
-            const lead     = leadDistRef.current
-            const leadLaps = lead / totalPathLength
-
-            if (leadLaps > GAUGE_CLOSE_THRESHOLD) {
-              const chargeFactor = Math.min(leadLaps / 2, 1)
-              heatGaugeRef.current = Math.min(1, heatGaugeRef.current + GAUGE_MAX_CHARGE_RATE * chargeFactor * dt)
-            } else {
-              heatGaugeRef.current = Math.max(0, heatGaugeRef.current - GAUGE_DRAIN_RATE * dt)
+        // ── Gauge state transitions ────────────────────────────────────────
+        if (isTooFast && !gaugeActiveRef.current && tooFastTimerRef.current >= GAUGE_CHARGE_DELAY) {
+          // Charge delay met, still racing — ramp gauge to 1 over 2s
+          heatGaugeRef.current = Math.min(1, heatGaugeRef.current + dt / 4000)
+          if (heatGaugeRef.current >= 1) {
+            // Floor reached — clear paint canvas permanently
+            gaugeActiveRef.current = true
+            stampStroke.clear()
+            if (paintCtxRef.current && clipArgsRef.current) {
+              applyPaintClip(paintCtxRef.current, clipArgsRef.current)
             }
-            heatGaugeRef.current = Math.max(0, Math.min(1, heatGaugeRef.current))
+          }
+        } else if (isGoodPace && !gaugeActiveRef.current && heatGaugeRef.current > 0) {
+          // Slowing/lifting before floor — drain gauge back over 2s, paint recovers
+          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 4000)
+        } else if (gaugeActiveRef.current && goodPaceTimerRef.current >= GAUGE_DRAIN_DELAY) {
+          // Floor reached; good pace held for 1s — drain over 2s, only saturation returns
+          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 4000)
+          if (heatGaugeRef.current <= 0) {
+            gaugeActiveRef.current   = false
+            goodPaceTimerRef.current = 0
+            // tooFastTimerRef stays at GAUGE_CHARGE_DELAY — re-racing re-triggers immediately
           }
         }
 
-        // Stroke scale and world saturation — updated each frame for next pointer event
-        const newG   = heatGaugeRef.current
-        const newGFx = newG < _th ? 0 : Math.pow((newG - _th) / (1 - _th), 2)
-        taperedStroke.setStrokeScale(1 - newGFx)
-        document.documentElement.style.setProperty('--game-saturation', (1 - newGFx * 0.55).toFixed(3))
+        heatGaugeRef.current = Math.max(0, Math.min(1, heatGaugeRef.current))
+
+        // ── Apply effects ──────────────────────────────────────────────────
+        const g   = heatGaugeRef.current
+        const gFx = g < GAUGE_EFFECT_THRESHOLD
+          ? 0
+          : Math.pow((g - GAUGE_EFFECT_THRESHOLD) / (1 - GAUGE_EFFECT_THRESHOLD), 2)
+
+        gaugeEffectRef.current = gFx
+        document.documentElement.style.setProperty('--game-saturation', (1 - gFx * 0.55).toFixed(3))
       }
 
       // ── 3. Touch bloom ────────────────────────────────────────────────────
@@ -972,7 +935,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       if (startedRef.current) {
         // Decay speed toward zero when finger is still
         if (touchActiveRef.current && now - lastTouchTimeRef.current > 80) {
-          fingerSpeedRef.current *= 0.85
+          fingerSpeedRef.current   *= 0.85
+          childPathRateRef.current *= 0.85
         }
 
         // Emit while finger is down
@@ -991,10 +955,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         }
       }
 
-      // ── 5. Labels ─────────────────────────────────────────────────────────
-      drawLabels(ctx, geo, now)
-
-      // ── 6. Pacing circle ──────────────────────────────────────────────────
+      // ── 5. Pacing circle ─────────────────────────────────────────────────────
       if (pacingPos) {
         ctx.beginPath()
         ctx.arc(pacingPos.x, pacingPos.y, lw * 0.62, 0, Math.PI * 2)
@@ -1002,7 +963,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         ctx.fill()
       }
 
-      // ── 7. Fingerprint indicator (above pacing circle) ────────────────────
+      // ── 6. Fingerprint indicator (above pacing circle) ────────────────────
       if (fpImgReadyRef.current && pacingPos && (fingerprintActiveRef.current || fpDismissingRef.current)) {
         const { x, y } = pacingPos
         const baseR    = lw * 0.45
@@ -1026,7 +987,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         }
       }
 
-      // ── 8. Encouragement moment ───────────────────────────────────────────
+      // ── 7. Encouragement moment ───────────────────────────────────────────
       const enc = encouragementRef.current
       if (enc) {
         const t = (now - enc.startTime) / 2_000
@@ -1057,6 +1018,35 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       }
 
       ctx.restore()
+
+      // ── Label proximity — write CSS vars for DOM overlay ──────────────────
+      {
+        const { sf } = geo
+        const lpFrac  = (((now - pacingStartRef.current) % CYCLE_MS) / CYCLE_MS) * 4
+        const lpBlend = smoothstep(startedRef.current
+          ? Math.min(1, (now - gameStartRef.current) / BLEND_MS)
+          : 0)
+
+        for (let i = 0; i < 4; i++) {
+          const localFrac = ((lpFrac - i) % 4 + 4) % 4
+          let proximity
+          if (localFrac >= 3 + sf) {
+            proximity = smoothstep((localFrac - (3 + sf)) / (1 - sf))
+          } else if (localFrac <= sf / 1.5) {
+            proximity = 1
+          } else if (localFrac <= sf) {
+            proximity = smoothstep(1 - (localFrac - sf / 1.5) / (sf - sf / 1.5))
+          } else {
+            proximity = 0
+          }
+          const alphaProx = ALPHA_FLOOR + (ALPHA_ACTIVE - ALPHA_FLOOR) * proximity
+          const scaleProx = 1.0 + (SCALE_ACTIVE - 1.0) * proximity
+          const alpha     = ALPHA_ACTIVE + (alphaProx - ALPHA_ACTIVE) * lpBlend
+          const scale     = 1.0 + (scaleProx - 1.0) * lpBlend
+          document.documentElement.style.setProperty(`--label-${i}-alpha`, alpha.toFixed(3))
+          document.documentElement.style.setProperty(`--label-${i}-scale`, scale.toFixed(3))
+        }
+      }
     }
 
     rafRef.current = requestAnimationFrame(frame)
