@@ -20,6 +20,11 @@ import * as layeredWash   from './strokes/layeredWash'
 const LAP_COLORS   = ['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']
 const CYCLE_MS     = 16_000
 
+// Maximum path advancement per pointer event — prevents corner-cut visual gaps.
+// Expressed as a multiplier of lw; 0.5 = half a track width of path per event.
+// At normal tracing speed and 60fps this cap is never reached.
+const MAX_PATH_ADVANCE_MULT = 0.5
+
 // ── Heat gauge tuning ─────────────────────────────────────────────────────────
 const GAUGE_SPEED_THRESHOLD   = 1.2   // path rate ratio above which gauge charges
 const GAUGE_RECOVER_THRESHOLD = 3.0   // path rate ratio above which recovery timer resets — only true racing blocks recovery
@@ -439,6 +444,49 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     }
   }
 
+  // ── advanceAlongPath ──────────────────────────────────────────────────────
+  // Given a starting fraction on the path (0–4) and a target fraction, return
+  // the position that is at most maxDist (CSS px) ahead of the start along the
+  // path. If the gap is within maxDist, returns the target unchanged. If it
+  // exceeds maxDist, walks forward and returns the capped position and fraction.
+  // Handles the wrap-around at fraction 4→0.
+  function advanceAlongPath(prevFrac, targetFrac, maxDist, points, totalPathLength) {
+    const N = points.length - 1
+
+    function fracToIndex(frac) {
+      return Math.round((frac / 4) * N)
+    }
+
+    const prevIdx   = fracToIndex(prevFrac)
+    const targetIdx = fracToIndex(targetFrac)
+
+    // Handle forward wrap-around: if target appears behind prev in index space
+    // but the fraction difference is small and positive, adjust for wrap.
+    let idxDiff = targetIdx - prevIdx
+    if (idxDiff < -N / 2) idxDiff += N   // wrapped forward
+    if (idxDiff < 0) {
+      // Child moved backward — allow drift, don't cap forward advancement.
+      return { x: points[targetIdx % N].x, y: points[targetIdx % N].y, fraction: targetFrac }
+    }
+
+    // Measure actual path distance from prevIdx to targetIdx
+    let pathDist = 0
+    for (let i = prevIdx; i < prevIdx + idxDiff; i++) {
+      const a = points[i % N]
+      const b = points[(i + 1) % N]
+      pathDist += Math.hypot(b.x - a.x, b.y - a.y)
+      if (pathDist >= maxDist) {
+        // Hit the cap — return the position at exactly maxDist from prevIdx
+        const cappedIdx  = i % N
+        const cappedFrac = (cappedIdx / N) * 4
+        return { x: points[cappedIdx].x, y: points[cappedIdx].y, fraction: cappedFrac }
+      }
+    }
+
+    // Gap was within maxDist — return target unchanged
+    return { x: points[targetIdx % N].x, y: points[targetIdx % N].y, fraction: targetFrac }
+  }
+
   // ── Lap detection ──────────────────────────────────────────────────────────
   function checkLap(pos) {
     if (!pos) return
@@ -594,14 +642,33 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     }
 
     if (pos) {
+      const geo        = geoRef.current
+      const maxAdvance = geo.lw * MAX_PATH_ADVANCE_MULT
+
+      // Cap path advancement — prevents corner-cut stamp gaps.
+      // Uses prevFrac (captured before checkLap overwrote prevFracRef).
+      const capped = advanceAlongPath(
+        prevFrac,
+        pos.fraction,
+        maxAdvance,
+        geo.points,
+        geo.totalPathLength,
+      )
+      const paintX = capped.x
+      const paintY = capped.y
+
+      // Update refs with capped values so the next event caps from here
+      childPosRef.current = { x: paintX, y: paintY, clx: paintX, cly: paintY, fraction: capped.fraction }
+      prevFracRef.current = capped.fraction
+
       const color = getLapColor(pos.fraction)
       stampStroke.updateColor(color, lapColorIdxRef.current)
       layeredWash.updateColor(color, lapColorIdxRef.current)
-      addStrokePoint(pos.clx, pos.cly, vel)
+      addStrokePoint(paintX, paintY, vel)
 
       // Speed + tangent — capture prev before overwriting
       const prevTouch = lastTouchRef.current
-      lastTouchRef.current = { x: pos.x, y: pos.y }
+      lastTouchRef.current = { x: paintX, y: paintY }
 
       const moveDt = now - lastTouchTimeRef.current
       if (moveDt > 0 && moveDt < 100) {
