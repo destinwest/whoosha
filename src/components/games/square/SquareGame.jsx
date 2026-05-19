@@ -4,11 +4,12 @@ import StrokeSelector from './StrokeSelector'
 import SquareCanvas   from './SquareCanvas'
 
 // ── buildMeadowBg ─────────────────────────────────────────────────────────────
-// Bakes the entire static background — base gradient, sun pools, green canopy
-// dapples, top-edge depth, and four slanted shafts — into a single offscreen
-// canvas at device-pixel resolution. All composition happens in canvas-land via
-// globalCompositeOperation; no CSS blend layers needed at runtime.
-function buildMeadowBg(w, h, dpr) {
+// Bakes the entire static background — base gradient, ground texture (when the
+// asset is loaded), sun pools, green canopy dapples, top-edge depth, and four
+// slanted shafts — into a single offscreen canvas at device-pixel resolution.
+// All composition happens in canvas-land via globalCompositeOperation; no CSS
+// blend layers needed at runtime.
+function buildMeadowBg(w, h, dpr, textureImg) {
   const oc = document.createElement('canvas')
   oc.width  = w * dpr
   oc.height = h * dpr
@@ -24,6 +25,16 @@ function buildMeadowBg(w, h, dpr) {
   bg.addColorStop(1.0,  '#7A9E99')
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
+
+  // Ground texture — moss/grass/earth marks tiled across the meadow. Drawn
+  // before the lighting passes so canopy light naturally illuminates it.
+  if (textureImg) {
+    const pattern = ctx.createPattern(textureImg, 'repeat')
+    if (pattern) {
+      ctx.fillStyle = pattern
+      ctx.fillRect(0, 0, w, h)
+    }
+  }
 
   // Screen-blend phase — all subsequent fills brighten what's below
   ctx.globalCompositeOperation = 'screen'
@@ -156,6 +167,12 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
   useEffect(() => {
     const el = bgCanvasRef.current
     if (!el) return
+
+    // Ground texture — loaded once. First bake may run before image resolves;
+    // a re-bake fires via onload so texture appears as soon as it's ready.
+    const textureImg = new Image()
+    let textureReady = false
+
     function draw() {
       const w = el.offsetWidth
       const h = el.offsetHeight
@@ -163,8 +180,15 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
       const dpr = window.devicePixelRatio || 1
       el.width  = w * dpr
       el.height = h * dpr
-      el.getContext('2d').drawImage(buildMeadowBg(w, h, dpr), 0, 0)
+      el.getContext('2d').drawImage(
+        buildMeadowBg(w, h, dpr, textureReady ? textureImg : null),
+        0, 0,
+      )
     }
+
+    textureImg.onload = () => { textureReady = true; draw() }
+    textureImg.src = '/textures/meadow-ground.svg'
+
     draw()
     const ro = new ResizeObserver(draw)
     ro.observe(el)
