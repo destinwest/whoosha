@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!--
+    Whoosha — track dirt-path texture
+    A 256×256 tile of earthy specks designed to tile seamlessly. Marks are kept
+    at least 8px from edges so tile seams across the track read as continuous
+    organic variation rather than a repeating pattern.
+    Used as a CanvasPattern strokeStyle in SquareCanvas (track texture pass).
+  -->
+
+  <!-- Larger soft mottles (slightly more visible patches of darker earth) -->
+  <g fill="#7a6240" opacity="0.07">
+    <circle cx="52"  cy="65"  r="4.2"/>
+    <circle cx="188" cy="145" r="3.5"/>
+    <circle cx="45"  cy="215" r="3.9"/>
+  </g>
+
+  <!-- Small earthy specks (the dominant texture) -->
+  <g fill="#5a4a2e" opacity="0.20">
+    <circle cx="18"  cy="32"  r="0.8"/>
+    <circle cx="51"  cy="21"  r="1.1"/>
+    <circle cx="89"  cy="41"  r="0.7"/>
+    <circle cx="123" cy="28"  r="1.0"/>
+    <circle cx="156" cy="52"  r="0.6"/>
+    <circle cx="189" cy="38"  r="1.2"/>
+    <circle cx="221" cy="67"  r="0.8"/>
+    <circle cx="15"  cy="78"  r="0.9"/>
+    <circle cx="44"  cy="95"  r="1.3"/>
+    <circle cx="78"  cy="71"  r="0.7"/>
+    <circle cx="110" cy="85"  r="1.0"/>
+    <circle cx="140" cy="76"  r="0.6"/>
+    <circle cx="143" cy="108" r="0.9"/>
+    <circle cx="179" cy="88"  r="1.1"/>
+    <circle cx="214" cy="112" r="0.8"/>
+    <circle cx="27"  cy="124" r="1.0"/>
+    <circle cx="62"  cy="145" r="0.7"/>
+    <circle cx="75"  cy="115" r="0.9"/>
+    <circle cx="103" cy="131" r="1.2"/>
+    <circle cx="128" cy="157" r="0.8"/>
+    <circle cx="162" cy="138" r="1.0"/>
+    <circle cx="165" cy="175" r="0.7"/>
+    <circle cx="198" cy="165" r="0.9"/>
+    <circle cx="232" cy="148" r="1.1"/>
+    <circle cx="19"  cy="178" r="0.6"/>
+    <circle cx="53"  cy="196" r="1.0"/>
+    <circle cx="87"  cy="178" r="0.8"/>
+    <circle cx="119" cy="215" r="0.9"/>
+    <circle cx="152" cy="198" r="1.2"/>
+    <circle cx="186" cy="224" r="0.7"/>
+    <circle cx="220" cy="205" r="1.0"/>
+    <circle cx="35"  cy="233" r="0.8"/>
+    <circle cx="71"  cy="240" r="0.6"/>
+    <circle cx="105" cy="226" r="1.1"/>
+    <circle cx="139" cy="245" r="0.9"/>
+    <circle cx="173" cy="232" r="0.7"/>
+    <circle cx="207" cy="245" r="1.0"/>
+  </g>
+
+  <!-- Occasional darker pebble accents (sparse) -->
+  <g fill="#3d3220" opacity="0.18">
+    <circle cx="38"  cy="58"  r="0.5"/>
+    <circle cx="167" cy="68"  r="0.6"/>
+    <circle cx="91"  cy="148" r="0.5"/>
+    <circle cx="201" cy="187" r="0.6"/>
+    <circle cx="58"  cy="215" r="0.5"/>
+  </g>
+</svg>

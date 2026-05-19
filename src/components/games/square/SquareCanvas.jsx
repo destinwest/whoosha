@@ -248,6 +248,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const clipArgsRef      = useRef(null)
   const trackGeoRef      = useRef(null)   // CSS px track centerline geometry
   const trackGradientRef = useRef(null)   // cached Pass B gradient (rebuilt on resize)
+  const trackTextureImgRef = useRef(null) // dirt-path SVG image, loaded once on mount
+  const trackPatternRef    = useRef(null) // CanvasPattern derived from texture image
 
   // ── Game state refs ────────────────────────────────────────────────────────
   const pacingStartRef       = useRef(null)    // clock for pacing circle — starts at mount
@@ -761,6 +763,15 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     const paintCanvas = document.createElement('canvas')
     paintRef.current  = paintCanvas
 
+    // Track dirt-path texture — load once, create pattern when ready.
+    // First frames render without texture; pattern appears when image resolves.
+    const textureImg = new Image()
+    textureImg.onload = () => {
+      trackTextureImgRef.current = textureImg
+      trackPatternRef.current    = ctx.createPattern(textureImg, 'repeat')
+    }
+    textureImg.src = '/textures/track-dirt.svg'
+
     let lastW = 0, lastH = 0
 
     function resize() {
@@ -859,6 +870,22 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         ctx.drawImage(paintCanvas, 0, 0, W, H)
       }
       ctx.restore()
+
+      // ── 2b. Track texture ─────────────────────────────────────────────────
+      // Subtle dirt-path texture stroked along the track centerline. Sits above
+      // the paint so it reads as the surface character of the track itself —
+      // visible through both bare cream and painted color. Pattern image is
+      // baked into a GPU texture; per-frame cost is one stroke call.
+      const trackPattern = trackPatternRef.current
+      if (trackPattern && trackGeo) {
+        ctx.save()
+        ctx.strokeStyle = trackPattern
+        ctx.lineWidth   = trackGeo.lw
+        ctx.beginPath()
+        ctx.roundRect(trackGeo.left, trackGeo.top, trackGeo.sqW, trackGeo.sqW, trackGeo.cr)
+        ctx.stroke()
+        ctx.restore()
+      }
 
       // ── Pacing position (computed once, shared by fingerprint + pacing circle) ─
       // Pacing starts at mount — independent of first touch.
