@@ -131,29 +131,6 @@ function buildGeo(rect) {
   }
 }
 
-// ── buildBgGradient ───────────────────────────────────────────────────────────
-// Computed once per resize, cached in bgGradientRef. W, H in CSS px.
-function buildBgGradient(ctx, W, H) {
-  const grad = ctx.createLinearGradient(0, 0, W, H)
-  grad.addColorStop(0, '#B0CECA')   // top-left — lighter, cooler sage
-  grad.addColorStop(1, '#7A9E99')   // bottom-right — darker, warmer sage
-  return grad
-}
-
-// ── drawVignette ──────────────────────────────────────────────────────────────
-function drawVignette(ctx, W, H) {
-  const grad = ctx.createRadialGradient(
-    W / 2, H / 2, Math.min(W, H) * 0.30,
-    W / 2, H / 2, Math.max(W, H) * 0.75,
-  )
-  grad.addColorStop(0, 'rgba(0,0,0,0)')
-  grad.addColorStop(1, 'rgba(0,0,0,0.18)')
-
-  ctx.save()
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, W, H)
-  ctx.restore()
-}
 
 // ── Racetrack draw passes ─────────────────────────────────────────────────────
 // geometry: { left, top, sqW, cr, lw } — all in CSS px, describing the track
@@ -271,7 +248,6 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const clipArgsRef      = useRef(null)
   const trackGeoRef      = useRef(null)   // CSS px track centerline geometry
   const trackGradientRef = useRef(null)   // cached Pass B gradient (rebuilt on resize)
-  const bgGradientRef    = useRef(null)   // cached background gradient (rebuilt on resize)
 
   // ── Game state refs ────────────────────────────────────────────────────────
   const pacingStartRef       = useRef(null)    // clock for pacing circle — starts at mount
@@ -822,7 +798,6 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const trackGeo = { left: cx - half, top: cy - half, sqW: sq, cr: r, lw }
       trackGeoRef.current      = trackGeo
       trackGradientRef.current = buildTrackGradient(ctx, trackGeo)
-      bgGradientRef.current    = buildBgGradient(ctx, rect.width, rect.height)
 
       const color = getDriftColor(colorTimeRef.current)
       stampStroke.init({ paintCtx, lw, dpr, color })
@@ -858,13 +833,6 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       ctx.save()
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, W, H)
-
-      // ── 0. Background fill ────────────────────────────────────────────────
-      ctx.fillStyle = bgGradientRef.current ?? '#9FBFB4'
-      ctx.fillRect(0, 0, W, H)
-
-      // ── 0b. Background vignette ───────────────────────────────────────────
-      drawVignette(ctx, W, H)
 
       // ── 1. Racetrack — four passes ────────────────────────────────────────
       const trackGeo = trackGeoRef.current
