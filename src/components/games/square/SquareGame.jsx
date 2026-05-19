@@ -4,14 +4,18 @@ import StrokeSelector from './StrokeSelector'
 import SquareCanvas   from './SquareCanvas'
 
 // ── buildMeadowBg ─────────────────────────────────────────────────────────────
-// Bakes the meadow background to an offscreen canvas once per resize.
-// Zero per-frame cost — drawn to the bg canvas via ResizeObserver.
-function buildMeadowBg(w, h) {
+// Bakes the entire static background — base gradient, sun pools, green canopy
+// dapples, top-edge depth, and four slanted shafts — into a single offscreen
+// canvas at device-pixel resolution. All composition happens in canvas-land via
+// globalCompositeOperation; no CSS blend layers needed at runtime.
+function buildMeadowBg(w, h, dpr) {
   const oc = document.createElement('canvas')
-  oc.width  = w
-  oc.height = h
+  oc.width  = w * dpr
+  oc.height = h * dpr
   const ctx = oc.getContext('2d')
+  ctx.scale(dpr, dpr)
 
+  // Base diagonal sage wash
   const bg = ctx.createLinearGradient(0, 0, w * 0.6, h)
   bg.addColorStop(0,    '#B0CECA')
   bg.addColorStop(0.30, '#9BBFBB')
@@ -21,25 +25,112 @@ function buildMeadowBg(w, h) {
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
 
-  // Dappled light pools — large radial gradients at screen blend read as
-  // soft canopy light; pixel-scale noise at this size reads as static.
+  // Screen-blend phase — all subsequent fills brighten what's below
   ctx.globalCompositeOperation = 'screen'
-  const pools = [
-    { x: 0.22 * w, y: 0.28 * h, r: 0.38 * Math.max(w, h), a: 0.12 },
-    { x: 0.72 * w, y: 0.20 * h, r: 0.28 * Math.max(w, h), a: 0.09 },
-    { x: 0.60 * w, y: 0.68 * h, r: 0.34 * Math.max(w, h), a: 0.10 },
-    { x: 0.18 * w, y: 0.72 * h, r: 0.24 * Math.max(w, h), a: 0.08 },
-  ]
-  for (const { x, y, r, a } of pools) {
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r)
+
+  // Amber sun pools — soft warm canopy light
+  for (const { cx, cy, rf, a } of [
+    { cx: 0.22, cy: 0.28, rf: 0.38, a: 0.12 },
+    { cx: 0.72, cy: 0.20, rf: 0.28, a: 0.09 },
+    { cx: 0.60, cy: 0.68, rf: 0.34, a: 0.10 },
+    { cx: 0.18, cy: 0.72, rf: 0.24, a: 0.08 },
+  ]) {
+    const px = cx * w, py = cy * h, r = rf * Math.max(w, h)
+    const g = ctx.createRadialGradient(px, py, 0, px, py, r)
     g.addColorStop(0, `rgba(218,195,128,${a})`)
     g.addColorStop(1, 'rgba(0,0,0,0)')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, w, h)
   }
 
+  // Green canopy dapples — cooler tinted pools, migrated from former CSS overlay
+  for (const { cx, cy, rf, color } of [
+    { cx: 0.21, cy: 0.26, rf: 0.33, color: 'rgba(105,140,45,0.12)' },
+    { cx: 0.71, cy: 0.19, rf: 0.26, color: 'rgba( 98,130,40,0.09)' },
+    { cx: 0.80, cy: 0.60, rf: 0.29, color: 'rgba(102,136,43,0.11)' },
+    { cx: 0.33, cy: 0.72, rf: 0.31, color: 'rgba( 96,128,38,0.10)' },
+    { cx: 0.54, cy: 0.44, rf: 0.23, color: 'rgba( 90,122,35,0.08)' },
+  ]) {
+    const px = cx * w, py = cy * h, r = rf * Math.max(w, h)
+    const g = ctx.createRadialGradient(px, py, 0, px, py, r)
+    g.addColorStop(0, color)
+    g.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, w, h)
+  }
+
+  // Top-edge depth — subtle dark wash on upper 22% (canopy shadow)
+  const topShadow = ctx.createLinearGradient(0, 0, 0, h * 0.22)
+  topShadow.addColorStop(0,     'rgba(48,82,65,0.14)')
+  topShadow.addColorStop(0.636, 'rgba(32,58,46,0.05)')
+  topShadow.addColorStop(1,     'rgba(0,0,0,0)')
+  ctx.fillStyle = topShadow
+  ctx.fillRect(0, 0, w, h * 0.22)
+
+  // Slanted shafts — two dark (tree-trunk shadows), two bright (sunbeams)
+  paintShaft(ctx, w, h,
+    [[0.02, 0], [0.31, 0], [0.44, 1], [0.15, 1]],
+    [
+      [0,    'rgba(88,74,24,0)'],
+      [0.30, 'rgba(88,74,24,0.22)'],
+      [0.55, 'rgba(72,60,18,0.28)'],
+      [0.78, 'rgba(55,46,14,0.18)'],
+      [1.00, 'rgba(35,28,8,0.05)'],
+    ])
+  paintShaft(ctx, w, h,
+    [[0.62, 0], [0.80, 0], [0.91, 1], [0.74, 1]],
+    [
+      [0,    'rgba(85,72,22,0)'],
+      [0.28, 'rgba(85,72,22,0.18)'],
+      [0.58, 'rgba(68,57,16,0.24)'],
+      [0.80, 'rgba(50,42,12,0.14)'],
+      [1.00, 'rgba(30,25,7,0.04)'],
+    ])
+  paintShaft(ctx, w, h,
+    [[0.05, 0], [0.15, 0], [0.36, 1], [0.18, 1]],
+    [
+      [0,    'rgba(255,240,175,0)'],
+      [0.18, 'rgba(255,240,175,0.28)'],
+      [0.50, 'rgba(248,228,158,0.24)'],
+      [0.80, 'rgba(235,215,140,0.12)'],
+      [1.00, 'rgba(255,240,175,0)'],
+    ])
+  paintShaft(ctx, w, h,
+    [[0.60, 0], [0.70, 0], [0.84, 1], [0.70, 1]],
+    [
+      [0,    'rgba(255,240,175,0)'],
+      [0.22, 'rgba(255,240,175,0.22)'],
+      [0.55, 'rgba(248,228,158,0.18)'],
+      [0.82, 'rgba(235,215,140,0.10)'],
+      [1.00, 'rgba(255,240,175,0)'],
+    ])
+
   ctx.globalCompositeOperation = 'source-over'
   return oc
+}
+
+// ── paintShaft ────────────────────────────────────────────────────────────────
+// Fills a 4-point polygon (CSS-style fractional coords) with a gradient running
+// along the polygon's diagonal — used for sunbeams and tree-shadow shafts.
+function paintShaft(ctx, w, h, polygon, stops) {
+  const pts = polygon.map(([fx, fy]) => [fx * w, fy * h])
+  ctx.save()
+  ctx.beginPath()
+  ctx.moveTo(pts[0][0], pts[0][1])
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1])
+  ctx.closePath()
+  ctx.clip()
+
+  const xs = pts.map(p => p[0])
+  const ys = pts.map(p => p[1])
+  const minX = Math.min(...xs), maxX = Math.max(...xs)
+  const minY = Math.min(...ys), maxY = Math.max(...ys)
+
+  const grad = ctx.createLinearGradient(minX, minY, maxX, maxY)
+  for (const [offset, color] of stops) grad.addColorStop(offset, color)
+  ctx.fillStyle = grad
+  ctx.fillRect(minX, minY, maxX - minX, maxY - minY)
+  ctx.restore()
 }
 
 const LABEL_TEXTS  = ['breathe in', 'hold', 'breathe out', 'hold']
@@ -69,9 +160,10 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
       const w = el.offsetWidth
       const h = el.offsetHeight
       if (!w || !h) return
-      el.width  = w
-      el.height = h
-      el.getContext('2d').drawImage(buildMeadowBg(w, h), 0, 0)
+      const dpr = window.devicePixelRatio || 1
+      el.width  = w * dpr
+      el.height = h * dpr
+      el.getContext('2d').drawImage(buildMeadowBg(w, h, dpr), 0, 0)
     }
     draw()
     const ro = new ResizeObserver(draw)
@@ -111,12 +203,6 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
         </svg>
       </button>
 
-      {/* Layer 1: Meadow floor — baked Canvas 2D texture; stays stationary during intro */}
-      <canvas
-        ref={bgCanvasRef}
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
-      />
-
       {/* game canvas — always mounted; blur/scale driven by CSS custom properties */}
       <div style={{
         position: 'absolute',
@@ -126,42 +212,19 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
         transformOrigin: 'center center',
         willChange: 'transform, filter',
       }}>
-        {/* Saturation wrapper — overlays and canvas share one filter so they desaturate together.
-            filter: saturate creates an isolated compositing group; putting both here ensures
-            the gauge affects all game elements uniformly. Background canvas stays outside. */}
+        {/* Saturation wrapper — bg canvas and game canvas share one filter so
+            the heat gauge desaturates the entire world in lockstep. */}
         <div style={{
           position: 'absolute',
           inset: 0,
           filter: 'saturate(var(--game-saturation, 1))',
           willChange: 'filter',
         }}>
-          {/* Ambient lighting overlays — sit below the canvas, show through its transparent bg */}
-          <div style={{ position: 'absolute', inset: 0, mixBlendMode: 'screen', background: `
-            radial-gradient(ellipse 38% 28% at 21% 26%, rgba(105,140,45,0.12) 0%, transparent 100%),
-            radial-gradient(ellipse 30% 22% at 71% 19%, rgba( 98,130,40,0.09) 0%, transparent 100%),
-            radial-gradient(ellipse 32% 26% at 80% 60%, rgba(102,136,43,0.11) 0%, transparent 100%),
-            radial-gradient(ellipse 35% 28% at 33% 72%, rgba( 96,128,38,0.10) 0%, transparent 100%),
-            radial-gradient(ellipse 26% 20% at 54% 44%, rgba( 90,122,35,0.08) 0%, transparent 100%)
-          ` }} />
-          <div style={{ position: 'absolute', inset: 0, mixBlendMode: 'screen',
-            background: 'linear-gradient(180deg, rgba(48,82,65,0.14) 0%, rgba(32,58,46,0.05) 14%, transparent 22%)',
-          }} />
-          <div style={{ position: 'absolute', inset: 0, mixBlendMode: 'screen',
-            clipPath: 'polygon(2% 0%, 31% 0%, 44% 100%, 15% 100%)',
-            background: 'linear-gradient(148deg, rgba(88,74,24,0) 0%, rgba(88,74,24,0.22) 30%, rgba(72,60,18,0.28) 55%, rgba(55,46,14,0.18) 78%, rgba(35,28,8,0.05) 100%)',
-          }} />
-          <div style={{ position: 'absolute', inset: 0, mixBlendMode: 'screen',
-            clipPath: 'polygon(62% 0%, 80% 0%, 91% 100%, 74% 100%)',
-            background: 'linear-gradient(148deg, rgba(85,72,22,0) 0%, rgba(85,72,22,0.18) 28%, rgba(68,57,16,0.24) 58%, rgba(50,42,12,0.14) 80%, rgba(30,25,7,0.04) 100%)',
-          }} />
-          <div style={{ position: 'absolute', inset: 0, mixBlendMode: 'screen',
-            clipPath: 'polygon(5% 0%, 15% 0%, 36% 100%, 18% 100%)',
-            background: 'linear-gradient(148deg, transparent 0%, rgba(255,240,175,0.28) 18%, rgba(248,228,158,0.24) 50%, rgba(235,215,140,0.12) 80%, transparent 100%)',
-          }} />
-          <div style={{ position: 'absolute', inset: 0, mixBlendMode: 'screen',
-            clipPath: 'polygon(60% 0%, 70% 0%, 84% 100%, 70% 100%)',
-            background: 'linear-gradient(148deg, transparent 0%, rgba(255,240,175,0.22) 22%, rgba(248,228,158,0.18) 55%, rgba(235,215,140,0.10) 82%, transparent 100%)',
-          }} />
+          {/* Meadow floor — baked at resize; all texture/lighting composited in canvas-land */}
+          <canvas
+            ref={bgCanvasRef}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+          />
 
           <SquareCanvas
             ref={squareCanvasRef}

@@ -307,7 +307,7 @@ The icon zoom is implemented on the home screen side only. The game and intro sy
 ### 6.4 Square Breathing Game Page (`/games/square`)
 **Audience:** Child (immersive)
 **Goal:** Child traces the square path and breathes at a calm, guided pace
-**Background:** Eucalyptus sage `#9FBFB4` — drawn as a subtle diagonal linear gradient on the canvas (lighter sage top-left, darker sage bottom-right). The edges of the background also carry a very faint tint of the current lap color, crossfading over ~1 second when a lap completes. On reset, the background returns immediately to pure sage.
+**Background:** Eucalyptus sage `#9FBFB4` — a subtle diagonal gradient (lighter sage top-left, darker sage bottom-right), with optional texture and lighting per `POLISH-STRATEGY.md`. Static — does not shift with lap state.
 **Feel:** All interface disappears. Only the game exists.
 
 **Intro screen:** Every game session begins with the shared Pre-Game Intro Screen defined in Section 6.0. Apply it here exactly as specified.
@@ -422,36 +422,47 @@ Key constraints:
 
 #### Visual Polish — Square Breathing Game
 
-**Guiding principle:** Every element should feel dimensional and alive, not flat. The stroke rendering is the primary visual — it must feel organic and hand-painted, not like a cursor trail. All effects use Canvas 2D API only. No CSS filters, no external libraries.
+**Guiding principle:** Every element should feel dimensional and alive, not flat. The stroke rendering is the primary visual — it must feel organic and hand-painted, not like a cursor trail.
 
-**Background:** A subtle diagonal linear gradient (top-left lighter sage to bottom-right darker sage) drawn as the first operation each frame. The edges carry a very faint tint of the current lap color, crossfading over ~1 second when a lap increments. On reset, returns immediately to pure sage.
+Visual technique, iOS perf budget, and rules about CSS filters / SVG / layering live in `POLISH-STRATEGY.md`. This section describes design intent; that doc describes how to achieve it.
 
-**Background vignette:** A subtle radial darkening drawn over the background gradient, before the racetrack. Pushes the centered track forward perceptually.
+**Background:** A subtle diagonal gradient (top-left lighter sage to bottom-right darker sage) with optional baked texture and lighting. Static — does not shift with lap state.
 
-**Racetrack surface:** Drawn in four layered passes each frame to create the illusion of a slightly raised physical channel — a convex surface with a lit inner lip and a shadowed inner wall:
+**Vignette:** A subtle radial darkening that pushes the centered track forward perceptually. Sits above the game canvas; its center is transparent so on-canvas elements (encouragement message, pacing circle) read clearly.
+
+**Racetrack surface:** Composed of four layered passes to create the illusion of a slightly raised physical channel — a convex surface with a lit inner lip and a shadowed inner wall:
 - Pass A: outer shadow — anchors the track with a soft drop shadow
 - Pass B: gradient body — main cream surface simulating a curved raised surface lit from above. Gradient cached per resize.
 - Pass C: highlight rim — very thin bright stroke simulating reflected light on the raised inner lip
 - Pass D: inner wall shadow — faint dark stroke simulating the inner wall casting shadow into the channel
 
-**Drawing order — every frame, without exception:**
-1. Background gradient
-2. Background vignette
-3. Pass A — outer shadow
-4. Pass B — gradient body
-5. Pass C — highlight rim
-6. Pass D — inner wall shadow
-7. Paint canvas composite
-8. Labels
-9. Pacing circle
-10. Amber / trace circle
-11. Encouragement overlay (if active)
+**Visual stacking (back to front):**
+1. Background — gradient, textures, lighting (baked once at resize)
+2. Racetrack surface — outer shadow, gradient body, highlight rim, inner wall shadow
+3. Painted stroke — child's traced color, clipped to track
+4. Labels (DOM overlay)
+5. Pacing circle
+6. Amber / trace circle
+7. Vignette (CSS overlay)
+8. Encouragement overlay (when active)
 
-**Paint layer — default stroke:** A persistent offscreen canvas composited each frame. Full track width, round cap, color interpolates continuously between current and next lap color based on lap progress. Clipped to annular track region.
+Static layers are baked at resize; dynamic layers render per-frame. See `POLISH-STRATEGY.md` for the rendering pipeline and per-frame budget.
+
+**Paint layer — default stroke ("Classic"):** A persistent offscreen canvas composited each frame. Rendered via stamp-based drawing — radial-gradient stamps placed along the centerline at fixed spacing, with a soft leading edge and subtle rail-edge accumulation. Color drifts continuously over time, interpolating between lap colors. Implementation in `strokes/stampStroke.js`. Clipped to annular track region.
 
 **Paint layer — watercolor stroke (selectable):** An alternative rendering mode producing a softer, more painterly quality. Uses multiple independent offscreen canvases composited back-to-front. Each layer has its own point history with slight positional jitter on outer layers, creating organic depth. Includes velocity response (faster movement = thinner, more transparent stroke) and wet edge effect (darker pigment at stroke boundary). Texture grain is implemented but disabled by default. All tuning constants live at the top of `layeredWash.js`.
 
 **Stroke Style Selector:** A small paintbrush icon button in the top-right corner. Tapping opens a floating panel with two options: Classic and Watercolor. Switching resets the game to start state. Session-only — always defaults to Classic on load. Implemented as `StrokeSelector.jsx`. Stroke mode stored as a ref in `SquareGame.jsx`, passed to `SquareCanvas.jsx` as a prop.
+
+---
+
+#### Heat Gauge
+
+An accumulating effect over the first six laps that mirrors how consistently the child stays with the pacing circle. If they hold steady, the world remains vivid and the stroke maintains full body. If they drift off-pace, paint gradually drains from the track, the stroke thins, and the world desaturates — felt feedback that pace and presence are slipping.
+
+The intent is not punishment. The intent is felt feedback: the visual state mirrors the regulation state. A child returning to pace can see the color come back. The effect caps at lap 6 — by then the child is either with the pacing circle or has chosen to pause/exit.
+
+Implementation details (saturation curve, paint-drain mechanism, stroke-thinning behavior) live in the code and `POLISH-STRATEGY.md`.
 
 ---
 
@@ -610,8 +621,9 @@ whoosha/
     │           ├── SquareCanvas.jsx       # Everything canvas — geometry, drawing, input, lap logic
     │           ├── StrokeSelector.jsx     # Top-right stroke style picker UI
     │           └── strokes/
-    │               ├── taperedStroke.js   # Default stroke: Catmull-Rom + tapered polygon fill
-    │               └── layeredWash.js     # Alternative stroke: multi-layer watercolor wash
+    │               ├── stampStroke.js     # 'Classic' stroke (default): radial-gradient stamps along centerline
+    │               ├── layeredWash.js     # 'Watercolor' stroke: multi-layer wash with organic depth
+    │               └── taperedStroke.js   # Prior default — retained for reference, pending retirement
     └── pages/
         ├── LandingPage.jsx
         ├── LoginPage.jsx
@@ -741,18 +753,14 @@ All text in the app should feel soft. Use `font-weight: 600` (semibold) rather t
 
 ---
 
-## 15. How to Start Each Claude Code Session
+## 15. Session Setup
 
-At the beginning of each new Claude Code session, say:
+Claude Code auto-loads `CLAUDE.md` at the start of every session. That file directs Claude to read this briefing and `POLISH-STRATEGY.md` as appropriate to the task — no manual setup needed.
 
-> "Please read BRIEFING.md in the project root before we begin."
-
-Claude Code will read the file using its file tools. Then tell it which section is most relevant to the current task. For example:
-- "We're building the Landing Page. Refer to Section 6.1 and Section 7 for color."
-- "We're implementing the Square Breathing game. Refer to Section 6.4 for full specs."
-- "We're setting up Supabase. Refer to Section 4 for the schema."
-
-This ensures every session starts with full context without re-explaining the project from scratch.
+When kicking off a task, point Claude to the most relevant section:
+- "We're building the Landing Page. Refer to Section 6.1 and Section 7."
+- "We're working on the Square Breathing game. Refer to Section 6.4."
+- "We're setting up Supabase. Refer to Section 4."
 
 ---
 

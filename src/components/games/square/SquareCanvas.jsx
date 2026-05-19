@@ -1114,7 +1114,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     <canvas
       ref={canvasRef}
       className="w-full h-full"
-      style={{ touchAction: 'none', pointerEvents: interactive ? 'auto' : 'none' }}
+      style={{ position: 'absolute', inset: 0, touchAction: 'none', pointerEvents: interactive ? 'auto' : 'none' }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
