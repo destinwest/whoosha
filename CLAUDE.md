@@ -47,6 +47,6 @@ Static SVG assets → baked into an offscreen canvas at resize → composited as
 - Supabase (auth + Postgres), Stripe (test mode), Sentry, Rive (Dragon game only)
 - Node 18+
 
-## Current state (2026-05-19)
+## Current state (2026-05-19, post Step 1)
 
-Main is clean post-recovery. Background rendering was refactored to a separate baked canvas; `stampStroke.js` was added. CSS overlay layering still violates the rules above and needs a cleanup refactor before adding SVG polish. See `POLISH-STRATEGY.md` § "Staged plan forward."
+Main is clean. Step 1 of the polish refactor landed: 6 CSS overlays baked into the bg canvas, DPR fixed, `bgCanvas` moved inside the saturate wrapper, `SquareCanvas` made `position: absolute`. Compositing layer count down from ~11 to ~4. Next up: Step 2 (SVG track texture). See `POLISH-STRATEGY.md` § "Staged plan forward."

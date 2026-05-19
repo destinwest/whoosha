@@ -147,14 +147,18 @@ Do **not** desaturate via `ctx.filter` per-frame, `getImageData` pixel ops, or r
 
 ---
 
-## Current state of `main` (as of 2026-05-19)
+## Current state of `main` (as of 2026-05-19, post Step 1)
 
-Working tree clean. Recovery commit landed. Still violates rules above:
+Working tree clean. Step 1 landed. Conforms to all layering rules.
 
-- **6× `mixBlendMode: screen` overlay divs** in `src/components/games/square/SquareGame.jsx` lines ~139–164. Need to be removed; their visual intent gets migrated into the bake.
-- **DPR bug in `buildMeadowBg`** — canvas sized at CSS pixels, not device pixels. Will be soft on retina.
-- **`bgCanvas` is outside the saturate wrapper.** Doesn't desaturate with the heat gauge. Move inside.
-- **`stampStroke.js` is in place** and wired up — no changes needed there.
+- **6 CSS overlays removed.** Their visual intent (canopy dapples, top-edge shadow, dark/bright shafts) is now baked into `buildMeadowBg` via Canvas 2D `globalCompositeOperation`.
+- **DPR fixed.** `buildMeadowBg` and the display canvas both size at `w * dpr × h * dpr`; drawing scaled accordingly.
+- **`bgCanvas` lives inside the saturate wrapper.** Desaturates with the heat gauge in lockstep.
+- **`SquareCanvas` is `position: absolute`** so it paints above the opaque baked bg canvas. Both siblings now use the same positioning mode per rule #7.
+- **`stampStroke.js`** in place as the Classic default.
+- Compositing layer count: ~4 full-screen layers (was ~11 pre-refactor).
+
+Next: Step 2 — SVG track texture.
 
 ---
 
