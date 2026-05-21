@@ -16,13 +16,13 @@ function buildMeadowBg(w, h, dpr, textureImg) {
   const ctx = oc.getContext('2d')
   ctx.scale(dpr, dpr)
 
-  // Base diagonal sage wash
+  // Base diagonal wash — deep emerald-teal, lighter top-left to darker bottom-right
   const bg = ctx.createLinearGradient(0, 0, w * 0.6, h)
-  bg.addColorStop(0,    '#B0CECA')
-  bg.addColorStop(0.30, '#9BBFBB')
-  bg.addColorStop(0.55, '#8AB5B1')
-  bg.addColorStop(0.78, '#7AA5A0')
-  bg.addColorStop(1.0,  '#7A9E99')
+  bg.addColorStop(0,    '#28C5AD')
+  bg.addColorStop(0.30, '#159986')
+  bg.addColorStop(0.55, '#097969')
+  bg.addColorStop(0.78, '#094E44')
+  bg.addColorStop(1.0,  '#082B26')
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
 
@@ -54,13 +54,13 @@ function buildMeadowBg(w, h, dpr, textureImg) {
     ctx.fillRect(0, 0, w, h)
   }
 
-  // Green canopy dapples — cooler tinted pools, migrated from former CSS overlay
+  // Warm canopy dapples — gold-olive pools, light filtered through autumn leaves
   for (const { cx, cy, rf, color } of [
-    { cx: 0.21, cy: 0.26, rf: 0.33, color: 'rgba(105,140,45,0.12)' },
-    { cx: 0.71, cy: 0.19, rf: 0.26, color: 'rgba( 98,130,40,0.09)' },
-    { cx: 0.80, cy: 0.60, rf: 0.29, color: 'rgba(102,136,43,0.11)' },
-    { cx: 0.33, cy: 0.72, rf: 0.31, color: 'rgba( 96,128,38,0.10)' },
-    { cx: 0.54, cy: 0.44, rf: 0.23, color: 'rgba( 90,122,35,0.08)' },
+    { cx: 0.21, cy: 0.26, rf: 0.33, color: 'rgba(165,150,70,0.12)' },
+    { cx: 0.71, cy: 0.19, rf: 0.26, color: 'rgba(155,140,65,0.09)' },
+    { cx: 0.80, cy: 0.60, rf: 0.29, color: 'rgba(160,145,68,0.11)' },
+    { cx: 0.33, cy: 0.72, rf: 0.31, color: 'rgba(150,138,62,0.10)' },
+    { cx: 0.54, cy: 0.44, rf: 0.23, color: 'rgba(145,130,58,0.08)' },
   ]) {
     const px = cx * w, py = cy * h, r = rf * Math.max(w, h)
     const g = ctx.createRadialGradient(px, py, 0, px, py, r)
@@ -70,10 +70,10 @@ function buildMeadowBg(w, h, dpr, textureImg) {
     ctx.fillRect(0, 0, w, h)
   }
 
-  // Top-edge depth — subtle dark wash on upper 22% (canopy shadow)
+  // Top-edge depth — warm dark sepia wash on upper 22% (warm canopy shadow)
   const topShadow = ctx.createLinearGradient(0, 0, 0, h * 0.22)
-  topShadow.addColorStop(0,     'rgba(48,82,65,0.14)')
-  topShadow.addColorStop(0.636, 'rgba(32,58,46,0.05)')
+  topShadow.addColorStop(0,     'rgba(75,60,35,0.14)')
+  topShadow.addColorStop(0.636, 'rgba(55,42,22,0.05)')
   topShadow.addColorStop(1,     'rgba(0,0,0,0)')
   ctx.fillStyle = topShadow
   ctx.fillRect(0, 0, w, h * 0.22)
@@ -162,6 +162,7 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
   const strokeModeRef   = useRef('classic')
   const squareCanvasRef = useRef(null)
   const bgCanvasRef     = useRef(null)
+  const pacingCanvasRef = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
 
   // ── Meadow background — baked once per resize ──────────────────────────────
   useEffect(() => {
@@ -253,11 +254,21 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
           <SquareCanvas
             ref={squareCanvasRef}
             strokeModeRef={strokeModeRef}
+            pacingCanvasRef={pacingCanvasRef}
             onGameStart={() => { sessionStartRef.current = Date.now() }}
             onResize={setLabelGeo}
             interactive={phase === 'game'}
           />
         </div>
+
+        {/* Pacing-circle layer — sits ABOVE the saturate wrapper so the circle
+            (and its grown/glowing state at the heat-gauge floor) stays vivid
+            while the rest of the world desaturates. Inside the blur wrapper so
+            it still blurs with the scene during the intro. */}
+        <canvas
+          ref={pacingCanvasRef}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+        />
 
         {/* label overlay — DOM text, positioned from canvas geometry */}
         {labelGeo && (() => {

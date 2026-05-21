@@ -32,8 +32,8 @@ const MAX_PATH_ADVANCE_MULT = 0.5
 // ── Heat gauge tuning ─────────────────────────────────────────────────────────
 const GAUGE_SPEED_THRESHOLD   = 1.2   // path rate ratio above which gauge charges
 const GAUGE_RECOVER_THRESHOLD = 3.0   // path rate ratio above which recovery timer resets — only true racing blocks recovery
-const GAUGE_CHARGE_DELAY      = 4000  // ms of sustained too-fast before desaturation begins
-const GAUGE_DRAIN_DELAY       = 1000  // ms of sustained recoverable-pace before recovery begins
+const GAUGE_CHARGE_DELAY      = 1000  // ms of sustained too-fast before the gauge starts ramping
+const GAUGE_DRAIN_DELAY       = 500   // ms of sustained recoverable-pace before recovery begins
 const GAUGE_EFFECT_THRESHOLD = 0.3    // gauge value below which no visible effect appears
 const ALPHA_ACTIVE = 0.75
 const ALPHA_FLOOR  = 0.18
@@ -151,9 +151,9 @@ function buildTrackGradient(ctx, { left, top, sqW, lw }) {
   // Position stops so the transition spans from straight inner edge (t=0)
   // through straight outer edge (~t=0.46) to corner outer edges (~t=0.88).
   const grad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
-  grad.addColorStop(0,   '#FAF5EE')   // inner edge of straights — lightest
-  grad.addColorStop(0.4, '#F5EFE6')   // straight outer edge — base cream
-  grad.addColorStop(1,   '#EDE5D8')   // corner outer edges — darkest
+  grad.addColorStop(0,   '#FAF2E0')   // inner edge of straights — lightest honey-cream
+  grad.addColorStop(0.4, '#F2EAD0')   // straight outer edge — base warm cream
+  grad.addColorStop(1,   '#E6DBBF')   // corner outer edges — darkest sand-cream
   return grad
 }
 
@@ -163,7 +163,7 @@ function drawTrackShadow(ctx, { left, top, sqW, cr, lw }) {
   ctx.beginPath()
   ctx.roundRect(left, top, sqW, sqW, cr)
   ctx.lineWidth   = lw + 7
-  ctx.strokeStyle = 'rgba(62,94,82,0.22)'
+  ctx.strokeStyle = 'rgba(78,68,40,0.22)'
   ctx.stroke()
   ctx.restore()
 }
@@ -211,7 +211,7 @@ function drawTrackInnerWall(ctx, { left, top, sqW, cr, lw }) {
     Math.max(0, cr - lw * 0.5),
   )
   ctx.lineWidth   = lw * 0.18
-  ctx.strokeStyle = 'rgba(62,94,82,0.14)'
+  ctx.strokeStyle = 'rgba(78,68,40,0.14)'
   ctx.stroke()
   ctx.restore()
 }
@@ -235,7 +235,7 @@ function applyPaintClip(ctx, { left, top, sqW, cr, lw }) {
 
 // ── SquareCanvas ──────────────────────────────────────────────────────────────
 const SquareCanvas = forwardRef(function SquareCanvas(
-  { strokeModeRef, onTick, onGameStart, onResize, interactive },
+  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onResize, interactive },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -293,6 +293,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const gaugeActiveRef       = useRef(false) // true once desaturation has fully fired
   const gaugeEffectRef       = useRef(0)     // computed gFx, written by gauge block, read by draw loop
   const childPathRateRef     = useRef(0)     // path fraction-units/ms, smoothed
+  const pacingEmphasisRef    = useRef(0)     // 0–1, eased toward gaugeActive — drives pacing-circle grow + glow
 
   // ── Fingerprint image loader ────────────────────────────────────────────────
   useEffect(() => {
@@ -352,6 +353,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       gaugeActiveRef.current      = false
       gaugeEffectRef.current      = 0
       childPathRateRef.current    = 0
+      pacingEmphasisRef.current   = 0
       document.documentElement.style.setProperty('--game-saturation', '1')
     },
   }), [])
@@ -787,6 +789,13 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       canvas.height      = rect.height * dpr
       paintCanvas.width  = rect.width  * dpr
       paintCanvas.height = rect.height * dpr
+
+      // Pacing-circle overlay canvas — same dimensions and DPR as main canvas
+      const pacingCanvas = pacingCanvasRef?.current
+      if (pacingCanvas) {
+        pacingCanvas.width  = rect.width  * dpr
+        pacingCanvas.height = rect.height * dpr
+      }
       geoRef.current     = buildGeo(rect)
       onResize?.({ labelMids: geoRef.current.labelMids, sq: geoRef.current.sq })
 
@@ -934,7 +943,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
 
         // ── Gauge state transitions ────────────────────────────────────────
         if (isTooFast && !gaugeActiveRef.current && tooFastTimerRef.current >= GAUGE_CHARGE_DELAY) {
-          // Charge delay met, still racing — ramp gauge to 1 over 2s
+          // Charge delay met, still racing — ramp gauge to 1 over 4s
           heatGaugeRef.current = Math.min(1, heatGaugeRef.current + dt / 4000)
           if (heatGaugeRef.current >= 1) {
             // Floor reached — clear paint canvas permanently
@@ -946,10 +955,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           }
         } else if (isGoodPace && !gaugeActiveRef.current && heatGaugeRef.current > 0) {
           // Slowing/lifting before floor — drain gauge back over 2s, paint recovers
-          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 4000)
+          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 2000)
         } else if (gaugeActiveRef.current && goodPaceTimerRef.current >= GAUGE_DRAIN_DELAY) {
-          // Floor reached; good pace held for 1s — drain over 2s, only saturation returns
-          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 4000)
+          // Floor reached; good pace held for 0.5s — drain over 2s, only saturation returns
+          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 2000)
           if (heatGaugeRef.current <= 0) {
             gaugeActiveRef.current   = false
             goodPaceTimerRef.current = 0
@@ -966,7 +975,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           : Math.pow((g - GAUGE_EFFECT_THRESHOLD) / (1 - GAUGE_EFFECT_THRESHOLD), 2)
 
         gaugeEffectRef.current = gFx
-        document.documentElement.style.setProperty('--game-saturation', (1 - gFx * 0.55).toFixed(3))
+        // Drain saturation toward grayscale — the color drains from the world.
+        document.documentElement.style.setProperty('--game-saturation', (1 - gFx * 0.9).toFixed(3))
       }
 
       // ── 3. Touch bloom ────────────────────────────────────────────────────
@@ -1030,12 +1040,55 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         }
       }
 
-      // ── 5. Pacing circle ─────────────────────────────────────────────────────
-      if (pacingPos) {
-        ctx.beginPath()
-        ctx.arc(pacingPos.x, pacingPos.y, lw * 0.62, 0, Math.PI * 2)
-        ctx.fillStyle = 'rgba(255,255,255,0.9)'
-        ctx.fill()
+      // ── 5. Pacing circle — drawn on the separate pacing canvas above the
+      //       saturate wrapper. Grows and gains a warm glow when the heat
+      //       gauge floor is active, drawing the child's eye back to pace.
+      //       Emphasis eases smoothly toward gaugeActive (target 0 or 1) so
+      //       the size/glow transition is gentle, not abrupt.
+      {
+        const target = gaugeActiveRef.current ? 1 : 0
+        const k = 1 - Math.exp(-dt / 400)  // exponential ease, ~1.2s to 95%
+        pacingEmphasisRef.current += (target - pacingEmphasisRef.current) * k
+      }
+
+      const pacingCanvas = pacingCanvasRef?.current
+      const pacingCtx = pacingCanvas?.getContext('2d')
+      if (pacingCtx) {
+        pacingCtx.save()
+        pacingCtx.setTransform(1, 0, 0, 1, 0, 0)
+        pacingCtx.clearRect(0, 0, pacingCanvas.width, pacingCanvas.height)
+        pacingCtx.scale(dpr, dpr)
+
+        if (pacingPos) {
+          const emph  = pacingEmphasisRef.current
+          const baseR = lw * 0.62
+          const r     = baseR * (1 + 0.2 * emph)  // 1.0× → 1.2× at full emphasis
+
+          // Warm glow underneath — vivid amber, brightness scales with emphasis
+          if (emph > 0.01) {
+            const glowR = r * 1.5
+            const glow  = pacingCtx.createRadialGradient(
+              pacingPos.x, pacingPos.y, r * 0.5,
+              pacingPos.x, pacingPos.y, glowR,
+            )
+            glow.addColorStop(0, `rgba(255,200,130,${(0.45 * emph).toFixed(3)})`)
+            glow.addColorStop(1, 'rgba(255,200,130,0)')
+            pacingCtx.beginPath()
+            pacingCtx.arc(pacingPos.x, pacingPos.y, glowR, 0, Math.PI * 2)
+            pacingCtx.fillStyle = glow
+            pacingCtx.fill()
+          }
+
+          // The circle itself — translucent so the start-state fingerprint
+          // shows through; lifts to more solid at full emphasis (gauge floor)
+          const fillAlpha = 0.55 + 0.30 * emph  // 0.55 at rest → 0.85 at floor
+          pacingCtx.beginPath()
+          pacingCtx.arc(pacingPos.x, pacingPos.y, r, 0, Math.PI * 2)
+          pacingCtx.fillStyle = `rgba(255,255,255,${fillAlpha.toFixed(3)})`
+          pacingCtx.fill()
+        }
+
+        pacingCtx.restore()
       }
 
       // ── 6. Fingerprint indicator (above pacing circle) ────────────────────
