@@ -14,33 +14,32 @@ import AccountPage from './pages/AccountPage'
 import SquarePage from './pages/games/SquarePage'
 import DragonPage from './pages/games/DragonPage'
 
-// ── TESTING BYPASS — reinstate when testing is done ──────────────────────────
-// ProtectedRoute auth/onboarding gates are commented out for local game testing.
-// To reinstate: uncomment everything inside this function and remove the early return.
+// Gates protected routes: requires authentication, and forces a first-time
+// signup through /onboarding before any other protected route is reachable.
 function ProtectedRoute({ children }) {
-  // const user = useStore((state) => state.user)
-  // const loading = useStore((state) => state.loading)
-  // const childProfiles = useStore((state) => state.childProfiles)
-  // const location = useLocation()
+  const user = useStore((state) => state.user)
+  const loading = useStore((state) => state.loading)
+  const childProfiles = useStore((state) => state.childProfiles)
+  const location = useLocation()
 
-  // if (loading) return <LoadingSpinner />
+  if (loading) return <LoadingSpinner />
 
-  // if (!user) {
-  //   return <Navigate to="/login" replace state={{ from: location }} />
-  // }
+  if (!user) {
+    return <Navigate to="/login" replace state={{ from: location }} />
+  }
 
   // Already has children — don't let them back into onboarding.
-  // if (Array.isArray(childProfiles) && childProfiles.length > 0 && location.pathname === '/onboarding') {
-  //   return <Navigate to="/home" replace />
-  // }
+  if (Array.isArray(childProfiles) && childProfiles.length > 0 && location.pathname === '/onboarding') {
+    return <Navigate to="/home" replace />
+  }
 
   // Onboarding gate: childProfiles is [] (not null) only after a successful
   // fetch, so this fires only when we know for certain there are no children.
-  // if (Array.isArray(childProfiles) && childProfiles.length === 0 && location.pathname !== '/onboarding') {
-  //   return <Navigate to="/onboarding" replace />
-  // }
+  if (Array.isArray(childProfiles) && childProfiles.length === 0 && location.pathname !== '/onboarding') {
+    return <Navigate to="/onboarding" replace />
+  }
 
-  return children // TESTING: always render — remove this line when reinstating above
+  return children
 }
 
 // Wraps routes that should not be accessible once logged in (login, signup).
@@ -62,9 +61,7 @@ function AppRoutes() {
   return (
     <Routes>
       {/* ── Public routes ─────────────────────────────────────── */}
-      {/* TESTING BYPASS: root redirects to /home — reinstate LandingPage when testing is done */}
-      {/* <Route path="/" element={<LandingPage />} /> */}
-      <Route path="/" element={<Navigate to="/home" replace />} />
+      <Route path="/" element={<LandingPage />} />
       <Route path="/demo" element={<DemoPage />} />
       <Route
         path="/login"

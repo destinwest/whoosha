@@ -2,6 +2,12 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabaseClient'
 
+// Set to true once the Google provider is configured in Supabase
+// (Authentication → Providers → Google) AND the OAuth client is set up in
+// Google Cloud Console. While false, the "Continue with Google" button and
+// the "or" divider are hidden — email/password is the only auth path.
+const GOOGLE_OAUTH_ENABLED = false
+
 // Google G SVG — matches official brand colors
 function GoogleIcon() {
   return (
@@ -29,6 +35,7 @@ export default function AuthForm({ mode }) {
 
   async function handleGoogleOAuth() {
     setError(null)
+    setSubmitting(true)
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -38,7 +45,12 @@ export default function AuthForm({ mode }) {
         redirectTo: window.location.origin,
       },
     })
-    if (error) setError(error.message)
+    // On success, the browser is about to redirect — leaving submitting=true
+    // is harmless because the page is unloading. On error, re-enable.
+    if (error) {
+      setError(error.message)
+      setSubmitting(false)
+    }
   }
 
   async function handleSubmit(e) {
@@ -135,22 +147,26 @@ export default function AuthForm({ mode }) {
             {isLogin ? 'Welcome back' : 'Create your account'}
           </h1>
 
-          {/* Google OAuth */}
-          <button
-            type="button"
-            onClick={handleGoogleOAuth}
-            className="w-full flex items-center justify-center gap-3 bg-white border border-text-sage/30 rounded-xl py-3.5 font-body font-semibold text-text-forest hover:bg-bg-mint/50 active:bg-bg-mint transition-colors"
-          >
-            <GoogleIcon />
-            Continue with Google
-          </button>
+          {/* Google OAuth + "or" divider — hidden until GOOGLE_OAUTH_ENABLED is flipped on */}
+          {GOOGLE_OAUTH_ENABLED && (
+            <>
+              <button
+                type="button"
+                onClick={handleGoogleOAuth}
+                disabled={submitting}
+                className="w-full flex items-center justify-center gap-3 bg-white border border-text-sage/30 rounded-xl py-3.5 font-body font-semibold text-text-forest hover:bg-bg-mint/50 active:bg-bg-mint transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <GoogleIcon />
+                Continue with Google
+              </button>
 
-          {/* Divider */}
-          <div className="flex items-center gap-4 my-6" aria-hidden="true">
-            <div className="flex-1 h-px bg-text-sage/25" />
-            <span className="font-body text-sm text-text-sage">or</span>
-            <div className="flex-1 h-px bg-text-sage/25" />
-          </div>
+              <div className="flex items-center gap-4 my-6" aria-hidden="true">
+                <div className="flex-1 h-px bg-text-sage/25" />
+                <span className="font-body text-sm text-text-sage">or</span>
+                <div className="flex-1 h-px bg-text-sage/25" />
+              </div>
+            </>
+          )}
 
           {/* Email + password form */}
           <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">

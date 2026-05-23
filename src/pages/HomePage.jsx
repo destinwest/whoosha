@@ -2,69 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import useStore from '../store/useStore'
-import GameCard from '../components/games/GameCard'
+import GameCarousel from '../components/games/GameCarousel'
 
 async function logout(navigate) {
   navigate('/')
   await supabase.auth.signOut()
-}
-
-// ── Shape icons ────────────────────────────────────────────────────────────────
-// stroke is an inline attribute (not currentColor) so clones render correctly
-// in the zoom portal, which has no CSS color context.
-// #3E5E52 = text-forest — visually identical to the previous currentColor approach.
-
-function SquareIcon({ fill = 'none' }) {
-  return (
-    <svg viewBox="0 0 64 64" fill="none" stroke="#3E5E52" strokeWidth="3.5"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="w-14 h-14">
-      <rect x="10" y="10" width="44" height="44" rx="8" fill={fill} />
-    </svg>
-  )
-}
-
-function DragonIcon() {
-  return (
-    <svg viewBox="0 0 64 64" fill="none" stroke="#3E5E52" strokeWidth="3.5"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="w-14 h-14">
-      {/* Body */}
-      <ellipse cx="30" cy="38" rx="16" ry="12" />
-      {/* Head */}
-      <circle cx="44" cy="24" r="9" />
-      {/* Snout */}
-      <path d="M50 22 Q56 20 56 26 Q56 30 50 28" />
-      {/* Eye */}
-      <circle cx="46" cy="22" r="1.5" fill="#3E5E52" stroke="none" />
-      {/* Wing */}
-      <path d="M22 32 Q12 20 16 12 Q22 18 26 28" />
-      {/* Tail */}
-      <path d="M16 42 Q8 46 10 54 Q16 50 20 44" />
-      {/* Flame — small, from snout */}
-      <path d="M56 24 Q62 22 60 18 Q58 22 56 20 Q60 16 57 12 Q54 16 55 20 Q52 16 54 24" fill="#3E5E52" stroke="none" />
-    </svg>
-  )
-}
-
-function HexagonIcon() {
-  return (
-    <svg viewBox="0 0 64 64" fill="none" stroke="#3E5E52" strokeWidth="3.5"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="w-14 h-14">
-      <polygon points="32,10 51,21 51,43 32,54 13,43 13,21" />
-    </svg>
-  )
-}
-
-function FlowerIcon() {
-  return (
-    <svg viewBox="0 0 64 64" fill="none" stroke="#3E5E52" strokeWidth="3.5"
-      strokeLinecap="round" aria-hidden="true" className="w-14 h-14">
-      <circle cx="32" cy="17" r="9" />
-      <circle cx="47" cy="32" r="9" />
-      <circle cx="32" cy="47" r="9" />
-      <circle cx="17" cy="32" r="9" />
-      <circle cx="32" cy="32" r="7" />
-    </svg>
-  )
 }
 
 function UserCircleIcon() {
@@ -77,70 +19,22 @@ function UserCircleIcon() {
   )
 }
 
-// ── Game definitions ────────────────────────────────────────────────────────────
-// Soothing palette assigned one per card: teal, lavender, amber, sage green.
-// Only Square Breathing is free-tier accessible (see Section 10c).
-// Icons are instantiated as elements here so the same ReactNode renders in both
-// the card and the ZoomOverlay portal clone.
-
-const GAMES = [
-  {
-    id: 'square',
-    label: 'Square Breathing',
-    description: 'Trace the square and breathe',
-    route: '/games/square',
-    bg: 'bg-secondary',
-    icon: <SquareIcon />,
-    // Bottom-right corner of the rect (arc midpoint at 45°):
-    // viewBox (46+8·cos45°, 46+8·sin45°) = (51.66, 51.66) → 51.66/64 × 56 = 45.2px → 45.2/56 = 0.807
-    focalPoint: { x: 0.807, y: 0.807 },
-  },
-  {
-    id: 'dragon',
-    label: 'Dragon Breath',
-    description: 'Breathe with the dragon',
-    route: '/games/dragon',
-    bg: 'bg-accent-lavender',
-    icon: <DragonIcon />,
-    focalPoint: { x: 0.82, y: 0.35 },
-  },
-  {
-    id: 'hexagon',
-    label: 'Hexagon Breathing',
-    description: 'Six sides, six slow breaths',
-    route: '/games/hexagon',
-    bg: 'bg-accent-amber',
-    icon: <HexagonIcon />,
-  },
-  {
-    id: 'flower',
-    label: 'Flower Breathing',
-    description: 'Open and close like petals',
-    route: '/games/flower',
-    bg: 'bg-primary',
-    icon: <FlowerIcon />,
-  },
-]
-
-// ── HomePage ────────────────────────────────────────────────────────────────────
+// ── HomePage ──────────────────────────────────────────────────────────────────
+// Header (logo + parent menu), greeting, and the fan-card GameCarousel for game
+// selection. The carousel owns its own state via useStore.homeActiveCardIndex
+// so the last-viewed card persists across navigation.
 
 export default function HomePage() {
   const user        = useStore((state) => state.user)
   const activeChild = useStore((state) => state.activeChild)
   const navigate    = useNavigate()
 
-  // Default to 'free' while fetching — safer than temporarily showing paid content.
-  const [tier, setTier]     = useState('free')
-  const [fading, setFading] = useState(false)
+  // Fetch tier so future paid-feature gates (e.g. unlocking carousel cards)
+  // have a value to read. Currently the carousel data hardcodes locked state.
+  const [tier, setTier]         = useState('free')
   const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef    = useRef(null)
-  const mountedRef = useRef(true)
+  const menuRef                 = useRef(null)
 
-  useEffect(() => {
-    return () => { mountedRef.current = false }
-  }, [])
-
-  // Fetch this parent's tier from the profiles table.
   useEffect(() => {
     if (!user?.id) return
     supabase
@@ -153,7 +47,7 @@ export default function HomePage() {
       })
   }, [user?.id])
 
-  // Close menu when clicking outside.
+  // Close parent menu on outside click
   useEffect(() => {
     if (!menuOpen) return
     function onClickOutside(e) {
@@ -165,104 +59,64 @@ export default function HomePage() {
     return () => document.removeEventListener('mousedown', onClickOutside)
   }, [menuOpen])
 
-  // Section 10c: Square Breathing is always free; everything else requires paid.
-  function isGameActive(id) {
-    if (tier === 'paid') return true
-    // TODO: remove 'dragon' from free tier after spike validation
-    return id === 'square' || id === 'dragon'
-  }
-
-  // Called by GameCard when the zoom sequence begins.
-  // Also handles the cancelled-navigation fallback: GameCard resets zoomActive
-  // after 800ms if still mounted, but we need to restore opacity here too.
-  // We simply reset fading after 900ms if this component is still mounted
-  // (i.e. navigation failed — we never left the page).
-  function handleZoomStart() {
-    setFading(true)
-    setTimeout(() => {
-      if (mountedRef.current) setFading(false)
-    }, 900)
-  }
-
   const firstName = activeChild?.first_name ?? ''
 
+  // tier is fetched for future use; reference it so lint doesn't flag unused
+  void tier
+
   return (
-    <div
-      className="min-h-screen bg-bg-eucalyptus flex flex-col"
-      style={{
-        opacity: fading ? 0 : 1,
-        transition: fading ? 'opacity 450ms cubic-bezier(0.4, 0, 0, 1)' : 'none',
-      }}
-    >
+    <div className="min-h-screen bg-bg-eucalyptus flex flex-col overflow-hidden select-none">
 
-        {/* ── Minimal header: logo left, parent icon right ── */}
-        <header className="flex items-center justify-between px-6 pt-6 pb-2 flex-shrink-0">
-          <span className="font-display text-2xl font-semibold text-text-forest">
-            Whoosha
-          </span>
-          {/* Parent icon → dropdown with Dashboard + Log out */}
-          <div ref={menuRef} className="relative">
-            <button
-              onClick={() => setMenuOpen((o) => !o)}
-              className="text-text-sage hover:text-text-forest transition-colors p-1 -mr-1 rounded-xl"
-              aria-label="Parent menu"
-              aria-haspopup="true"
-              aria-expanded={menuOpen}
-            >
-              <UserCircleIcon />
-            </button>
+      {/* Header: logo left, parent menu right */}
+      <header className="flex items-center justify-between px-6 pt-6 pb-2 flex-shrink-0">
+        <span className="font-display text-2xl font-semibold text-text-forest">Whoosha</span>
+        <div ref={menuRef} className="relative">
+          <button
+            onClick={() => setMenuOpen((o) => !o)}
+            className="text-text-sage hover:text-text-forest transition-colors p-1 -mr-1 rounded-xl"
+            aria-label="Parent menu"
+            aria-haspopup="true"
+            aria-expanded={menuOpen}
+          >
+            <UserCircleIcon />
+          </button>
 
-            {menuOpen && (
-              <div className="absolute right-0 mt-1 w-44 bg-white rounded-2xl shadow-lg overflow-hidden z-50 border border-black/5">
-                <Link
-                  to="/dashboard"
-                  onClick={() => setMenuOpen(false)}
-                  className="block px-4 py-3 font-body text-sm font-medium text-text-forest hover:bg-bg-cream transition-colors"
-                >
-                  Dashboard
-                </Link>
-                <button
-                  onClick={() => logout(navigate)}
-                  className="block w-full text-left px-4 py-3 font-body text-sm font-medium text-text-sage hover:bg-bg-cream transition-colors border-t border-black/5"
-                >
-                  Log out
-                </button>
-              </div>
-            )}
-          </div>
-        </header>
-
-        {/* ── Greeting ── */}
-        <div className="px-6 pt-6 pb-2 flex-shrink-0">
-          <h1 className="font-display text-4xl font-semibold text-text-forest">
-            {firstName ? `Hi ${firstName} 🌿` : 'Hi there 🌿'}
-          </h1>
-          <p className="font-body text-text-sage mt-1">
-            Which game would you like to play?
-          </p>
+          {menuOpen && (
+            <div className="absolute right-0 mt-1 w-44 bg-white rounded-2xl shadow-lg overflow-hidden z-50 border border-black/5">
+              <Link
+                to="/dashboard"
+                onClick={() => setMenuOpen(false)}
+                className="block px-4 py-3 font-body text-sm font-medium text-text-forest hover:bg-bg-cream transition-colors"
+              >
+                Dashboard
+              </Link>
+              <button
+                onClick={() => logout(navigate)}
+                className="block w-full text-left px-4 py-3 font-body text-sm font-medium text-text-sage hover:bg-bg-cream transition-colors border-t border-black/5"
+              >
+                Log out
+              </button>
+            </div>
+          )}
         </div>
+      </header>
 
-        {/* ── Game grid ── */}
-        <main className="flex-1 px-4 pt-6 pb-10">
-          <div className="grid grid-cols-2 gap-4 max-w-2xl mx-auto">
-            {GAMES.map((game) => (
-              <GameCard
-                key={game.id}
-                id={game.id}
-                label={game.label}
-                description={game.description}
-                icon={game.icon}
-                zoomIcon={game.zoomIcon}
-                route={game.route}
-                bg={game.bg}
-                active={isGameActive(game.id)}
-                onZoomStart={handleZoomStart}
-                focalPoint={game.focalPoint}
-              />
-            ))}
-          </div>
-        </main>
+      {/* Greeting */}
+      <div className="px-6 pt-4 pb-2 flex-shrink-0 text-center">
+        <h1 className="font-display text-3xl md:text-4xl font-semibold text-text-forest">
+          {firstName ? `Hi ${firstName} 🌿` : 'Hi there 🌿'}
+        </h1>
+      </div>
 
+      {/* Carousel — fills remaining space vertically */}
+      <main className="flex-1 flex flex-col items-center justify-center px-4">
+        <GameCarousel />
+      </main>
+
+      {/* Footer hint */}
+      <div className="text-center text-sm text-text-forest/55 pb-6 px-4">
+        Swipe or use the side arrows · Tap a card to play
+      </div>
     </div>
   )
 }

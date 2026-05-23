@@ -277,30 +277,29 @@ The intro system is designed to support additional variants over time, each suit
 **Feel:** Welcoming, calm, child-appropriate — soothing and rewarding palette dominates
 
 **Layout:**
-- **Minimal header:** App logo centered or left. Small parent/account icon top right only. No other navigation visible.
+- **Minimal header:** App logo top-left, small parent/account menu top-right (opens to Dashboard / Log out).
 - **Greeting:** Large, warm, rounded text. E.g. "Hi Lily 🌿" using the active child's first name. Pulled from Supabase. Centered below header.
-- **Game cards grid:** 2x2 grid on tablet, 2x2 on phone (scrollable if needed), single column on very small screens. Each card:
-  - Large rounded rectangle, minimum 180px tall, generous padding
-  - Soft background color from soothing palette — one card per color (sage green, teal, lavender, amber)
-  - Simple illustrated shape icon centered (square, infinity, hexagon, flower)
-  - Game name in large rounded font below icon: **Square Breathing, Infinity Breathing, Hexagon Breathing, Flower Breathing**
-  - One short line of description ("Trace the square and breathe")
-  - Entire card is tappable — large touch target
-- **Bottom of screen:** Only if needed — small parent icon to access dashboard. No other navigation.
-- **Inactive games** (not yet built): Show card in muted/desaturated state with small lock icon. Not tappable — pointer-events none. No toast or message on tap.
+- **Fanned game-card carousel:** Eight cards arranged in a fan, one active in the center, others rotated behind. Implemented in `src/components/games/GameCarousel.jsx`. Roster and order in `src/data/games.js`:
+  - Positions −3, −2: "more breath soon" placeholders (locked, frosted, three-dot mystery shape)
+  - Position −1: Infinity Breathing (locked, frosted)
+  - Position 0 (center, default active): **Square Breathing** (only free-tier game)
+  - Position +1: Hexagon Breathing (locked, frosted)
+  - Position +2: Flower Breathing (locked, frosted)
+  - Positions +3, +4: "more breath soon" placeholders (locked, frosted)
+- **Card visual:** 200×280px rounded rectangle. Per-game gradient background. Shape icon centered, game name and tagline below. Locked cards have a frosted-glass filter (`blur(2px) saturate(0.55)`) plus a small lock badge in the top-right corner.
+- **Last-viewed card persists** across navigation within a session via `homeActiveCardIndex` in the Zustand store. Defaults to Square on first load.
 
-**Tile zoom transition (on active game card tap):**
-Tapping an active game card does not navigate immediately. Instead the card's shape icon zooms toward the viewer, filling the screen with its dark green stroke color, before handing off to the game route. This gives the child a felt sense of diving into the game world rather than switching screens.
+**Interaction:**
+- **Touch-primary devices (phones and tablets):** swipe left/right to rotate the fan. Tap a side card to bring it to center. Tap the center card to enter (if unlocked) or show the "Coming Soon" overlay (if locked). Chevron buttons are hidden via `(hover: none) and (pointer: coarse)` media query.
+- **Desktop (mouse-primary):** chevron buttons (`‹` / `›`) flank the carousel. Arrow keys also rotate. Click a side card to bring it to center. Click the center card to enter the game. Enter key activates the centered card.
+- **Coming Soon overlay:** Tapping the active card while it's locked shows a translucent overlay with "Coming Soon" text. Auto-dismisses after ~1.4s; click anywhere on the overlay to dismiss earlier.
 
-Sequence:
-1. Home screen content fades out over ~450ms
-2. The shape icon (e.g. the rounded square for Square Breathing) scales up from its position on the card, accelerating with a quartic ease-in over ~650ms
-3. The icon stroke — dark forest green `#3E5E52` — fills the viewport at peak scale
-4. React Router navigates to the game route at ~85% of the zoom duration, before the animation completes, to eliminate any flash risk
-5. The game route mounts with its `#2C4A3E` intro overlay already at full opacity — the two greens are close enough in the same family that the join is seamless
-6. The `fadeSettle` intro begins from there
-
-The icon zoom is implemented on the home screen side only. The game and intro system require no changes — they already start dark.
+**Fan geometry** (tunable constants in `GameCarousel.jsx`):
+- Cards pivot around a point 380px below their center.
+- Rotation: 11° per step from center; up to ±44° at distance 4.
+- Scale: drops 0.05 per step, floor 0.80.
+- Z-index decreases with distance from center.
+- Cards beyond distance 4 (currently none) fade to opacity 0.
 
 ---
 
@@ -579,20 +578,23 @@ whoosha/
 ├── package.json
 ├── vite.config.js
 ├── tailwind.config.js
-├── BRIEFING.md                   # This file
-├── design-assets/                # Color palette images, reference screenshots
-│   ├── palette-backgrounds.png
-│   ├── palette-text-info.png
-│   ├── palette-soothing-rewarding.png
-│   ├── palette-blues.png
-│   ├── palette-greens.png
-│   └── boxBreathingGame.png      # Visual reference for square breathing game shape
+├── BRIEFING.md                   # This file — product spec, design system, voice (WHAT and WHY)
+├── CLAUDE.md                     # Operating instructions Claude reads at session start
+├── POLISH-STRATEGY.md            # Visual technique, iOS perf budget, layering rules (HOW)
+├── design-assets/                # Color palette references, mockups, visual reference imagery
 ├── public/
 │   ├── favicon.ico
-│   └── og-image.png              # Social sharing image placeholder
+│   ├── og-image.png              # Social sharing image placeholder
+│   ├── assets/                   # Static binary assets used by games
+│   │   ├── dragon-spike.riv      # Rive animation for the Dragon Breath spike
+│   │   ├── fingerprint.png       # Pre-touch fingerprint hint glyph
+│   │   └── fingerprintDark.png   # Dark variant of the fingerprint glyph
+│   └── textures/                 # Static SVG textures baked into game canvases
+│       ├── track-dirt.svg        # Dirt-path texture stroked on the racetrack
+│       └── meadow-ground.svg     # Meadow ground texture (grass clumps, leaf specks)
 └── src/
     ├── main.jsx                  # App entry point
-    ├── App.jsx                   # Router setup
+    ├── App.jsx                   # Router setup + auth/onboarding gating
     ├── index.css                 # Tailwind base + global styles
     ├── lib/
     │   ├── supabaseClient.js     # Supabase initialization
@@ -600,9 +602,11 @@ whoosha/
     ├── store/
     │   └── useStore.js           # Zustand store — auth, active child, game state
     ├── hooks/
-    │   ├── useAuth.js            # Auth state hook
+    │   ├── useAuth.js            # Auth state hook — keeps store in sync with Supabase
     │   └── useSession.js         # Game session tracking hook
     ├── components/
+    │   ├── auth/
+    │   │   └── AuthForm.jsx       # Shared auth card used by LoginPage and SignupPage
     │   ├── layout/
     │   │   ├── Navbar.jsx        # Landing page nav (logged out)
     │   │   ├── AppNav.jsx        # App nav (logged in, minimal)
@@ -613,19 +617,24 @@ whoosha/
     │   │   ├── LoadingSpinner.jsx
     │   │   └── transitions/
     │   │       ├── GameIntro.jsx             # Shared intro wrapper — accepts introVariant prop, calls onComplete
+    │   │       ├── ZoomOverlay.jsx           # Home-card → game route tile-zoom transition
     │   │       └── variants/
     │   │           └── FadeSettleIntro.jsx   # 'fadeSettle' variant — color fade + blur resolve + scale settle
     │   └── games/
-    │       └── square/
-    │           ├── SquareGame.jsx         # Phase manager — 'intro' | 'game', stroke state, session timing
-    │           ├── SquareCanvas.jsx       # Everything canvas — geometry, drawing, input, lap logic
-    │           ├── StrokeSelector.jsx     # Top-right stroke style picker UI
-    │           └── strokes/
-    │               ├── stampStroke.js     # 'Classic' stroke (default): radial-gradient stamps along centerline
-    │               ├── layeredWash.js     # 'Watercolor' stroke: multi-layer wash with organic depth
-    │               └── taperedStroke.js   # Prior default — retained for reference, pending retirement
+    │       ├── GameCard.jsx       # Shared card used for game tiles on /home
+    │       ├── square/
+    │       │   ├── SquareGame.jsx         # Phase manager — 'intro' | 'game', stroke state, session timing
+    │       │   ├── SquareCanvas.jsx       # Everything canvas — geometry, drawing, input, lap logic
+    │       │   ├── StrokeSelector.jsx     # Top-right stroke style picker UI
+    │       │   └── strokes/
+    │       │       ├── stampStroke.js     # 'Classic' stroke (default): radial-gradient stamps along centerline
+    │       │       ├── layeredWash.js     # 'Watercolor' stroke: multi-layer wash with organic depth
+    │       │       └── taperedStroke.js   # Prior default — retained for reference, pending retirement
+    │       └── dragon/
+    │           └── DragonGame.jsx         # Rive-based Dragon Breath spike
     └── pages/
         ├── LandingPage.jsx
+        ├── DemoPage.jsx          # Public interactive preview of Square Breathing
         ├── LoginPage.jsx
         ├── SignupPage.jsx
         ├── OnboardingPage.jsx     # Child name capture, first login only
@@ -633,7 +642,8 @@ whoosha/
         ├── DashboardPage.jsx      # Stub
         ├── AccountPage.jsx        # Stub
         └── games/
-            └── SquarePage.jsx     # Game page wrapper
+            ├── SquarePage.jsx     # Square Breathing page wrapper
+            └── DragonPage.jsx     # Dragon Breath page wrapper (Rive spike)
 ```
 
 ---

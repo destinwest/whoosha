@@ -26,6 +26,11 @@ const useStore = create((set) => ({
   gameSession: null,
   setGameSession: (session) => set({ gameSession: session }),
   clearGameSession: () => set({ gameSession: null }),
+
+  // Home-carousel active card index (persists across navigation within session).
+  // 3 = Square's position in src/data/games.js — the default centered card.
+  homeActiveCardIndex: 3,
+  setHomeActiveCardIndex: (i) => set({ homeActiveCardIndex: i }),
 }))
 
 export default useStore
