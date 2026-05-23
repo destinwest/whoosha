@@ -13,6 +13,7 @@ import DashboardPage from './pages/DashboardPage'
 import AccountPage from './pages/AccountPage'
 import SquarePage from './pages/games/SquarePage'
 import DragonPage from './pages/games/DragonPage'
+import HexagonPage from './pages/games/HexagonPage'
 
 // Gates protected routes: requires authentication, and forces a first-time
 // signup through /onboarding before any other protected route is reachable.
@@ -110,6 +111,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DragonPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/games/hexagon"
+        element={
+          <ProtectedRoute>
+            <HexagonPage />
           </ProtectedRoute>
         }
       />

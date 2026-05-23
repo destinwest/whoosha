@@ -11,7 +11,7 @@ export const HOME_GAMES = [
   { id: 'p2',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
   { id: 'infinity', name: 'Infinity Breathing', tagline: 'Trace the infinity', route: '/games/infinity', gameKey: 'infinity',    shape: 'infinity', locked: true,  placeholder: false },
   { id: 'square',   name: 'Square Breathing',   tagline: 'Trace the square',   route: '/games/square',   gameKey: 'square',      shape: 'square',   locked: false, placeholder: false },
-  { id: 'hexagon',  name: 'Hexagon Breathing',  tagline: 'Trace the hexagon',  route: '/games/hexagon',  gameKey: 'hexagon',     shape: 'hexagon',  locked: true,  placeholder: false },
+  { id: 'hexagon',  name: 'Hexagon Breathing',  tagline: 'Trace the hexagon',  route: '/games/hexagon',  gameKey: 'hexagon',     shape: 'hexagon',  locked: false, placeholder: false },
   { id: 'flower',   name: 'Flower Breathing',   tagline: 'Trace the flower',   route: '/games/flower',   gameKey: 'flower',      shape: 'flower',   locked: true,  placeholder: false },
   { id: 'p3',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
   { id: 'p4',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
