@@ -35,6 +35,23 @@ const GAUGE_RECOVER_THRESHOLD = 3.0   // path rate ratio above which recovery ti
 const GAUGE_CHARGE_DELAY      = 1000  // ms of sustained too-fast before the gauge starts ramping
 const GAUGE_DRAIN_DELAY       = 500   // ms of sustained recoverable-pace before recovery begins
 const GAUGE_EFFECT_THRESHOLD = 0.3    // gauge value below which no visible effect appears
+
+// ── Synergy tuning ────────────────────────────────────────────────────────────
+// Time-based continuous reward. An on-pace accumulator grows while the user
+// stays close + in pace and decays when they drift. Stage 0→4 is mapped
+// directly from the accumulator via piecewise-linear thresholds.
+const SYNERGY_DIST_THRESHOLD_LW = 0.8     // user within lw * 0.8 of pacing counts as close
+const SYNERGY_TIME_0_TO_1_MS    = 4000    // 0 → Stage 1 — amber grows to pacing size
+const SYNERGY_TIME_1_TO_2_MS    = 4000    // Stage 1 → 2 — pacing fill shifts to amber
+const SYNERGY_TIME_2_TO_3_MS    = 8000    // Stage 2 → 3 — both circles grow to 1.5×
+const SYNERGY_TIME_3_TO_4_MS    = 16000   // Stage 3 → 4 — embers begin radiating
+const SYNERGY_MAX_ACCUM_MS      = SYNERGY_TIME_0_TO_1_MS + SYNERGY_TIME_1_TO_2_MS
+                                + SYNERGY_TIME_2_TO_3_MS + SYNERGY_TIME_3_TO_4_MS  // 32s
+const SYNERGY_MAX_STAGE         = 4
+const SYNERGY_RETURN_MS         = 3000                                  // full return-to-start duration from max state
+const SYNERGY_RETURN_RATE       = SYNERGY_MAX_ACCUM_MS / SYNERGY_RETURN_MS  // accum-ms drained per real-ms during return
+const EMBER_PARTICLE_CAP        = 30
+const EMBER_SPAWN_RATE_AT_FULL  = 14      // particles per second at Stage 4.0
 const ALPHA_ACTIVE = 0.75
 const ALPHA_FLOOR  = 0.18
 const SCALE_ACTIVE = 1.5
@@ -294,6 +311,11 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const gaugeEffectRef       = useRef(0)     // computed gFx, written by gauge block, read by draw loop
   const childPathRateRef     = useRef(0)     // path fraction-units/ms, smoothed
   const pacingEmphasisRef    = useRef(0)     // 0–1, eased toward gaugeActive — drives pacing-circle grow + glow
+  // ── Synergy reward (time-based continuous progression) ────────────────────
+  const synergyStageRef      = useRef(0)     // 0.0 → 4.0, derived from accumulator each frame
+  const onPaceAccumRef       = useRef(0)     // ms of on-pace time, caps at SYNERGY_MAX_ACCUM_MS
+  const emberParticlesRef    = useRef([])    // pooled ember particles (Stage 4)
+  const lastEmberSpawnRef    = useRef(0)     // ms timestamp of last ember spawn
 
   // ── Fingerprint image loader ────────────────────────────────────────────────
   useEffect(() => {
@@ -354,6 +376,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       gaugeEffectRef.current      = 0
       childPathRateRef.current    = 0
       pacingEmphasisRef.current   = 0
+      synergyStageRef.current     = 0
+      onPaceAccumRef.current      = 0
+      emberParticlesRef.current   = []
+      lastEmberSpawnRef.current   = 0
       document.documentElement.style.setProperty('--game-saturation', '1')
     },
   }), [])
@@ -946,7 +972,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           // Charge delay met, still racing — ramp gauge to 1 over 4s
           heatGaugeRef.current = Math.min(1, heatGaugeRef.current + dt / 4000)
           if (heatGaugeRef.current >= 1) {
-            // Floor reached — clear paint canvas permanently
+            // Floor reached — clear paint canvas permanently. Synergy now
+            // drains gracefully via the synergy block (3-second return rate
+            // engages while gaugeActiveRef.current is true).
             gaugeActiveRef.current = true
             stampStroke.clear()
             if (paintCtxRef.current && clipArgsRef.current) {
@@ -979,6 +1007,50 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         document.documentElement.style.setProperty('--game-saturation', (1 - gFx * 0.9).toFixed(3))
       }
 
+      // ── Synergy update ────────────────────────────────────────────────────
+      // Three behaviors:
+      //   - Finger lifted OR gauge-floor active → fast return to 0 over 3s
+      //     (from max). Both events should drain the synergy reward.
+      //   - Touching + on-pace               → accumulator grows at +dt.
+      //   - Touching + off-pace              → symmetric 1:1 slow decay.
+      if (!touchRef.current || gaugeActiveRef.current) {
+        onPaceAccumRef.current = Math.max(
+          0, onPaceAccumRef.current - dt * SYNERGY_RETURN_RATE,
+        )
+      } else if (startedRef.current && pacingPos && childPosRef.current) {
+        const child      = childPosRef.current
+        const dist       = Math.hypot(child.clx - pacingPos.x, child.cly - pacingPos.y)
+        const speedRatio = childPathRateRef.current / (4 / CYCLE_MS)
+        const close      = dist <= lw * SYNERGY_DIST_THRESHOLD_LW
+        const inPace     = speedRatio <= GAUGE_SPEED_THRESHOLD
+        if (close && inPace) {
+          onPaceAccumRef.current = Math.min(SYNERGY_MAX_ACCUM_MS, onPaceAccumRef.current + dt)
+        } else {
+          onPaceAccumRef.current = Math.max(0, onPaceAccumRef.current - dt)
+        }
+      }
+
+      // Map accumulator → continuous stage (piecewise linear)
+      {
+        const a = onPaceAccumRef.current
+        const t1 = SYNERGY_TIME_0_TO_1_MS
+        const t2 = t1 + SYNERGY_TIME_1_TO_2_MS
+        const t3 = t2 + SYNERGY_TIME_2_TO_3_MS
+        const t4 = t3 + SYNERGY_TIME_3_TO_4_MS
+        if      (a >= t4) synergyStageRef.current = 4
+        else if (a >= t3) synergyStageRef.current = 3 + (a - t3) / SYNERGY_TIME_3_TO_4_MS
+        else if (a >= t2) synergyStageRef.current = 2 + (a - t2) / SYNERGY_TIME_2_TO_3_MS
+        else if (a >= t1) synergyStageRef.current = 1 + (a - t1) / SYNERGY_TIME_1_TO_2_MS
+        else              synergyStageRef.current = a / SYNERGY_TIME_0_TO_1_MS
+      }
+
+      // Derived stage values for visual mapping
+      const synStage   = synergyStageRef.current
+      const synStage01 = Math.min(1, synStage)                       // 0 → 1 across stages 0..1 (amber grows to pacing size)
+      const synStage12 = Math.max(0, Math.min(1, synStage - 1))      // 0 → 1 across stages 1..2 (pacing fill shifts to amber)
+      const synStage23 = Math.max(0, Math.min(1, synStage - 2))      // 0 → 1 across stages 2..3 (both circles grow to 1.5×)
+      const synStage34 = Math.max(0, Math.min(1, synStage - 3))      // 0 → 1 across stages 3..4 (ember particles radiate)
+
       // ── 3. Touch bloom ────────────────────────────────────────────────────
       {
         const showBloom = touchActiveRef.current || bloomFadingRef.current || fpDismissingRef.current
@@ -987,28 +1059,32 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           const bloomScale = fpDismissingRef.current ? fpDismissTRef.current : 1
           const alpha      = bloomAttackRef.current * bloomFadeRef.current
 
-          const innerR = lw * 0.4 * bloomScale
-          const outerR = lw * 1.1 * bloomScale
+          // Stage 0→1 grows the amber bloom toward pacing-circle size;
+          // stage 2→3 then grows BOTH circles to 1.5× original pacing size.
+          const synergyScale = (1 + 0.55 * synStage01) * (1 + 0.5 * synStage23)
+          const innerR = lw * 0.4 * bloomScale * synergyScale
+          const outerR = lw * 1.1 * bloomScale * synergyScale
 
-          if (innerR > 0.5) {
-            const inner = ctx.createRadialGradient(tx, ty, 0, tx, ty, innerR)
-            inner.addColorStop(0,    `rgba(255,230,160,${(0.85 * alpha).toFixed(3)})`)
-            inner.addColorStop(0.15, `rgba(255,210,120,${(0.65 * alpha).toFixed(3)})`)
-            inner.addColorStop(0.45, `rgba(212,160,86,${(0.25 * alpha).toFixed(3)})`)
-            inner.addColorStop(1,    'rgba(212,160,86,0)')
-            ctx.fillStyle = inner
-            ctx.beginPath()
-            ctx.arc(tx, ty, innerR, 0, Math.PI * 2)
-            ctx.fill()
-          }
-
+          // One gradient — disk body (0 → 36% of outerR = innerR) + soft halo.
+          // The "disk character" emerges with synergy: at synStage01=0 the
+          // curve stays soft (subtle pre-synergy bloom); at synStage01=1 the
+          // disk reads as solid amber matching the pacing circle's size and
+          // opacity. 36% mark is always at innerR (ratio 0.4/1.1 is fixed).
           if (outerR > 0.5) {
-            const outer = ctx.createRadialGradient(tx, ty, innerR * 0.5, tx, ty, outerR)
-            outer.addColorStop(0,    `rgba(212,160,86,${(0.18 * alpha).toFixed(3)})`)
-            outer.addColorStop(0.25, `rgba(212,160,86,${(0.10 * alpha).toFixed(3)})`)
-            outer.addColorStop(0.6,  `rgba(212,160,86,${(0.04 * alpha).toFixed(3)})`)
-            outer.addColorStop(1,    'rgba(212,160,86,0)')
-            ctx.fillStyle = outer
+            const sb       = synStage01  // 0 → 1: shifts from soft glow to solid disk
+            const aMid     = (0.55 + 0.20 * sb) * alpha   // 18% radius
+            const aDiskEdge = (0.20 + 0.38 * sb) * alpha  // 36% radius (edge of innerR / "disk edge")
+            const aHaloA   = (0.08 + 0.14 * sb) * alpha   // 55% radius
+            const aHaloB   = (0.02 + 0.04 * sb) * alpha   // 80% radius
+
+            const grad = ctx.createRadialGradient(tx, ty, 0, tx, ty, outerR)
+            grad.addColorStop(0,    `rgba(255,230,160,${(0.85 * alpha).toFixed(3)})`)
+            grad.addColorStop(0.18, `rgba(255,210,120,${aMid.toFixed(3)})`)
+            grad.addColorStop(0.36, `rgba(232,180,100,${aDiskEdge.toFixed(3)})`)
+            grad.addColorStop(0.55, `rgba(212,160,86,${aHaloA.toFixed(3)})`)
+            grad.addColorStop(0.80, `rgba(212,160,86,${aHaloB.toFixed(3)})`)
+            grad.addColorStop(1,    'rgba(212,160,86,0)')
+            ctx.fillStyle = grad
             ctx.beginPath()
             ctx.arc(tx, ty, outerR, 0, Math.PI * 2)
             ctx.fill()
@@ -1062,7 +1138,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         if (pacingPos) {
           const emph  = pacingEmphasisRef.current
           const baseR = lw * 0.62
-          const r     = baseR * (1 + 0.2 * emph)  // 1.0× → 1.2× at full emphasis
+          // Heat-gauge emphasis (1.0→1.2×) and synergy stage 2→3 (1.0→1.5×)
+          // both contribute. Mutually exclusive in practice (gauge floor
+          // resets synergy), so multiplication doesn't double-stack.
+          const r     = baseR * (1 + 0.2 * emph) * (1 + 0.5 * synStage23)
 
           // Warm glow underneath — vivid amber, brightness scales with emphasis
           if (emph > 0.01) {
@@ -1080,11 +1159,63 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           }
 
           // The circle itself — translucent so the start-state fingerprint
-          // shows through; lifts to more solid at full emphasis (gauge floor)
-          const fillAlpha = 0.55 + 0.30 * emph  // 0.55 at rest → 0.85 at floor
+          // shows through; lifts to more solid at full emphasis (gauge floor).
+          // Synergy stage 1→2 lerps the fill from white toward amber #D4A056.
+          const fillAlpha = 0.55 + 0.30 * emph
+          const fillR = Math.round(255 - 43 * synStage12)
+          const fillG = Math.round(255 - 95 * synStage12)
+          const fillB = Math.round(255 - 169 * synStage12)
           pacingCtx.beginPath()
           pacingCtx.arc(pacingPos.x, pacingPos.y, r, 0, Math.PI * 2)
-          pacingCtx.fillStyle = `rgba(255,255,255,${fillAlpha.toFixed(3)})`
+          pacingCtx.fillStyle = `rgba(${fillR},${fillG},${fillB},${fillAlpha.toFixed(3)})`
+          pacingCtx.fill()
+        }
+
+        // ── Ember particles (Stage 3→4) ───────────────────────────────────
+        // Crackling embers radiate outward in all directions from the merged
+        // pacing/amber center. Short-lived sparks within ~1-2 track-widths.
+        if (pacingPos && synStage34 > 0) {
+          const spawnInterval = 1000 / (EMBER_SPAWN_RATE_AT_FULL * synStage34)
+          if (now - lastEmberSpawnRef.current > spawnInterval) {
+            const particles = emberParticlesRef.current
+            let slot = particles.find(p => p.life <= 0)
+            if (!slot && particles.length < EMBER_PARTICLE_CAP) {
+              slot = {}
+              particles.push(slot)
+            }
+            if (slot) {
+              const angle = Math.random() * Math.PI * 2
+              const speed = 0.05 + Math.random() * 0.02  // 50–70 px/sec
+              slot.x       = pacingPos.x + (Math.random() - 0.5) * lw * 0.2
+              slot.y       = pacingPos.y + (Math.random() - 0.5) * lw * 0.2
+              slot.vx      = Math.cos(angle) * speed
+              slot.vy      = Math.sin(angle) * speed
+              slot.maxLife = 1000 + Math.random() * 400  // 1000–1400ms — persist out to ~2× pacing radius
+              slot.life    = slot.maxLife
+            }
+            lastEmberSpawnRef.current = now
+          }
+        }
+
+        // Update + draw embers (continues draining even after spawn stops)
+        for (const p of emberParticlesRef.current) {
+          if (p.life <= 0) continue
+          p.life -= dt
+          if (p.life <= 0) continue
+          p.x += p.vx * dt
+          p.y += p.vy * dt
+
+          const lifeT = p.life / p.maxLife
+          const r     = lw * 0.20 * Math.sqrt(lifeT)
+          const alpha = lifeT * 0.70  // linear fade — embers stay visible through the full travel
+          if (r < 0.5 || alpha < 0.02) continue
+
+          const grad = pacingCtx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r)
+          grad.addColorStop(0, `rgba(255,210,130,${alpha.toFixed(3)})`)
+          grad.addColorStop(1, 'rgba(212,140,60,0)')
+          pacingCtx.beginPath()
+          pacingCtx.arc(p.x, p.y, r, 0, Math.PI * 2)
+          pacingCtx.fillStyle = grad
           pacingCtx.fill()
         }
 
