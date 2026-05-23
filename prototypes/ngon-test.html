@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>roundedNgonPath visual smoke</title>
+<style>
+  body {
+    margin: 0;
+    background: #B0CECA;
+    font-family: system-ui, sans-serif;
+    color: #3E5E52;
+    padding: 24px;
+  }
+  h1 { font-weight: 600; margin: 0 0 16px; }
+  canvas { background: #F5EFE6; border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.12); display: block; }
+  .grid { display: grid; grid-template-columns: repeat(3, 280px); gap: 24px; }
+  .cell { background: #F5EFE6; border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.12); padding: 12px; }
+  .cell h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #6D9B8A; }
+</style>
+</head>
+<body>
+  <h1>roundedNgonPath — visual smoke</h1>
+  <div class="grid" id="grid"></div>
+
+<script type="module">
+  // ── Inline copy of the helper (single source: src/components/games/_shared/roundedNgonPath.js)
+  function roundedNgonPath(ctx, cx, cy, radius, sides, cornerRadius, startAngle = 0) {
+    if (sides < 3) return
+    const verts = []
+    const step = (Math.PI * 2) / sides
+    for (let i = 0; i < sides; i++) {
+      const a = startAngle + i * step
+      verts.push({ x: cx + radius * Math.cos(a), y: cy + radius * Math.sin(a) })
+    }
+    if (cornerRadius <= 0) {
+      ctx.moveTo(verts[0].x, verts[0].y)
+      for (let i = 1; i < sides; i++) ctx.lineTo(verts[i].x, verts[i].y)
+      ctx.closePath()
+      return
+    }
+    const startMidX = (verts[0].x + verts[1].x) / 2
+    const startMidY = (verts[0].y + verts[1].y) / 2
+    ctx.moveTo(startMidX, startMidY)
+    for (let i = 1; i <= sides; i++) {
+      const corner = verts[i % sides]
+      const next   = verts[(i + 1) % sides]
+      const nextMidX = (corner.x + next.x) / 2
+      const nextMidY = (corner.y + next.y) / 2
+      ctx.arcTo(corner.x, corner.y, nextMidX, nextMidY, cornerRadius)
+    }
+    ctx.closePath()
+  }
+
+  function makeCell(title, drawFn) {
+    const cell = document.createElement('div')
+    cell.className = 'cell'
+    const h = document.createElement('h2')
+    h.textContent = title
+    cell.appendChild(h)
+    const c = document.createElement('canvas')
+    const SIZE = 256
+    c.width = SIZE * 2
+    c.height = SIZE * 2
+    c.style.width  = SIZE + 'px'
+    c.style.height = SIZE + 'px'
+    cell.appendChild(c)
+    const ctx = c.getContext('2d')
+    ctx.scale(2, 2)
+    drawFn(ctx, SIZE)
+    document.getElementById('grid').appendChild(cell)
+  }
+
+  // Each cell: draws a stroked track + a centerline + vertex dots so we can
+  // visually verify the rounded N-gon traces correctly.
+  function drawTrack(ctx, cx, cy, radius, sides, cornerRadius, startAngle) {
+    // Outer shadow
+    ctx.beginPath()
+    roundedNgonPath(ctx, cx, cy, radius, sides, cornerRadius, startAngle)
+    ctx.lineWidth   = 30
+    ctx.strokeStyle = 'rgba(62,94,82,0.22)'
+    ctx.stroke()
+
+    // Cream body
+    ctx.beginPath()
+    roundedNgonPath(ctx, cx, cy, radius, sides, cornerRadius, startAngle)
+    ctx.lineWidth   = 22
+    ctx.strokeStyle = '#F2EAD0'
+    ctx.stroke()
+
+    // Centerline (thin dark stroke right on the path)
+    ctx.beginPath()
+    roundedNgonPath(ctx, cx, cy, radius, sides, cornerRadius, startAngle)
+    ctx.lineWidth   = 1
+    ctx.strokeStyle = 'rgba(62,94,82,0.55)'
+    ctx.stroke()
+
+    // Vertex markers
+    const step = (Math.PI * 2) / sides
+    ctx.fillStyle = 'rgba(212,160,86,0.9)'
+    for (let i = 0; i < sides; i++) {
+      const a = startAngle + i * step
+      const x = cx + radius * Math.cos(a)
+      const y = cy + radius * Math.sin(a)
+      ctx.beginPath()
+      ctx.arc(x, y, 3, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  makeCell('Square (sides=4, startAngle=π/4)', (ctx, S) => {
+    drawTrack(ctx, S/2, S/2, S*0.32, 4, S*0.07, Math.PI / 4)
+  })
+  makeCell('Flat-top Hexagon (sides=6, π/3)', (ctx, S) => {
+    drawTrack(ctx, S/2, S/2, S*0.34, 6, S*0.06, Math.PI / 3)
+  })
+  makeCell('Pointy-top Hexagon (sides=6, π/2)', (ctx, S) => {
+    drawTrack(ctx, S/2, S/2, S*0.34, 6, S*0.06, Math.PI / 2)
+  })
+  makeCell('Pentagon (sides=5)', (ctx, S) => {
+    drawTrack(ctx, S/2, S/2, S*0.34, 5, S*0.06, -Math.PI / 2)
+  })
+  makeCell('Octagon (sides=8)', (ctx, S) => {
+    drawTrack(ctx, S/2, S/2, S*0.34, 8, S*0.06, Math.PI / 8)
+  })
+  makeCell('Triangle (sides=3)', (ctx, S) => {
+    drawTrack(ctx, S/2, S/2, S*0.36, 3, S*0.06, -Math.PI / 2)
+  })
+</script>
+</body>
+</html>
