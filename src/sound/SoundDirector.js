@@ -204,14 +204,16 @@ export default class SoundDirector {
     this._air    = createAir(this.ctx, this._noiseBufs.brown)
     this._meadow = createMeadow(this.ctx, this._noiseBufs.pink)
     this._rumble = createRumble(this.ctx)
-    this._bowl   = createBowl(this.ctx)
     this._air.output.connect(this.ambientBus)
     this._meadow.output.connect(this.ambientBus)
     this._rumble.output.connect(this.rumbleBus)
-    this._bowl.output.connect(this.synergyBus)
 
-    // synergyBus starts silent — its gain is driven by update() from
-    // synergyStage and breathPhase.
+    // ── Synergy bowl disabled while tuning the ambient meadow ────────────
+    // Uncomment these four lines to re-enable. The update() and dispose()
+    // bowl blocks below are guarded by `if (this._bowl)` / `?.`, so leaving
+    // them untouched is safe — when _bowl is null they degrade to no-ops.
+    // this._bowl = createBowl(this.ctx)
+    // this._bowl.output.connect(this.synergyBus)
     this.synergyBus.gain.value = 0
 
     if (this._muted) return  // user is muted; don't ramp up yet (un-mute will restore)
