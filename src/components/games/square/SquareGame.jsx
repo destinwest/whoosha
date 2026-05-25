@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import GameIntro     from '../../ui/transitions/GameIntro'
 import StrokeSelector from './StrokeSelector'
 import SquareCanvas   from './SquareCanvas'
+import MuteButton     from '../../ui/MuteButton'
+import { useSoundDirector } from '../../../hooks/useSoundDirector'
 
 // ── buildMeadowBg ─────────────────────────────────────────────────────────────
 // Bakes the entire static background — base gradient, ground texture (when the
@@ -164,6 +166,27 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
   const bgCanvasRef     = useRef(null)
   const pacingCanvasRef = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
 
+  // ── Sound director ────────────────────────────────────────────────────────
+  // Owns the Web Audio graph for this game. Phase 1: the director is mounted
+  // and receives per-frame state updates from SquareCanvas, but produces no
+  // audible output yet. Later phases attach ambient/dysregulation/synergy
+  // modules onto the buses prepared inside the director.
+  const directorRef = useSoundDirector()
+
+  // Bind update to a stable identity so SquareCanvas doesn't see a new
+  // callback every render (which would trigger no re-render here, but is
+  // still cheaper to keep stable).
+  const directorTickRef = useRef((snapshot) => {
+    directorRef.current?.update(snapshot)
+  })
+
+  // When the game phase begins, ramp the ambient bed in. Idempotent inside
+  // the director — safe to call across re-renders.
+  useEffect(() => {
+    if (phase !== 'game') return
+    directorRef.current?.startAmbient()
+  }, [phase])
+
   // ── Meadow background — baked once per resize ──────────────────────────────
   useEffect(() => {
     const el = bgCanvasRef.current
@@ -211,10 +234,21 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
     onExit(dur)
   }
 
+  // ── Audio unlock ───────────────────────────────────────────────────────────
+  // Called synchronously from the first pointerdown anywhere on the game
+  // screen. AudioContext.resume() must be invoked inside a user-gesture
+  // handler to satisfy iOS/Chrome autoplay policy — the React useEffect that
+  // fires on phase transition is always async, so it arrives too late. The
+  // director's unlock() is idempotent.
+  function handleContainerPointerDown() {
+    directorRef.current?.unlock()
+  }
+
   return (
     <div
       className="absolute inset-0 bg-bg-eucalyptus overflow-hidden select-none"
       style={{ touchAction: 'none' }}
+      onPointerDown={handleContainerPointerDown}
     >
       {/* back button */}
       <button
@@ -227,6 +261,9 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
           <path d="M19 12H5M12 5l-7 7 7 7" />
         </svg>
       </button>
+
+      {/* mute toggle — top-right, mirrors exit-button treatment */}
+      <MuteButton className="absolute top-4 right-4 z-20" />
 
       {/* game canvas — always mounted; blur/scale driven by CSS custom properties */}
       <div style={{
@@ -256,6 +293,7 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
             strokeModeRef={strokeModeRef}
             pacingCanvasRef={pacingCanvasRef}
             onGameStart={() => { sessionStartRef.current = Date.now() }}
+            onGameStateTick={directorTickRef.current}
             onResize={setLabelGeo}
             interactive={phase === 'game'}
           />

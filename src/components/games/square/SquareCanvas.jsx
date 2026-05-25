@@ -3,10 +3,13 @@
 // all geometry computation, all per-frame drawing, and all pointer handling.
 //
 // Props:
-//   strokeModeRef  — { current: 'classic' | 'watercolor' }
-//   onTick(now)    — called each rAF frame; SquareGame drives intro from here
-//   onGameStart()  — called once when the child first drags from the start point
-//   interactive    — boolean; controls pointer events on the canvas element
+//   strokeModeRef       — { current: 'classic' | 'watercolor' }
+//   onTick(now)         — called each rAF frame; SquareGame drives intro from here
+//   onGameStart()       — called once when the child first drags from the start point
+//   onGameStateTick(s)  — called each rAF frame at end-of-frame, with a snapshot
+//                         { gaugeEffect, gaugeActive, synergyStage, breathPhase, speedRatio }
+//                         consumed by the sound director for adaptive audio modulation
+//   interactive         — boolean; controls pointer events on the canvas element
 //
 // Imperative API (via ref):
 //   reset()        — clears all canvas state and resets all game-state refs
@@ -252,7 +255,7 @@ function applyPaintClip(ctx, { left, top, sqW, cr, lw }) {
 
 // ── SquareCanvas ──────────────────────────────────────────────────────────────
 const SquareCanvas = forwardRef(function SquareCanvas(
-  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onResize, interactive },
+  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onGameStateTick, onResize, interactive },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -1305,6 +1308,21 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           document.documentElement.style.setProperty(`--label-${i}-alpha`, alpha.toFixed(3))
           document.documentElement.style.setProperty(`--label-${i}-scale`, scale.toFixed(3))
         }
+      }
+
+      // ── External state subscription (sound director, etc.) ───────────────
+      // Single per-frame snapshot fired after all state has been finalized.
+      // Cost: one object allocation per frame; the consumer is expected to
+      // be a no-op or cheap modulation. Skipped silently when no observer.
+      if (onGameStateTick) {
+        const pacingRate = 4 / CYCLE_MS
+        onGameStateTick({
+          gaugeEffect:  gaugeEffectRef.current,
+          gaugeActive:  gaugeActiveRef.current,
+          synergyStage: synergyStageRef.current,
+          breathPhase:  ((now - pacingStartRef.current) % CYCLE_MS) / CYCLE_MS,
+          speedRatio:   childPathRateRef.current / pacingRate,
+        })
       }
     }
 
