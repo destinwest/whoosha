@@ -21,8 +21,7 @@
 //     audio doesn't drain battery in the background.
 
 import { createNoiseBuffers } from './noiseBuffer'
-import { createAir }          from './synthAir'
-import { createMeadow }       from './synthMeadow'
+import { createBreath }       from './synthBreath'
 import { createRumble }       from './synthRumble'
 import { createBowl }         from './synthBowl'
 
@@ -38,10 +37,11 @@ const AMBIENT_LEVEL_FULL   = 1.0
 const AMBIENT_LEVEL_MUFFLED = 0.45
 const RUMBLE_LEVEL_MAX     = 0.18    // top-of-gauge rumble bus gain
 
-// Meadow activity gating: at gauge=0 the meadow spawns events normally; at
-// full dysregulation new events stop. Curve is steeper than the lowpass —
-// the meadow goes quiet earlier in the gauge ramp than the bed fully muffles.
-const MEADOW_QUIET_AT_GAUGE = 0.55
+// Breath-texture suppression under dysregulation: at full gauge the inhale
+// and exhale textures duck to BREATH_DUCK_FLOOR so the dysregulation chain
+// (lowpass + rumble) takes over. The constant drone keeps playing — pulling
+// the harmonic ground out from under the user would feel jarring.
+const BREATH_DUCK_FLOOR = 0.10
 
 // ── Synergy / breath modulation ──
 // breathPhase is a 0–1 saw — sin(2π·phase) gives a smooth ±1 oscillator.
@@ -124,8 +124,7 @@ export default class SoundDirector {
     this._mutedGain = 1      // last non-muted master target — restored on un-mute
 
     // Synth-module instances (populated lazily on first startAmbient).
-    this._air      = null
-    this._meadow   = null
+    this._breath   = null
     this._rumble   = null
     this._bowl     = null
     this._noiseBufs = null   // shared between modules
@@ -135,7 +134,7 @@ export default class SoundDirector {
     this._lastLevel   = AMBIENT_LEVEL_FULL
     this._lastRumble  = 0
     this._lastSynergy = 0    // last synergyBus gain target (stage × breath swell)
-    this._lastMeadowActivity = 1
+    this._lastBreathDuck = 1 // last breath-textures output-gain target
 
     // Lifecycle: suspend on hidden tab, resume on visible.
     this._onVisibilityChange = () => {
@@ -195,21 +194,18 @@ export default class SoundDirector {
     }
 
     // Spin up the ambient modules.
-    //   air    — barely-perceptible room tone (always on); the floor of the
-    //            soundscape that prevents sterile-digital-silence.
-    //   meadow — Poisson-scheduled breeze events with physically-coupled
-    //            leaf rustles. Long pauses between events are normal.
+    //   breath — drone + inhale/exhale textures locked to breathPhase.
+    //            Replaces the prior nature-mimicry approach with intentional
+    //            musical ambient that actively guides the breath cycle.
     //   rumble — silent at gauge=0; rises with dysregulation.
     //   bowl   — silent at synergy=0; partials fade in across stages 0–4.
-    this._air    = createAir(this.ctx, this._noiseBufs.brown)
-    this._meadow = createMeadow(this.ctx, this._noiseBufs.pink)
+    this._breath = createBreath(this.ctx, this._noiseBufs.pink)
     this._rumble = createRumble(this.ctx)
-    this._air.output.connect(this.ambientBus)
-    this._meadow.output.connect(this.ambientBus)
+    this._breath.output.connect(this.ambientBus)
     this._rumble.output.connect(this.rumbleBus)
 
-    // ── Synergy bowl disabled while tuning the ambient meadow ────────────
-    // Uncomment these four lines to re-enable. The update() and dispose()
+    // ── Synergy bowl disabled while tuning the ambient breath layer ─────
+    // Uncomment these two lines to re-enable. The update() and dispose()
     // bowl blocks below are guarded by `if (this._bowl)` / `?.`, so leaving
     // them untouched is safe — when _bowl is null they degrade to no-ops.
     // this._bowl = createBowl(this.ctx)
@@ -255,15 +251,19 @@ export default class SoundDirector {
       this._lastLevel = levelTarget
     }
 
-    // ── Meadow activity ──
-    // As the gauge rises, new breeze events spawn less and less often. At
-    // gauge ≥ MEADOW_QUIET_AT_GAUGE no new events spawn — in-flight events
-    // play out naturally. The dysregulated state feels eerily still.
-    // (No setTargetAtTime here — this is a JS-side rate, not an audio param.)
-    const meadowActivity = Math.max(0, 1 - (gauge / MEADOW_QUIET_AT_GAUGE))
-    if (Math.abs(meadowActivity - this._lastMeadowActivity) > RESCHEDULE_EPS) {
-      this._meadow?.setActivity(meadowActivity)
-      this._lastMeadowActivity = meadowActivity
+    // ── Breath textures ──
+    // Forward the snapshot's breathPhase into the breath module so the
+    // inhale and exhale textures follow the pacing circle's cycle. Under
+    // dysregulation, scale the whole module down (textures + drone alike)
+    // toward BREATH_DUCK_FLOOR so the bed recedes behind the lowpass + rumble
+    // rather than fighting them. Throttled so we don't queue ramps per-frame.
+    if (this._breath) {
+      this._breath.update(snapshot.breathPhase || 0)
+      const duckTarget = 1 + (BREATH_DUCK_FLOOR - 1) * lpRatio
+      if (Math.abs(duckTarget - this._lastBreathDuck) > RESCHEDULE_EPS) {
+        this._breath.output.gain.setTargetAtTime(duckTarget, now, TC_LEVEL)
+        this._lastBreathDuck = duckTarget
+      }
     }
 
     // ── Rumble level ──
@@ -304,11 +304,10 @@ export default class SoundDirector {
   // removes lifecycle listeners.
   dispose() {
     document.removeEventListener('visibilitychange', this._onVisibilityChange)
-    this._air?.dispose()
-    this._meadow?.dispose()
+    this._breath?.dispose()
     this._rumble?.dispose()
     this._bowl?.dispose()
-    this._air = this._meadow = this._rumble = this._bowl = null
+    this._breath = this._rumble = this._bowl = null
     try { this.masterGain.disconnect() } catch (e) { /* already disconnected */ }
     try { this.compressor.disconnect()  } catch (e) { /* already disconnected */ }
     if (this.ctx.state !== 'closed') {
