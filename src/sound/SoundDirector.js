@@ -1,9 +1,8 @@
 // ── SoundDirector ──────────────────────────────────────────────────────────
 // Owns the AudioContext and the entire audio graph for the Square game.
-// Phase 1: skeleton only — master gain, compressor, mute integration, iOS
-// unlock, lifecycle. No audible sound emitted yet; subsequent phases attach
-// the ambient bus (Phase 2), the dysregulation chain (Phase 3), and the
-// synergy bowl (Phase 4) onto the buses prepared here.
+// Phase 2: ambient bus is live (synthesized stream + breeze + leaves). Phase
+// 3 will attach the dysregulation chain (lowpass sweep on the ambient bus +
+// rumble); Phase 4 will attach the synergy bowl.
 //
 // Lifecycle contract:
 //   const director = new SoundDirector()
@@ -20,6 +19,11 @@
 //     act as a safety net, not as a sound-shaping tool.
 //   - visibilitychange handler suspends the context when the tab is hidden so
 //     audio doesn't drain battery in the background.
+
+import { createNoiseBuffers } from './noiseBuffer'
+import { createStream }       from './synthStream'
+import { createBreeze }       from './synthBreeze'
+import { createLeaves }       from './synthLeaves'
 
 const RAMP_FAST = 0.05  // 50ms — for mute toggles
 const RAMP_SLOW = 4.0   // 4s   — for the initial ambient fade-in (Phase 2)
@@ -67,6 +71,12 @@ export default class SoundDirector {
     this._started   = false  // becomes true on first startAmbient() call
     this._mutedGain = 1      // last non-muted master target — restored on un-mute
 
+    // Synth-module instances (populated lazily on first startAmbient).
+    this._stream   = null
+    this._breeze   = null
+    this._leaves   = null
+    this._noiseBufs = null   // shared between modules
+
     // Lifecycle: suspend on hidden tab, resume on visible.
     this._onVisibilityChange = () => {
       if (!this._unlocked) return
@@ -108,12 +118,30 @@ export default class SoundDirector {
   }
 
   // ── startAmbient ──────────────────────────────────────────────────────────
-  // Phase 2 hook: ramps master gain from 0 to its target over 4s. Called once
-  // when the game phase begins. Idempotent.
+  // Generates the noise buffers (one-time, ~50ms), instantiates the three
+  // ambient synth modules (stream + breeze + leaves), connects them to the
+  // ambient bus, then ramps the master gain from 0 to its target over 4s.
+  // Idempotent — subsequent calls are no-ops.
   startAmbient(targetGain = 1) {
     if (this._started) return
     this._started   = true
     this._mutedGain = targetGain
+
+    // One-time noise buffer generation. Synchronous (~50ms on a phone) but
+    // we're inside a user-gesture-adjacent path (post-intro), not on the
+    // critical path of the first paint, so it's fine.
+    if (!this._noiseBufs) {
+      this._noiseBufs = createNoiseBuffers(this.ctx)
+    }
+
+    // Spin up the ambient modules — each connects to ambientBus.
+    this._stream = createStream(this.ctx, this._noiseBufs.brown)
+    this._breeze = createBreeze(this.ctx, this._noiseBufs.pink)
+    this._leaves = createLeaves(this.ctx, this._noiseBufs.pink)
+    this._stream.output.connect(this.ambientBus)
+    this._breeze.output.connect(this.ambientBus)
+    this._leaves.output.connect(this.ambientBus)
+
     if (this._muted) return  // user is muted; don't ramp up yet (un-mute will restore)
     const now = this.ctx.currentTime
     this.masterGain.gain.cancelScheduledValues(now)
@@ -130,10 +158,15 @@ export default class SoundDirector {
   }
 
   // ── dispose ───────────────────────────────────────────────────────────────
-  // Idempotent cleanup. Closes the AudioContext (releases the audio thread),
-  // disconnects nodes, removes lifecycle listeners.
+  // Idempotent cleanup. Stops all synth modules, closes the AudioContext
+  // (which releases the audio thread + cancels every scheduled event), and
+  // removes lifecycle listeners.
   dispose() {
     document.removeEventListener('visibilitychange', this._onVisibilityChange)
+    this._stream?.dispose()
+    this._breeze?.dispose()
+    this._leaves?.dispose()
+    this._stream = this._breeze = this._leaves = null
     try { this.masterGain.disconnect() } catch (e) { /* already disconnected */ }
     try { this.compressor.disconnect()  } catch (e) { /* already disconnected */ }
     if (this.ctx.state !== 'closed') {
