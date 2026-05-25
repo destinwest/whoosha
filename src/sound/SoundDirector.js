@@ -24,9 +24,31 @@ import { createNoiseBuffers } from './noiseBuffer'
 import { createStream }       from './synthStream'
 import { createBreeze }       from './synthBreeze'
 import { createLeaves }       from './synthLeaves'
+import { createRumble }       from './synthRumble'
 
 const RAMP_FAST = 0.05  // 50ms — for mute toggles
 const RAMP_SLOW = 4.0   // 4s   — for the initial ambient fade-in (Phase 2)
+
+// ── Dysregulation modulation targets ──
+// gaugeEffect (0 → ~0.9) drives all of these. Maxima are calibrated against
+// the gauge's effective range, not its theoretical 0–1.
+const LOWPASS_OPEN_HZ      = 18000   // fully-open (transparent) cutoff
+const LOWPASS_CLOSED_HZ    = 600     // fully-closed (world muffled) cutoff
+const AMBIENT_LEVEL_FULL   = 1.0
+const AMBIENT_LEVEL_MUFFLED = 0.45
+const LEAVES_GAUGE_THRESHOLD = 0.55   // below this, leaves fully audible; fades out by ~0.85
+const LEAVES_GAUGE_FULL_OUT  = 0.85
+const RUMBLE_LEVEL_MAX     = 0.18    // top-of-gauge rumble bus gain
+
+// setTargetAtTime time constants (seconds to ~63% of target).
+const TC_FILTER  = 0.10
+const TC_LEVEL   = 0.10
+const TC_LEAVES  = 0.25
+const TC_RUMBLE  = 0.12
+
+// Min target change before re-scheduling — avoids zipper from per-frame
+// micro-modulation of already-stable params.
+const RESCHEDULE_EPS = 0.005
 
 export default class SoundDirector {
   constructor() {
@@ -51,18 +73,39 @@ export default class SoundDirector {
 
     this.masterGain.connect(this.compressor).connect(this.ctx.destination)
 
-    // Bus stubs — populated by later phases. Keeping the references here means
-    // future modules can wire into a stable spine without touching this file.
+    // ── Ambient signal chain ──
+    // [stream + breeze] → ambientBus → ambientLowpass → ambientLevel → master
+    // [leaves]          → leavesSubmix → ambientBus (so leaves can be faded
+    //                     out separately under dysregulation while the bed
+    //                     continues through the same lowpass + level chain)
     this.ambientBus = this.ctx.createGain()
     this.ambientBus.gain.value = 1
-    this.ambientBus.connect(this.masterGain)
 
+    this.ambientLowpass = this.ctx.createBiquadFilter()
+    this.ambientLowpass.type = 'lowpass'
+    this.ambientLowpass.frequency.value = LOWPASS_OPEN_HZ
+    this.ambientLowpass.Q.value = 0.7  // mild resonance — natural-sounding sweep
+
+    this.ambientLevel = this.ctx.createGain()
+    this.ambientLevel.gain.value = AMBIENT_LEVEL_FULL
+
+    this.leavesSubmix = this.ctx.createGain()
+    this.leavesSubmix.gain.value = 1   // gaugeEffect modulates this
+
+    this.ambientBus.connect(this.ambientLowpass)
+                   .connect(this.ambientLevel)
+                   .connect(this.masterGain)
+    this.leavesSubmix.connect(this.ambientBus)
+
+    // ── Synergy bus (Phase 4) ──
     this.synergyBus = this.ctx.createGain()
     this.synergyBus.gain.value = 1
     this.synergyBus.connect(this.masterGain)
 
+    // ── Rumble bus ──
+    // Starts silent; gaugeEffect drives the level up under dysregulation.
     this.rumbleBus = this.ctx.createGain()
-    this.rumbleBus.gain.value = 1
+    this.rumbleBus.gain.value = 0
     this.rumbleBus.connect(this.masterGain)
 
     // Internal state
@@ -75,7 +118,14 @@ export default class SoundDirector {
     this._stream   = null
     this._breeze   = null
     this._leaves   = null
+    this._rumble   = null
     this._noiseBufs = null   // shared between modules
+
+    // Last-scheduled targets for change-throttling in update().
+    this._lastLowpass = LOWPASS_OPEN_HZ
+    this._lastLevel   = AMBIENT_LEVEL_FULL
+    this._lastLeaves  = 1
+    this._lastRumble  = 0
 
     // Lifecycle: suspend on hidden tab, resume on visible.
     this._onVisibilityChange = () => {
@@ -134,13 +184,19 @@ export default class SoundDirector {
       this._noiseBufs = createNoiseBuffers(this.ctx)
     }
 
-    // Spin up the ambient modules — each connects to ambientBus.
+    // Spin up the ambient modules.
+    // Stream + breeze feed ambientBus directly. Leaves route through the
+    // leavesSubmix so they can be faded out independently under dysregulation
+    // (while stream + breeze remain audible, just muffled).
+    // Rumble feeds the rumbleBus, which is silent by default.
     this._stream = createStream(this.ctx, this._noiseBufs.brown)
     this._breeze = createBreeze(this.ctx, this._noiseBufs.pink)
     this._leaves = createLeaves(this.ctx, this._noiseBufs.pink)
+    this._rumble = createRumble(this.ctx)
     this._stream.output.connect(this.ambientBus)
     this._breeze.output.connect(this.ambientBus)
-    this._leaves.output.connect(this.ambientBus)
+    this._leaves.output.connect(this.leavesSubmix)
+    this._rumble.output.connect(this.rumbleBus)
 
     if (this._muted) return  // user is muted; don't ramp up yet (un-mute will restore)
     const now = this.ctx.currentTime
@@ -150,11 +206,58 @@ export default class SoundDirector {
   }
 
   // ── update ────────────────────────────────────────────────────────────────
-  // Called once per rAF from SquareCanvas's frame loop with the game state
-  // snapshot. Phase 1: no-op (we just log in dev to verify the contract).
-  // Subsequent phases consume this for ambient/dysregulation/synergy modulation.
-  update(_snapshot) {
-    // Intentionally empty in Phase 1. Will be populated in Phases 2–4.
+  // Called once per rAF from SquareCanvas's frame loop. Phase 3 consumes
+  // `gaugeEffect` to drive the dysregulation modulation chain. Phase 4 will
+  // add `synergyStage` and `breathPhase` handling.
+  //
+  // Modulation uses setTargetAtTime (smooth exponential approach) rather
+  // than linearRampToValueAtTime — this lets us update every frame without
+  // queueing thousands of ramps. The time constants are tuned so per-frame
+  // jitter in the input signal is filtered into a perceptually smooth ramp.
+  // Targets are change-throttled (>RESCHEDULE_EPS) to avoid noise.
+  update(snapshot) {
+    if (!this._started || !snapshot) return
+    const now = this.ctx.currentTime
+    const gauge = Math.max(0, Math.min(1, snapshot.gaugeEffect || 0))
+
+    // ── Ambient lowpass ──
+    // Exponential mapping in log-frequency space: gauge=0 → fully open,
+    // gauge≥0.9 → fully closed. Subjectively matches the visual desaturation.
+    const lpRatio = Math.min(gauge / 0.9, 1)
+    const lpTarget = LOWPASS_OPEN_HZ * Math.pow(LOWPASS_CLOSED_HZ / LOWPASS_OPEN_HZ, lpRatio)
+    if (Math.abs(lpTarget - this._lastLowpass) / this._lastLowpass > RESCHEDULE_EPS) {
+      this.ambientLowpass.frequency.setTargetAtTime(lpTarget, now, TC_FILTER)
+      this._lastLowpass = lpTarget
+    }
+
+    // ── Ambient level ──
+    const levelTarget = AMBIENT_LEVEL_FULL + (AMBIENT_LEVEL_MUFFLED - AMBIENT_LEVEL_FULL) * lpRatio
+    if (Math.abs(levelTarget - this._lastLevel) > RESCHEDULE_EPS) {
+      this.ambientLevel.gain.setTargetAtTime(levelTarget, now, TC_LEVEL)
+      this._lastLevel = levelTarget
+    }
+
+    // ── Leaves submix ──
+    // Stays at 1.0 until gauge crosses the threshold, then ramps to 0 by
+    // LEAVES_GAUGE_FULL_OUT. The transients "vanish" into the muffled world.
+    let leavesTarget = 1
+    if (gauge >= LEAVES_GAUGE_THRESHOLD) {
+      const t = Math.min(1, (gauge - LEAVES_GAUGE_THRESHOLD) / (LEAVES_GAUGE_FULL_OUT - LEAVES_GAUGE_THRESHOLD))
+      leavesTarget = 1 - t
+    }
+    if (Math.abs(leavesTarget - this._lastLeaves) > RESCHEDULE_EPS) {
+      this.leavesSubmix.gain.setTargetAtTime(leavesTarget, now, TC_LEAVES)
+      this._lastLeaves = leavesTarget
+    }
+
+    // ── Rumble level ──
+    // Linear ramp from silent to RUMBLE_LEVEL_MAX. Slight perceptual lag
+    // (TC_RUMBLE > TC_FILTER) so the rumble "appears" rather than slams in.
+    const rumbleTarget = RUMBLE_LEVEL_MAX * lpRatio
+    if (Math.abs(rumbleTarget - this._lastRumble) > RESCHEDULE_EPS) {
+      this.rumbleBus.gain.setTargetAtTime(rumbleTarget, now, TC_RUMBLE)
+      this._lastRumble = rumbleTarget
+    }
   }
 
   // ── dispose ───────────────────────────────────────────────────────────────
@@ -166,7 +269,8 @@ export default class SoundDirector {
     this._stream?.dispose()
     this._breeze?.dispose()
     this._leaves?.dispose()
-    this._stream = this._breeze = this._leaves = null
+    this._rumble?.dispose()
+    this._stream = this._breeze = this._leaves = this._rumble = null
     try { this.masterGain.disconnect() } catch (e) { /* already disconnected */ }
     try { this.compressor.disconnect()  } catch (e) { /* already disconnected */ }
     if (this.ctx.state !== 'closed') {
