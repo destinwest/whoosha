@@ -25,6 +25,7 @@ import { createStream }       from './synthStream'
 import { createBreeze }       from './synthBreeze'
 import { createLeaves }       from './synthLeaves'
 import { createRumble }       from './synthRumble'
+import { createBowl }         from './synthBowl'
 
 const RAMP_FAST = 0.05  // 50ms — for mute toggles
 const RAMP_SLOW = 4.0   // 4s   — for the initial ambient fade-in (Phase 2)
@@ -39,6 +40,14 @@ const AMBIENT_LEVEL_MUFFLED = 0.45
 const LEAVES_GAUGE_THRESHOLD = 0.55   // below this, leaves fully audible; fades out by ~0.85
 const LEAVES_GAUGE_FULL_OUT  = 0.85
 const RUMBLE_LEVEL_MAX     = 0.18    // top-of-gauge rumble bus gain
+
+// ── Synergy / breath modulation ──
+// breathPhase is a 0–1 saw — sin(2π·phase) gives a smooth ±1 oscillator.
+// SYNERGY_BREATH_DEPTH controls how much the bowl swells on each breath.
+// 0.2 = ±20% linear amplitude (≈ ±1.6 dB) — felt but never noticed.
+const SYNERGY_BREATH_DEPTH = 0.20
+const SYNERGY_BUS_BASE     = 0.85    // top-of-stage synergy bus gain (sits under the bed)
+const TC_BREATH            = 0.06    // fast-tracking — breathPhase is already smooth
 
 // setTargetAtTime time constants (seconds to ~63% of target).
 const TC_FILTER  = 0.10
@@ -119,6 +128,7 @@ export default class SoundDirector {
     this._breeze   = null
     this._leaves   = null
     this._rumble   = null
+    this._bowl     = null
     this._noiseBufs = null   // shared between modules
 
     // Last-scheduled targets for change-throttling in update().
@@ -126,6 +136,7 @@ export default class SoundDirector {
     this._lastLevel   = AMBIENT_LEVEL_FULL
     this._lastLeaves  = 1
     this._lastRumble  = 0
+    this._lastSynergy = 0    // last synergyBus gain target (stage × breath swell)
 
     // Lifecycle: suspend on hidden tab, resume on visible.
     this._onVisibilityChange = () => {
@@ -193,10 +204,16 @@ export default class SoundDirector {
     this._breeze = createBreeze(this.ctx, this._noiseBufs.pink)
     this._leaves = createLeaves(this.ctx, this._noiseBufs.pink)
     this._rumble = createRumble(this.ctx)
+    this._bowl   = createBowl(this.ctx)
     this._stream.output.connect(this.ambientBus)
     this._breeze.output.connect(this.ambientBus)
     this._leaves.output.connect(this.leavesSubmix)
     this._rumble.output.connect(this.rumbleBus)
+    this._bowl.output.connect(this.synergyBus)
+
+    // synergyBus starts silent — its gain is driven by update() from
+    // synergyStage and breathPhase.
+    this.synergyBus.gain.value = 0
 
     if (this._muted) return  // user is muted; don't ramp up yet (un-mute will restore)
     const now = this.ctx.currentTime
@@ -258,6 +275,28 @@ export default class SoundDirector {
       this.rumbleBus.gain.setTargetAtTime(rumbleTarget, now, TC_RUMBLE)
       this._lastRumble = rumbleTarget
     }
+
+    // ── Synergy bowl ──
+    // Per-partial fade-in is driven by synergyStage; the bus-level breath
+    // modulation is driven by breathPhase. Skip both if the bowl module
+    // hasn't been instantiated (defensive — startAmbient creates it).
+    if (this._bowl) {
+      const stage = Math.max(0, Math.min(4, snapshot.synergyStage || 0))
+      this._bowl.setStage(stage)
+
+      // Bus gain: scales with stage (so the bowl is silent at stage 0 even if
+      // the partials accidentally have residual output) AND breathes with the
+      // game's breath cycle. sin(2π·phase) gives a smooth ±1 swing; we map it
+      // into ±SYNERGY_BREATH_DEPTH around a unity mid-point.
+      const stageGate  = Math.min(1, stage)  // smoothly engages over stage 0→1
+      const phase      = snapshot.breathPhase || 0
+      const breathMul  = 1 + Math.sin(phase * Math.PI * 2) * SYNERGY_BREATH_DEPTH
+      const synergyTarget = SYNERGY_BUS_BASE * stageGate * breathMul
+      if (Math.abs(synergyTarget - this._lastSynergy) > RESCHEDULE_EPS) {
+        this.synergyBus.gain.setTargetAtTime(synergyTarget, now, TC_BREATH)
+        this._lastSynergy = synergyTarget
+      }
+    }
   }
 
   // ── dispose ───────────────────────────────────────────────────────────────
@@ -270,7 +309,8 @@ export default class SoundDirector {
     this._breeze?.dispose()
     this._leaves?.dispose()
     this._rumble?.dispose()
-    this._stream = this._breeze = this._leaves = this._rumble = null
+    this._bowl?.dispose()
+    this._stream = this._breeze = this._leaves = this._rumble = this._bowl = null
     try { this.masterGain.disconnect() } catch (e) { /* already disconnected */ }
     try { this.compressor.disconnect()  } catch (e) { /* already disconnected */ }
     if (this.ctx.state !== 'closed') {
