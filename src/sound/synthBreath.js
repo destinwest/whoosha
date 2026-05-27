@@ -69,12 +69,19 @@ const STRAIGHT_FRAC        = (1 - 2 * SQUARE_RADIUS_RATIO) /
                               ((1 - 2 * SQUARE_RADIUS_RATIO) + Math.PI * SQUARE_RADIUS_RATIO / 2)
 const CORNER_FRAC_OF_CYCLE = (1 - STRAIGHT_FRAC) / 4
 
-// Inhale wraps around 1.0: starts at ~0.9046, ends at ~0.1546.
-const INHALE_START = 1   - CORNER_FRAC_OF_CYCLE
-const INHALE_END   = 0.25 - CORNER_FRAC_OF_CYCLE
+// Fine-tuning knob: shift both windows later by this many seconds (positive
+// values delay the texture onset; negative values pull it earlier). Useful
+// for nudging the perceptual timing without changing the structural shape.
+// 16-second cycle → 1 s = 0.0625 of breathPhase.
+const WINDOW_DELAY_SECONDS = 0.1
+const WINDOW_DELAY_FRAC    = WINDOW_DELAY_SECONDS / 16
+
+// Inhale wraps around 1.0: starts at ~0.9109, ends at ~0.1609.
+const INHALE_START = 1   - CORNER_FRAC_OF_CYCLE + WINDOW_DELAY_FRAC
+const INHALE_END   = 0.25 - CORNER_FRAC_OF_CYCLE + WINDOW_DELAY_FRAC
 // Exhale offset by half a cycle.
-const EXHALE_START = 0.5 - CORNER_FRAC_OF_CYCLE
-const EXHALE_END   = 0.75 - CORNER_FRAC_OF_CYCLE
+const EXHALE_START = 0.5 - CORNER_FRAC_OF_CYCLE + WINDOW_DELAY_FRAC
+const EXHALE_END   = 0.75 - CORNER_FRAC_OF_CYCLE + WINDOW_DELAY_FRAC
 
 // setTargetAtTime time constant for envelope tracking. Small (≈30 ms) because
 // the input breathPhase is already smooth; we just need to avoid zipper.
