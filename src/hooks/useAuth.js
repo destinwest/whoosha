@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import * as Sentry from '@sentry/react'
 import { supabase } from '../lib/supabaseClient'
 import useStore from '../store/useStore'
 
@@ -42,11 +43,19 @@ export function useAuth() {
       setUser(session?.user ?? null)
 
       if (session?.user) {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('children')
           .select('id, first_name')
           .eq('parent_id', session.user.id)
 
+        // If the fetch fails (network, RLS misconfigured, etc.) we still need
+        // to set childProfiles to something so the ProtectedRoute guard can
+        // proceed — the empty-array fallback sends the user to /onboarding,
+        // which is the safer-of-two-evils degradation. Capture to Sentry so
+        // the failure isn't silent in dev/prod.
+        if (error) {
+          Sentry.captureException(error, { tags: { area: 'children-fetch' } })
+        }
         const profiles = data ?? []
         setChildProfiles(profiles)
 

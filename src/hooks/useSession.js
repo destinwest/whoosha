@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/react'
 import { supabase } from '../lib/supabaseClient'
 import useStore from '../store/useStore'
 
@@ -14,7 +15,11 @@ export function useSession() {
       completed,
     })
 
-    if (error) console.error('Failed to save session:', error)
+    // Send to Sentry rather than console.error: the latter lands in the
+    // browser console where it's visible to the user and any extension
+    // reading their console output, and Supabase error payloads can hint
+    // at table structure / RLS state.
+    if (error) Sentry.captureException(error, { tags: { area: 'session-insert', gameSlug } })
   }
 
   return { saveSession }

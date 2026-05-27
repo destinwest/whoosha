@@ -8,12 +8,22 @@ Sentry.init({
   dsn: import.meta.env.VITE_SENTRY_DSN,
   integrations: [
     Sentry.browserTracingIntegration(),
-    Sentry.replayIntegration(),
+    // PII guard: session replays capture DOM mutations. For a children's
+    // product handling child first names and parent emails, mask all text
+    // and block media inside replays explicitly — defaults vary by SDK
+    // version, and being explicit is also documentation.
+    Sentry.replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+    }),
   ],
   // Capture 100% of traces in development; tune down for production
   tracesSampleRate: 1.0,
   replaysSessionSampleRate: 0.1,
   replaysOnErrorSampleRate: 1.0,
+  // Strip request/response bodies and form data from breadcrumbs so we
+  // don't accidentally transmit child names or emails through Sentry.
+  sendDefaultPii: false,
 })
 
 function ErrorFallback({ resetError }) {
