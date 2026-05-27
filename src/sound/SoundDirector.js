@@ -26,7 +26,6 @@ import { createRumble }       from './synthRumble'
 import { createBowl }         from './synthBowl'
 
 const RAMP_FAST = 0.05  // 50ms — for mute toggles
-const RAMP_SLOW = 4.0   // 4s   — for the initial ambient fade-in (Phase 2)
 
 // ── Dysregulation modulation targets ──
 // gaugeEffect (0 → ~0.9) drives all of these. Maxima are calibrated against
@@ -177,9 +176,11 @@ export default class SoundDirector {
   }
 
   // ── startAmbient ──────────────────────────────────────────────────────────
-  // Generates the noise buffers (one-time, ~50ms), instantiates the three
-  // ambient synth modules (stream + breeze + leaves), connects them to the
-  // ambient bus, then ramps the master gain from 0 to its target over 4s.
+  // Generates the noise buffers (one-time, ~50ms), instantiates the ambient
+  // synth modules, connects them to their buses, then sets the master gain
+  // to its target *instantly* (no fade-in). The breath module's inhale
+  // window is timed so that at game start the bell is already partway up —
+  // the texture is audible the moment the game opens.
   // Idempotent — subsequent calls are no-ops.
   startAmbient(targetGain = 1) {
     if (this._started) return
@@ -212,11 +213,10 @@ export default class SoundDirector {
     // this._bowl.output.connect(this.synergyBus)
     this.synergyBus.gain.value = 0
 
-    if (this._muted) return  // user is muted; don't ramp up yet (un-mute will restore)
+    if (this._muted) return  // user is muted; un-mute will restore via setMuted's ramp
     const now = this.ctx.currentTime
     this.masterGain.gain.cancelScheduledValues(now)
-    this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, now)
-    this.masterGain.gain.linearRampToValueAtTime(targetGain, now + RAMP_SLOW)
+    this.masterGain.gain.setValueAtTime(targetGain, now)
   }
 
   // ── update ────────────────────────────────────────────────────────────────

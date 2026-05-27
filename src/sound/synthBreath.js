@@ -20,10 +20,21 @@
 //                       energy.
 //
 // Mapping to the Square breathPhase 0–1 cycle:
-//   [0.00, 0.25)  inhale  → inhale texture swells, exhale silent
-//   [0.25, 0.50)  hold    → SILENT
-//   [0.50, 0.75)  exhale  → exhale texture swells, inhale silent
-//   [0.75, 1.00)  hold    → SILENT
+//   The texture windows are shifted ~1.5 s earlier than the breathe-in /
+//   breathe-out *sides* so that each texture begins ramping at the corner
+//   the pacing circle traverses *entering* the side, not at the start of
+//   the straight. Each window still spans 4 s (0.25 of the cycle) — it
+//   just covers entry-corner + straight rather than straight + exit-corner.
+//
+//   Inhale window: [INHALE_START, INHALE_END) wrapped — bottom-left corner
+//     (entering breathe-in straight from left hold) → entry to bottom-right
+//     corner (exit toward right hold). At game start (breathPhase = 0) the
+//     pacing is partway through the breathe-in straight; the inhale bell
+//     is already ~93% of peak, so the texture is audible immediately.
+//   Hold (top, right side): SILENT.
+//   Exhale window: [EXHALE_START, EXHALE_END) — top-right corner (entering
+//     breathe-out straight from right hold) → entry to top-left corner.
+//   Hold (bottom, left side): SILENT.
 //
 // Why bell envelopes (sin·π·t) and not linear ramps?
 //   The sine half-cycle has zero derivative at both ends — no click at the
@@ -43,11 +54,27 @@ const EXHALE_FILTER_HZ   = 380
 const EXHALE_FILTER_Q    = 0.55
 const EXHALE_PEAK_GAIN   = 0.13
 
-// Phase windows (within breathPhase 0–1)
-const INHALE_START = 0.00
-const INHALE_END   = 0.25
-const EXHALE_START = 0.50
-const EXHALE_END   = 0.75
+// ── Phase windows ────────────────────────────────────────────────────────
+// Derived from the SquareCanvas pacing geometry. The canvas uses corner
+// radius r = sq * 0.22, which makes each side ~62% straight + ~38% arc.
+// CORNER_FRAC_OF_CYCLE is the breathPhase length of one arc (~0.0954, or
+// ~1.53 s of the 16 s cycle). Each texture window starts that long BEFORE
+// its respective breathe-in/breathe-out side begins, so the bell starts
+// ramping while the pacing circle is in the entry-corner.
+//
+// If SquareCanvas's radius ratio ever changes, update SQUARE_RADIUS_RATIO
+// here to match — these are physically coupled.
+const SQUARE_RADIUS_RATIO  = 0.22
+const STRAIGHT_FRAC        = (1 - 2 * SQUARE_RADIUS_RATIO) /
+                              ((1 - 2 * SQUARE_RADIUS_RATIO) + Math.PI * SQUARE_RADIUS_RATIO / 2)
+const CORNER_FRAC_OF_CYCLE = (1 - STRAIGHT_FRAC) / 4
+
+// Inhale wraps around 1.0: starts at ~0.9046, ends at ~0.1546.
+const INHALE_START = 1   - CORNER_FRAC_OF_CYCLE
+const INHALE_END   = 0.25 - CORNER_FRAC_OF_CYCLE
+// Exhale offset by half a cycle.
+const EXHALE_START = 0.5 - CORNER_FRAC_OF_CYCLE
+const EXHALE_END   = 0.75 - CORNER_FRAC_OF_CYCLE
 
 // setTargetAtTime time constant for envelope tracking. Small (≈30 ms) because
 // the input breathPhase is already smooth; we just need to avoid zipper.
@@ -56,12 +83,19 @@ const TC_ENV = 0.03
 // Change-throttle epsilon — skip re-scheduling when target moves less than this.
 const RESCHEDULE_EPS = 0.002
 
-// ── computeEnvelope ──────────────────────────────────────────────────────
-// sin(π·t) bell over a normalized window. Zero outside the window.
+// ── computeBellEnvelope ──────────────────────────────────────────────────
+// sin(π·t) bell over a normalized window. Wrap-aware: when windowStart
+// > windowEnd the window straddles breathPhase = 1.0 (e.g., inhale runs
+// from 0.9046 through 1.0 and back to 0.1546). Zero outside the window.
 function computeBellEnvelope(breathPhase, windowStart, windowEnd) {
-  if (breathPhase < windowStart || breathPhase >= windowEnd) return 0
-  const t = (breathPhase - windowStart) / (windowEnd - windowStart)
-  return Math.sin(t * Math.PI)
+  // Window length, accounting for wrap. (a + 1) % 1 normalizes a negative
+  // delta into [0, 1); when windowEnd > windowStart this is just the
+  // straight difference.
+  const length = ((windowEnd - windowStart) + 1) % 1
+  if (length === 0) return 0
+  const offset = ((breathPhase - windowStart) + 1) % 1
+  if (offset >= length) return 0
+  return Math.sin((offset / length) * Math.PI)
 }
 
 export function createBreath(ctx, pinkBuffer) {
