@@ -4,34 +4,34 @@
 // each gated by a sin(π·t) bell envelope. Holds are silent.
 //
 // ── Prototype mode selector ──
-// The baseline ("wave") sounds ocean-like — that's the spectral signature
-// of pink noise through a stationary bandpass. Modes A–D each try a
-// different DSP technique to push the texture closer to "breath" or
-// "breeze." Switch BREATH_MODE below to compare. Each mode's tunables are
-// in MODE_PARAMS so they can be adjusted independently.
+// All non-baseline modes use the same DSP chain (highpass + resonant
+// bandpass + slow LFO on the resonance center — the structure of mode A).
+// A's exhale character ("haa", warm, lowish resonance) was identified as
+// the strong direction. Modes B / C / D are subtle parameter variations
+// on that exhale shape, applied to BOTH inhale and exhale, to test
+// different ways of treating the inhale phase.
 //
-//   'wave' — baseline. Single bandpass on pink noise. Smooth, broad,
-//            spectrally stationary. Reads as "ocean wave."
-//   'A'    — Sibilant Highpass. Drops the bass, keeps the airy top end.
-//            A resonant bandpass after the highpass adds a vocal-formant
-//            character (think "shh" or "haa"). A slow LFO on the resonant
-//            center adds subtle life.
-//   'B'    — Turbulent Flutter. Same bandpass as baseline, but with two
-//            slow LFOs (coprime rates) multiplicatively modulating a
-//            post-envelope gain. Adds the granular amplitude turbulence
-//            of real breath flow.
-//   'C'    — Formant Stack. Three parallel narrow bandpasses tuned like
-//            voice formants (F1/F2/F3) so the noise reads more like
-//            voiced breath without being identifiable as speech.
-//   'D'    — Sweep-and-Air. The bandpass center frequency sweeps DURING
-//            the breath — brighter at peak airflow, darker at the edges,
-//            matching the physical relationship between flow rate and
-//            spectral content.
+//   'wave' — original baseline. Pink noise through a single stationary
+//            bandpass. Reads as "ocean wave." Kept for reference.
+//   'A'    — Sibilant Highpass. Inhale highpass=2 kHz with resonance at
+//            ~2.8 kHz (airy "shh"); exhale highpass=200 Hz with resonance
+//            at ~700 Hz (warm "haa"). The exhale character was identified
+//            as the right direction; modes B/C/D explore it.
+//   'B'    — A's exhale APPLIED VERBATIM TO BOTH PHASES. Tests whether
+//            the bell-envelope timing alone provides enough in/out
+//            structure when the texture itself is identical.
+//   'C'    — A's exhale, with the inhale's resonance shifted up a touch
+//            (700 → 780 Hz) and a slightly faster resonance-LFO. Same
+//            warm character with a small pitch differentiation between
+//            in and out.
+//   'D'    — A's exhale, with more LFO movement on the resonance center
+//            (faster rate, deeper modulation) for both phases. More
+//            "alive" / animated feel.
 //
 // All modes share window timing, the bell envelope, and the dysregulation
 // ducking via the outer output gain (driven by SoundDirector).
 
-const BREATH_MODE = 'A'  // 'wave' | 'A' | 'B' | 'C' | 'D'
+const BREATH_MODE = 'B'  // 'wave' | 'A' | 'B' | 'C' | 'D'
 
 // ── Per-mode tunables ─────────────────────────────────────────────────────
 // peakGain is the bell-envelope peak amplitude (linear gain). The bell
@@ -56,48 +56,30 @@ const MODE_PARAMS = {
     exhale: { highpassHz: 200,  hpQ: 0.7, resHz: 700,  resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.20, peakGain: 0.20 },
   },
 
-  // B — Turbulent Flutter: post-envelope gain LFOs add amplitude turbulence.
-  //   bandpassHz   : filter center
-  //   q            : filter Q
-  //   flutterRateA : faster of the two flutter LFOs (Hz)
-  //   flutterRateB : slower flutter LFO (Hz); coprime with A
-  //   flutterDepth : combined modulation depth (1.0 = full ±1.0 swing)
-  //   peakGain     : bell envelope peak
+  // B — A's exhale verbatim for both phases.
+  //     Inhale and exhale use identical params; only the bell-envelope
+  //     timing distinguishes the two phases. Use this to hear the warm
+  //     "haa" character without any in/out spectral differentiation.
   B: {
-    inhale: { bandpassHz: 1500, q: 0.55, flutterRateA: 7.3, flutterRateB: 11.7, flutterDepth: 0.40, peakGain: 0.15 },
-    exhale: { bandpassHz: 380,  q: 0.55, flutterRateA: 5.1, flutterRateB: 8.9,  flutterDepth: 0.40, peakGain: 0.15 },
+    inhale: { highpassHz: 200, hpQ: 0.7, resHz: 700, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.20, peakGain: 0.20 },
+    exhale: { highpassHz: 200, hpQ: 0.7, resHz: 700, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.20, peakGain: 0.20 },
   },
 
-  // C — Formant Stack: three parallel bandpasses approximating voice formants.
-  //   formants : [{ hz, q, g }] where g is the per-formant gain (relative)
-  //   peakGain : bell envelope peak (multiplies the summed formants)
+  // C — A's exhale with a subtle upward pitch shift for inhale.
+  //     Inhale resonance moves to ~780 Hz (vs exhale's 700 Hz) and the
+  //     inhale LFO ticks slightly faster. Keeps the warm character but
+  //     reintroduces a small in/out perceptual distinction.
   C: {
-    inhale: {
-      formants: [
-        { hz: 800,  q: 5,   g: 0.60 },
-        { hz: 2400, q: 4,   g: 0.40 },
-        { hz: 4500, q: 3,   g: 0.25 },
-      ],
-      peakGain: 0.18,
-    },
-    exhale: {
-      formants: [
-        { hz: 400,  q: 5,   g: 0.60 },
-        { hz: 1100, q: 4,   g: 0.40 },
-        { hz: 2500, q: 3,   g: 0.25 },
-      ],
-      peakGain: 0.18,
-    },
+    inhale: { highpassHz: 200, hpQ: 0.7, resHz: 780, resQ: 3.5, resLFOHz: 0.11, resLFODepth: 0.20, peakGain: 0.20 },
+    exhale: { highpassHz: 200, hpQ: 0.7, resHz: 700, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.20, peakGain: 0.20 },
   },
 
-  // D — Sweep-and-Air: bandpass center sweeps with the bell shape.
-  //   minHz, maxHz : sweep range. Filter is at minHz at the edges of the
-  //                  window, climbing to maxHz at the peak.
-  //   q            : filter Q
-  //   peakGain     : bell envelope peak
+  // D — A's exhale with more LFO movement on the resonance center.
+  //     Faster rate + deeper modulation for both phases — the resonance
+  //     "shimmers" more, giving a more animated/alive feel.
   D: {
-    inhale: { minHz: 500, maxHz: 3500, q: 0.55, peakGain: 0.13 },
-    exhale: { minHz: 200, maxHz: 1500, q: 0.55, peakGain: 0.13 },
+    inhale: { highpassHz: 200, hpQ: 0.7, resHz: 700, resQ: 3.5, resLFOHz: 0.16, resLFODepth: 0.30, peakGain: 0.20 },
+    exhale: { highpassHz: 200, hpQ: 0.7, resHz: 700, resQ: 3.5, resLFOHz: 0.13, resLFODepth: 0.30, peakGain: 0.20 },
   },
 }
 
@@ -119,7 +101,6 @@ const EXHALE_START = 0.5 - CORNER_FRAC_OF_CYCLE + WINDOW_DELAY_FRAC
 const EXHALE_END   = 0.75 - CORNER_FRAC_OF_CYCLE + WINDOW_DELAY_FRAC
 
 const TC_ENV         = 0.03
-const TC_FILTER      = 0.05
 const RESCHEDULE_EPS = 0.002
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -205,115 +186,14 @@ function buildChain_A(ctx, pinkBuffer, params) {
   }
 }
 
-function buildChain_B(ctx, pinkBuffer, params) {
-  const source = makeSource(ctx, pinkBuffer)
-
-  const bp = ctx.createBiquadFilter()
-  bp.type = 'bandpass'
-  bp.frequency.value = params.bandpassHz
-  bp.Q.value = params.q
-
-  const envGain = ctx.createGain()
-  envGain.gain.value = 0
-
-  // Multiplicative flutter AFTER the envelope so holds remain truly silent.
-  // Two coprime LFOs sum on the flutterGain.gain AudioParam; combined with
-  // its base value of 1.0, the gain swings around unity ± flutterDepth.
-  const flutterGain = ctx.createGain()
-  flutterGain.gain.value = 1.0
-
-  const lfoA = ctx.createOscillator()
-  lfoA.type = 'sine'
-  lfoA.frequency.value = params.flutterRateA
-  const depA = ctx.createGain()
-  depA.gain.value = params.flutterDepth * 0.5
-  lfoA.connect(depA).connect(flutterGain.gain)
-  lfoA.start(ctx.currentTime + Math.random())
-
-  const lfoB = ctx.createOscillator()
-  lfoB.type = 'sine'
-  lfoB.frequency.value = params.flutterRateB
-  const depB = ctx.createGain()
-  depB.gain.value = params.flutterDepth * 0.5
-  lfoB.connect(depB).connect(flutterGain.gain)
-  lfoB.start(ctx.currentTime + Math.random())
-
-  source.connect(bp).connect(envGain).connect(flutterGain)
-
-  return {
-    output: flutterGain,
-    envGain,
-    dispose() {
-      try { source.stop() } catch (e) {}
-      try { lfoA.stop()   } catch (e) {}
-      try { lfoB.stop()   } catch (e) {}
-    },
-  }
-}
-
-function buildChain_C(ctx, pinkBuffer, params) {
-  const source = makeSource(ctx, pinkBuffer)
-
-  const envGain = ctx.createGain()
-  envGain.gain.value = 0
-
-  // Three parallel formant arms summing at envGain (Web Audio sums all
-  // signals routed to a node's input).
-  for (const { hz, q, g } of params.formants) {
-    const bp = ctx.createBiquadFilter()
-    bp.type = 'bandpass'
-    bp.frequency.value = hz
-    bp.Q.value = q
-    const gain = ctx.createGain()
-    gain.gain.value = g
-    source.connect(bp).connect(gain).connect(envGain)
-  }
-
-  return {
-    output: envGain,
-    envGain,
-    dispose() { try { source.stop() } catch (e) {} },
-  }
-}
-
-function buildChain_D(ctx, pinkBuffer, params) {
-  const source = makeSource(ctx, pinkBuffer)
-
-  const bp = ctx.createBiquadFilter()
-  bp.type = 'bandpass'
-  bp.frequency.value = params.minHz
-  bp.Q.value = params.q
-
-  const envGain = ctx.createGain()
-  envGain.gain.value = 0
-  source.connect(bp).connect(envGain)
-
-  let lastFilterHz = params.minHz
-
-  return {
-    output: envGain,
-    envGain,
-    // The filter center traces a sin(π·t) curve in lockstep with the bell —
-    // brightest at peak airflow, darker at the window edges.
-    onProgress(progress, now) {
-      if (progress === null) return
-      const sweep = Math.sin(progress * Math.PI)
-      const targetHz = params.minHz + (params.maxHz - params.minHz) * sweep
-      if (Math.abs(targetHz - lastFilterHz) / lastFilterHz > 0.02) {
-        bp.frequency.setTargetAtTime(targetHz, now, TC_FILTER)
-        lastFilterHz = targetHz
-      }
-    },
-    dispose() { try { source.stop() } catch (e) {} },
-  }
-}
-
+// B / C / D all use buildChain_A — they're parameter variations on the
+// same highpass + resonance chain, not different DSP topologies.
 const CHAIN_BUILDERS = {
   wave: buildChain_wave,
   A:    buildChain_A,
-  B:    buildChain_B,
-  C:    buildChain_C,
-  D:    buildChain_D,
+  B:    buildChain_A,
+  C:    buildChain_A,
+  D:    buildChain_A,
 }
 
 // ── createBreath ─────────────────────────────────────────────────────────
