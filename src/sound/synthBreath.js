@@ -73,7 +73,7 @@ const CORNER_FRAC_OF_CYCLE = (1 - STRAIGHT_FRAC) / 4
 // values delay the texture onset; negative values pull it earlier). Useful
 // for nudging the perceptual timing without changing the structural shape.
 // 16-second cycle → 1 s = 0.0625 of breathPhase.
-const WINDOW_DELAY_SECONDS = 0.4
+const WINDOW_DELAY_SECONDS = 0.6
 const WINDOW_DELAY_FRAC    = WINDOW_DELAY_SECONDS / 16
 
 // Inhale wraps around 1.0: starts at ~0.9109, ends at ~0.1609.
