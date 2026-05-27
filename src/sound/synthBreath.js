@@ -4,34 +4,32 @@
 // each gated by a sin(π·t) bell envelope. Holds are silent.
 //
 // ── Prototype mode selector ──
-// All non-baseline modes use the same DSP chain (highpass + resonant
-// bandpass + slow LFO on the resonance center — the structure of mode A).
-// A's exhale character ("haa", warm, lowish resonance) was identified as
-// the strong direction. Modes B / C / D are subtle parameter variations
-// on that exhale shape, applied to BOTH inhale and exhale, to test
-// different ways of treating the inhale phase.
+// Modes A, B, D introduce a SWEEPING resonance: the formant frequency
+// rises linearly across the inhale window and falls across the exhale
+// window, matching the rising/falling energy of the physical breath.
+// Mode C is kept as the prior static-resonance reference.
 //
 //   'wave' — original baseline. Pink noise through a single stationary
 //            bandpass. Reads as "ocean wave." Kept for reference.
-//   'A'    — Sibilant Highpass. Inhale highpass=2 kHz with resonance at
-//            ~2.8 kHz (airy "shh"); exhale highpass=200 Hz with resonance
-//            at ~700 Hz (warm "haa"). The exhale character was identified
-//            as the right direction; modes B/C/D explore it.
-//   'B'    — A's exhale APPLIED VERBATIM TO BOTH PHASES. Tests whether
-//            the bell-envelope timing alone provides enough in/out
-//            structure when the texture itself is identical.
-//   'C'    — A's exhale, with the inhale's resonance shifted up a touch
-//            (700 → 780 Hz) and a slightly faster resonance-LFO. Same
-//            warm character with a small pitch differentiation between
-//            in and out.
-//   'D'    — A's exhale, with more LFO movement on the resonance center
-//            (faster rate, deeper modulation) for both phases. More
-//            "alive" / animated feel.
+//   'A'    — Subtle sweep. Inhale resonance rises 700 → 850 Hz across
+//            its window; exhale falls 850 → 700 Hz. Residual LFO retained
+//            for organic motion on top. The pitch change reads more as
+//            "rising warmth" than as an obvious pitch glide.
+//   'B'    — Moderate sweep. Inhale 600 → 1000 Hz; exhale 1000 → 600 Hz.
+//            Pitch motion clearly perceivable; LFO reduced so the sweep
+//            is the dominant motion.
+//   'C'    — Static reference (unchanged from prior iteration). Warm
+//            "haa" character with inhale resonance at 780 Hz, exhale at
+//            700 Hz. No sweep across the window.
+//   'D'    — Obvious sweep. Inhale 500 → 1500 Hz; exhale 1500 → 500 Hz.
+//            Dramatic, unmistakable pitch glide. LFO disabled — the
+//            sweep provides all the motion.
 //
-// All modes share window timing, the bell envelope, and the dysregulation
-// ducking via the outer output gain (driven by SoundDirector).
+// Sweep variants linearly interpolate resStartHz → resEndHz across the
+// bell-progress timeline. The static highpass and amplitude bell envelope
+// are unchanged across all modes. Holds remain silent.
 
-const BREATH_MODE = 'B'  // 'wave' | 'A' | 'B' | 'C' | 'D'
+const BREATH_MODE = 'D'  // 'wave' | 'A' | 'B' | 'C' | 'D'
 
 // ── Per-mode tunables ─────────────────────────────────────────────────────
 // peakGain is the bell-envelope peak amplitude (linear gain). The bell
@@ -43,43 +41,43 @@ const MODE_PARAMS = {
     exhale: { bandpassHz: 380,  q: 0.55, peakGain: 0.13 },
   },
 
-  // A — Sibilant Highpass: airy, "shh"/"haa" character.
+  // Static-resonance params (used by mode C only):
   //   highpassHz : floor frequency (everything below is cut)
   //   hpQ        : highpass resonance (higher = sharper rolloff)
-  //   resHz      : resonance peak frequency (the "formant")
+  //   resHz      : resonance peak frequency (the "formant"); fixed across window
   //   resQ       : resonance sharpness (higher = narrower, more vocal)
   //   resLFOHz   : LFO rate modulating the resonance center
   //   resLFODepth: depth of resonance modulation as a fraction of resHz
   //   peakGain   : bell envelope peak amplitude
+  //
+  // Sweep-resonance params (used by modes A, B, D):
+  //   resStartHz : resonance freq at start of bell window
+  //   resEndHz   : resonance freq at end of bell window
+  //     For inhale: resStartHz < resEndHz (rising). For exhale: > (falling).
+  //   Other fields same as above; LFO depth/rate optional (0 disables).
+
+  // A — Subtle sweep (small range, light LFO).
   A: {
-    inhale: { highpassHz: 2000, hpQ: 0.7, resHz: 2800, resQ: 3.5, resLFOHz: 0.13, resLFODepth: 0.18, peakGain: 0.20 },
-    exhale: { highpassHz: 200,  hpQ: 0.7, resHz: 700,  resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.20, peakGain: 0.20 },
+    inhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 700, resEndHz: 850, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.10, peakGain: 0.20 },
+    exhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 850, resEndHz: 700, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.10, peakGain: 0.20 },
   },
 
-  // B — A's exhale verbatim for both phases.
-  //     Inhale and exhale use identical params; only the bell-envelope
-  //     timing distinguishes the two phases. Use this to hear the warm
-  //     "haa" character without any in/out spectral differentiation.
+  // B — Moderate sweep (medium range, minimal LFO).
   B: {
-    inhale: { highpassHz: 200, hpQ: 0.7, resHz: 700, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.20, peakGain: 0.20 },
-    exhale: { highpassHz: 200, hpQ: 0.7, resHz: 700, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.20, peakGain: 0.20 },
+    inhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 600, resEndHz: 1000, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.05, peakGain: 0.20 },
+    exhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 1000, resEndHz: 600, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.05, peakGain: 0.20 },
   },
 
-  // C — A's exhale with a subtle upward pitch shift for inhale.
-  //     Inhale resonance moves to ~780 Hz (vs exhale's 700 Hz) and the
-  //     inhale LFO ticks slightly faster. Keeps the warm character but
-  //     reintroduces a small in/out perceptual distinction.
+  // C — Static reference (kept from prior iteration; uses buildChain_A).
   C: {
     inhale: { highpassHz: 200, hpQ: 0.7, resHz: 780, resQ: 3.5, resLFOHz: 0.11, resLFODepth: 0.20, peakGain: 0.20 },
     exhale: { highpassHz: 200, hpQ: 0.7, resHz: 700, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.20, peakGain: 0.20 },
   },
 
-  // D — A's exhale with more LFO movement on the resonance center.
-  //     Faster rate + deeper modulation for both phases — the resonance
-  //     "shimmers" more, giving a more animated/alive feel.
+  // D — Obvious sweep (large range, LFO disabled — sweep does all the work).
   D: {
-    inhale: { highpassHz: 200, hpQ: 0.7, resHz: 700, resQ: 3.5, resLFOHz: 0.16, resLFODepth: 0.30, peakGain: 0.20 },
-    exhale: { highpassHz: 200, hpQ: 0.7, resHz: 700, resQ: 3.5, resLFOHz: 0.13, resLFODepth: 0.30, peakGain: 0.20 },
+    inhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 500, resEndHz: 1500, resQ: 3.5, resLFOHz: 0, resLFODepth: 0, peakGain: 0.20 },
+    exhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 1500, resEndHz: 500, resQ: 3.5, resLFOHz: 0, resLFODepth: 0, peakGain: 0.20 },
   },
 }
 
@@ -186,14 +184,71 @@ function buildChain_A(ctx, pinkBuffer, params) {
   }
 }
 
-// B / C / D all use buildChain_A — they're parameter variations on the
-// same highpass + resonance chain, not different DSP topologies.
+// Same structure as buildChain_A, but the resonance frequency is swept
+// from params.resStartHz to params.resEndHz linearly across the bell-
+// progress timeline. Inhale specifies a rising sweep (start < end);
+// exhale specifies a falling sweep (start > end). The LFO (if depth > 0)
+// adds residual wobble on top of the swept base frequency.
+function buildChain_sweep(ctx, pinkBuffer, params) {
+  const source = makeSource(ctx, pinkBuffer)
+
+  const hp = ctx.createBiquadFilter()
+  hp.type = 'highpass'
+  hp.frequency.value = params.highpassHz
+  hp.Q.value = params.hpQ
+
+  const res = ctx.createBiquadFilter()
+  res.type = 'bandpass'
+  res.frequency.value = params.resStartHz
+  res.Q.value = params.resQ
+
+  // Optional residual LFO on the resonance center. Sums with the swept
+  // base value (Web Audio adds connected signals to AudioParam values).
+  let lfo = null
+  if (params.resLFOHz > 0 && params.resLFODepth > 0) {
+    lfo = ctx.createOscillator()
+    lfo.type = 'sine'
+    lfo.frequency.value = params.resLFOHz
+    const lfoDepth = ctx.createGain()
+    const midHz = (params.resStartHz + params.resEndHz) / 2
+    lfoDepth.gain.value = midHz * params.resLFODepth
+    lfo.connect(lfoDepth).connect(res.frequency)
+    lfo.start(ctx.currentTime + Math.random() * 2)
+  }
+
+  const envGain = ctx.createGain()
+  envGain.gain.value = 0
+  source.connect(hp).connect(res).connect(envGain)
+
+  let lastResHz = params.resStartHz
+
+  return {
+    output: envGain,
+    envGain,
+    // Linear sweep from resStartHz to resEndHz across the bell window.
+    // setTargetAtTime smooths frame-to-frame writes (TC ~50ms).
+    onProgress(progress, now) {
+      if (progress === null) return
+      const targetHz = params.resStartHz + (params.resEndHz - params.resStartHz) * progress
+      if (Math.abs(targetHz - lastResHz) > 1) {
+        res.frequency.setTargetAtTime(targetHz, now, 0.05)
+        lastResHz = targetHz
+      }
+    },
+    dispose() {
+      try { source.stop() } catch (e) {}
+      if (lfo) try { lfo.stop() } catch (e) {}
+    },
+  }
+}
+
+// A / B / D use the sweep builder; C retains the static-resonance builder.
 const CHAIN_BUILDERS = {
   wave: buildChain_wave,
-  A:    buildChain_A,
-  B:    buildChain_A,
+  A:    buildChain_sweep,
+  B:    buildChain_sweep,
   C:    buildChain_A,
-  D:    buildChain_A,
+  D:    buildChain_sweep,
 }
 
 // ── createBreath ─────────────────────────────────────────────────────────
