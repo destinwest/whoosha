@@ -24,12 +24,18 @@
 //   'D'    — Obvious sweep. Inhale 500 → 1500 Hz; exhale 1500 → 500 Hz.
 //            Dramatic, unmistakable pitch glide. LFO disabled — the
 //            sweep provides all the motion.
+//   'sibilant' — Original "Sibilant Highpass" preset, restored for A/B
+//            comparison against the sweep variants. Asymmetric in/out
+//            character: bright sibilant inhale (highpass 2 kHz, resonance
+//            ~2.8 kHz, airy "shh") + warm exhale (highpass 200 Hz,
+//            resonance ~700 Hz, soft "haa"). Static resonance with slow
+//            LFO; no sweep within the window.
 //
 // Sweep variants linearly interpolate resStartHz → resEndHz across the
 // bell-progress timeline. The static highpass and amplitude bell envelope
 // are unchanged across all modes. Holds remain silent.
 
-const BREATH_MODE = 'A'  // 'wave' | 'A' | 'B' | 'C' | 'D'
+const BREATH_MODE = 'sibilant'  // 'wave' | 'A' | 'B' | 'C' | 'D' | 'sibilant'
 
 // ── Per-mode tunables ─────────────────────────────────────────────────────
 // peakGain is the bell-envelope peak amplitude (linear gain). The bell
@@ -78,6 +84,17 @@ const MODE_PARAMS = {
   D: {
     inhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 500, resEndHz: 1500, resQ: 3.5, resLFOHz: 0, resLFODepth: 0, peakGain: 0.20 },
     exhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 1500, resEndHz: 500, resQ: 3.5, resLFOHz: 0, resLFODepth: 0, peakGain: 0.20 },
+  },
+
+  // 'sibilant' — Original "Sibilant Highpass" preset, restored for A/B
+  // comparison against the sweep variants. Asymmetric in/out character:
+  //   inhale  highpass 2 kHz, resonance peaked at ~2.8 kHz (airy "shh")
+  //   exhale  highpass 200 Hz, resonance peaked at ~700 Hz (warm "haa")
+  // No frequency sweep within the window. Slow LFO on resonance center
+  // (depth 18–20% of resHz). Uses buildChain_A (static-resonance chain).
+  sibilant: {
+    inhale: { highpassHz: 2000, hpQ: 0.7, resHz: 2800, resQ: 3.5, resLFOHz: 0.13, resLFODepth: 0.18, peakGain: 0.20 },
+    exhale: { highpassHz: 200,  hpQ: 0.7, resHz: 700,  resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.20, peakGain: 0.20 },
   },
 }
 
@@ -262,13 +279,14 @@ function buildChain_sweep(ctx, pinkBuffer, params) {
   }
 }
 
-// A / B / D use the sweep builder; C retains the static-resonance builder.
+// A / B / D use the sweep builder; C and 'sibilant' use the static-resonance builder.
 const CHAIN_BUILDERS = {
-  wave: buildChain_wave,
-  A:    buildChain_sweep,
-  B:    buildChain_sweep,
-  C:    buildChain_A,
-  D:    buildChain_sweep,
+  wave:     buildChain_wave,
+  A:        buildChain_sweep,
+  B:        buildChain_sweep,
+  C:        buildChain_A,
+  D:        buildChain_sweep,
+  sibilant: buildChain_A,
 }
 
 // ── createBreath ─────────────────────────────────────────────────────────
