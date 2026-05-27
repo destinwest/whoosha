@@ -16,8 +16,10 @@ export default function AccountPage() {
   const navigate = useNavigate()
 
   async function handleLogout() {
+    // See HomePage.jsx — await signOut before navigating so a failed network
+    // call doesn't leave the user technically still authenticated.
+    try { await supabase.auth.signOut() } catch { /* network may fail; carry on */ }
     navigate('/')
-    await supabase.auth.signOut()
   }
 
   return (

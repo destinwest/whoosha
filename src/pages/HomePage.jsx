@@ -5,8 +5,14 @@ import useStore from '../store/useStore'
 import GameCarousel from '../components/games/GameCarousel'
 
 async function logout(navigate) {
+  // Await signOut BEFORE navigating. If the local session isn't invalidated
+  // before we change the route, a failed network call leaves the user
+  // technically still authenticated — refreshing or opening /home in a new
+  // tab puts them back in. signOut also fires onAuthStateChange(SIGNED_OUT)
+  // which clears the Zustand store, so by the time navigate runs the route
+  // guards know the user is gone.
+  try { await supabase.auth.signOut() } catch { /* network may fail; carry on */ }
   navigate('/')
-  await supabase.auth.signOut()
 }
 
 function UserCircleIcon() {

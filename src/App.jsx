@@ -29,14 +29,22 @@ function ProtectedRoute({ children }) {
     return <Navigate to="/login" replace state={{ from: location }} />
   }
 
+  // Children-fetch flicker guard: after a fresh login, setUser() resolves
+  // before the children query does. During that ~50–300 ms window
+  // childProfiles is still null. Without this guard the page would render
+  // briefly with no profile data, then redirect to /onboarding once the
+  // fetch completes. Show the spinner instead so the route gate is strict.
+  if (childProfiles === null) return <LoadingSpinner />
+
   // Already has children — don't let them back into onboarding.
-  if (Array.isArray(childProfiles) && childProfiles.length > 0 && location.pathname === '/onboarding') {
+  if (childProfiles.length > 0 && location.pathname === '/onboarding') {
     return <Navigate to="/home" replace />
   }
 
-  // Onboarding gate: childProfiles is [] (not null) only after a successful
-  // fetch, so this fires only when we know for certain there are no children.
-  if (Array.isArray(childProfiles) && childProfiles.length === 0 && location.pathname !== '/onboarding') {
+  // Onboarding gate: childProfiles is [] only after a successful fetch
+  // (guard above caught null), so this fires only when we know for certain
+  // there are no children.
+  if (childProfiles.length === 0 && location.pathname !== '/onboarding') {
     return <Navigate to="/onboarding" replace />
   }
 

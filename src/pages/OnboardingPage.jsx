@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import * as Sentry from '@sentry/react'
 import { supabase } from '../lib/supabaseClient'
 import useStore from '../store/useStore'
 
@@ -19,6 +20,14 @@ export default function OnboardingPage() {
     const trimmedName = name.trim()
     if (!trimmedName) return
 
+    // Defensive: ProtectedRoute guards this page on `user`, but a race where
+    // the user logs out mid-submit could leave us trying to insert with a
+    // null parent_id. Bail loudly rather than crashing on null access.
+    if (!user?.id) {
+      setError('You appear to be signed out. Please log in again.')
+      return
+    }
+
     setError(null)
     setSubmitting(true)
 
@@ -30,7 +39,7 @@ export default function OnboardingPage() {
         .single()
 
       if (error) {
-        console.error('Supabase insert error:', error)
+        Sentry.captureException(error, { tags: { area: 'onboarding-insert' } })
         setError('Something went a little sideways. Let\'s try again.')
         return
       }
