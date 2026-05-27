@@ -151,15 +151,40 @@ export default class SoundDirector {
   // MUST be called synchronously from inside a user-gesture event handler
   // (pointerdown, click, touchstart). resume() returns a promise but the
   // gesture credit is consumed at call time, not at promise-resolution time.
-  // Idempotent — safe to call repeatedly; only the first call actually does
-  // anything meaningful.
+  //
+  // Safe to call on every gesture — both the silent-buffer kick and the
+  // resume() call are cheap, and re-attempting them is necessary on iOS
+  // Safari: there are documented states where the first resume() resolves
+  // successfully but the context remains 'suspended' in practice. The
+  // prior implementation gated on a one-shot _unlocked flag, which made
+  // it impossible to recover from that state — subsequent taps did nothing.
   unlock() {
-    if (this._unlocked) return
-    this._unlocked = true
-    // ctx.state can be 'suspended' on construction; resume() upgrades it.
+    // iOS audio-system kick: playing a 1-sample silent buffer forces the
+    // AudioSession that backs Web Audio to engage. ctx.resume() alone is
+    // sometimes insufficient — there are iOS states where it succeeds as
+    // a promise but no audio reaches the speaker until something is
+    // actually played. This costs a few microseconds; harmless on
+    // desktops, essential on iOS.
+    try {
+      const buf    = this.ctx.createBuffer(1, 1, 22050)
+      const source = this.ctx.createBufferSource()
+      source.buffer = buf
+      source.connect(this.ctx.destination)
+      source.start(0)
+    } catch (e) {
+      // Older browsers may throw if context is closed or buffer args are odd.
+    }
+
+    // Always attempt resume; the previous early-return blocked retries
+    // when the first attempt didn't actually unlock the context.
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {})
     }
+
+    // Marker for the visibilitychange handler — once flipped to true it
+    // stays true, so background/foreground transitions can manage the
+    // context state from this point on.
+    this._unlocked = true
   }
 
   // ── setMuted ──────────────────────────────────────────────────────────────
