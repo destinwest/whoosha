@@ -29,7 +29,7 @@
 // bell-progress timeline. The static highpass and amplitude bell envelope
 // are unchanged across all modes. Holds remain silent.
 
-const BREATH_MODE = 'D'  // 'wave' | 'A' | 'B' | 'C' | 'D'
+const BREATH_MODE = 'A'  // 'wave' | 'A' | 'B' | 'C' | 'D'
 
 // ── Per-mode tunables ─────────────────────────────────────────────────────
 // peakGain is the bell-envelope peak amplitude (linear gain). The bell
@@ -101,6 +101,14 @@ const EXHALE_END   = 0.75 - CORNER_FRAC_OF_CYCLE + WINDOW_DELAY_FRAC
 const TC_ENV         = 0.03
 const RESCHEDULE_EPS = 0.002
 
+// Envelope shape — where the bell reaches its peak within the window
+// (0..1). 0.5 = symmetric sine bell (original behavior). Values below 0.5
+// shift the peak earlier, giving a faster rise and a longer/gentler fall
+// — mimics how a real breath trails off softly at its end. 0.4 means the
+// rise occupies the first 40% of the window (~1.6 s of the 4 s phase) and
+// the decay stretches across the remaining 60% (~2.4 s).
+const ENVELOPE_PEAK_AT = 0.4
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 // Wrap-aware bell progress. Returns t ∈ [0, 1) within the window, or null
@@ -111,6 +119,18 @@ function computeBellProgress(breathPhase, windowStart, windowEnd) {
   const offset = ((breathPhase - windowStart) + 1) % 1
   if (offset >= length) return null
   return offset / length
+}
+
+// Asymmetric bell envelope. Returns a value in [0, 1] for progress ∈ [0, 1],
+// with the peak (= 1) occurring at progress = peakAt rather than at 0.5.
+// Both halves use sin(x · π/2) so the curve is smooth and reaches the peak
+// with zero derivative from each side — no kink at the top. When peakAt = 0.5
+// this reduces to the symmetric sin(π·t) bell.
+function evaluateAsymmetricBell(progress, peakAt) {
+  if (progress < peakAt) {
+    return Math.sin((progress / peakAt) * (Math.PI / 2))
+  }
+  return Math.sin(((1 - progress) / (1 - peakAt)) * (Math.PI / 2))
 }
 
 function makeSource(ctx, buffer) {
@@ -275,7 +295,7 @@ export function createBreath(ctx, pinkBuffer) {
     const now = ctx.currentTime
 
     const ip = computeBellProgress(breathPhase, INHALE_START, INHALE_END)
-    const ig = (ip === null ? 0 : Math.sin(ip * Math.PI)) * params.inhale.peakGain
+    const ig = (ip === null ? 0 : evaluateAsymmetricBell(ip, ENVELOPE_PEAK_AT)) * params.inhale.peakGain
     if (Math.abs(ig - lastInhaleGain) > RESCHEDULE_EPS) {
       inhaleChain.envGain.gain.setTargetAtTime(ig, now, TC_ENV)
       lastInhaleGain = ig
@@ -283,7 +303,7 @@ export function createBreath(ctx, pinkBuffer) {
     inhaleChain.onProgress?.(ip, now)
 
     const xp = computeBellProgress(breathPhase, EXHALE_START, EXHALE_END)
-    const xg = (xp === null ? 0 : Math.sin(xp * Math.PI)) * params.exhale.peakGain
+    const xg = (xp === null ? 0 : evaluateAsymmetricBell(xp, ENVELOPE_PEAK_AT)) * params.exhale.peakGain
     if (Math.abs(xg - lastExhaleGain) > RESCHEDULE_EPS) {
       exhaleChain.envGain.gain.setTargetAtTime(xg, now, TC_ENV)
       lastExhaleGain = xg
