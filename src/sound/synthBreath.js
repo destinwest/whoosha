@@ -35,7 +35,7 @@
 // bell-progress timeline. The static highpass and amplitude bell envelope
 // are unchanged across all modes. Holds remain silent.
 
-const BREATH_MODE = 'sibilant'  // 'wave' | 'A' | 'B' | 'C' | 'D' | 'sibilant'
+const BREATH_MODE = 'A'  // 'wave' | 'A' | 'B' | 'C' | 'D' | 'sibilant'
 
 // ── Per-mode tunables ─────────────────────────────────────────────────────
 // peakGain is the bell-envelope peak amplitude (linear gain). The bell
