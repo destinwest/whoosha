@@ -67,6 +67,13 @@ export default function AuthForm({ mode }) {
         const { data, error } = await supabase.auth.signUp({ email, password })
         if (error) {
           setError(error.message)
+        } else if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          // Supabase signals "email already exists" by returning a fake user
+          // object with no identities — and crucially, NO confirmation email
+          // is sent. This is a deliberate anti-enumeration measure. Without
+          // surfacing it, the user sees "check your email" and waits forever
+          // for a message that will never arrive.
+          setError('That email is already registered. Try logging in instead.')
         } else if (data.user && !data.session) {
           // Email confirmation is enabled in Supabase — show the check-your-email state.
           // Disable email confirmation in Supabase dashboard for frictionless local testing.
