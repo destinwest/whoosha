@@ -76,17 +76,22 @@ export function useAuth() {
     // initial page-load auth check — no need to call getSession() separately.
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      // Defensive URL-hash cleanup after OAuth / magic-link callback.
-      // supabase-js's detectSessionInUrl normally strips the hash itself,
-      // but flow-type / version / React Router timing edges can leave
-      // #access_token=... visible in the URL bar even after the session
-      // is established. URL fragments aren't sent to servers (RFC 3986),
-      // but they do persist in browser history, screen sharing, and sync.
-      // Targeted check on token-shaped fragments only, so legitimate
-      // anchor hashes (e.g. #how-it-works on the landing page) are
-      // preserved.
-      if (window.location.hash && /access_token|refresh_token/.test(window.location.hash)) {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      // Defensive URL cleanup after OAuth / magic-link callbacks.
+      // supabase-js's detectSessionInUrl strips the token content from the
+      // hash, but on some browsers/versions it leaves a bare '#' behind —
+      // and a content-based regex check (e.g. for 'access_token') wouldn't
+      // catch that residue. Instead, on the events that signal a fresh
+      // sign-in (INITIAL_SESSION / SIGNED_IN with a non-null session),
+      // rewrite the URL to its clean pathname+search form. Skipped on the
+      // landing page ('/'), which uses anchor hashes (#how-it-works,
+      // #pricing) for in-page navigation — every other route in the app
+      // has no legitimate use for a URL hash.
+      if (
+        (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') &&
+        session &&
+        window.location.pathname !== '/'
+      ) {
         window.history.replaceState(null, '', window.location.pathname + window.location.search)
       }
       handleSession(session)
