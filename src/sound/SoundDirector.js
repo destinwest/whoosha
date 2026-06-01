@@ -24,6 +24,7 @@ import { createNoiseBuffers } from './noiseBuffer'
 import { createBreath }       from './synthBreath'
 import { createRumble }       from './synthRumble'
 import { createBowl }         from './synthBowl'
+import { createAmbient }      from './synthAmbient'
 
 const RAMP_FAST = 0.05  // 50ms — for mute toggles
 
@@ -126,7 +127,13 @@ export default class SoundDirector {
     this._breath   = null
     this._rumble   = null
     this._bowl     = null
+    this._ambient  = null
     this._noiseBufs = null   // shared between modules
+
+    // Tracks dispose state so async ambient loading can no-op if the
+    // director was torn down before the audio file finished downloading
+    // and decoding.
+    this._disposed = false
 
     // Last-scheduled targets for change-throttling in update().
     this._lastLowpass = LOWPASS_OPEN_HZ
@@ -220,15 +227,39 @@ export default class SoundDirector {
     }
 
     // Spin up the ambient modules.
-    //   breath — drone + inhale/exhale textures locked to breathPhase.
-    //            Replaces the prior nature-mimicry approach with intentional
-    //            musical ambient that actively guides the breath cycle.
-    //   rumble — silent at gauge=0; rises with dysregulation.
-    //   bowl   — silent at synergy=0; partials fade in across stages 0–4.
+    //   breath  — drone + inhale/exhale textures locked to breathPhase.
+    //             Replaces the prior nature-mimicry approach with intentional
+    //             musical ambient that actively guides the breath cycle.
+    //   rumble  — silent at gauge=0; rises with dysregulation.
+    //   bowl    — silent at synergy=0; partials fade in across stages 0–4.
+    //   ambient — sampled forest-meadow bed, loaded async, fades in when ready.
     this._breath = createBreath(this.ctx, this._noiseBufs.pink)
     this._rumble = createRumble(this.ctx)
     this._breath.output.connect(this.ambientBus)
     this._rumble.output.connect(this.rumbleBus)
+
+    // Ambient bed loads asynchronously (fetch + decode). Fire and forget;
+    // the synth breath plays immediately, and the ambient swells in once
+    // the file is ready (typically 100–500ms). The promise can resolve
+    // AFTER dispose() in the worst case (user backs out of the game during
+    // a slow first load), so we check _disposed and clean up if so.
+    createAmbient(this.ctx)
+      .then((ambient) => {
+        if (this._disposed) {
+          ambient.dispose()
+          return
+        }
+        this._ambient = ambient
+        ambient.output.connect(this.ambientBus)
+      })
+      .catch((err) => {
+        // Non-fatal: the game works without the ambient bed. Capture so
+        // delivery failures show up in observability, not the user's
+        // browser console.
+        if (typeof window !== 'undefined' && window.Sentry) {
+          window.Sentry.captureException(err, { tags: { area: 'ambient-load' } })
+        }
+      })
 
     // ── Synergy bowl disabled while tuning the ambient breath layer ─────
     // Uncomment these two lines to re-enable. The update() and dispose()
@@ -328,11 +359,13 @@ export default class SoundDirector {
   // (which releases the audio thread + cancels every scheduled event), and
   // removes lifecycle listeners.
   dispose() {
+    this._disposed = true
     document.removeEventListener('visibilitychange', this._onVisibilityChange)
     this._breath?.dispose()
     this._rumble?.dispose()
     this._bowl?.dispose()
-    this._breath = this._rumble = this._bowl = null
+    this._ambient?.dispose()
+    this._breath = this._rumble = this._bowl = this._ambient = null
     try { this.masterGain.disconnect() } catch (e) { /* already disconnected */ }
     try { this.compressor.disconnect()  } catch (e) { /* already disconnected */ }
     if (this.ctx.state !== 'closed') {
