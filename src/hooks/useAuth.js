@@ -77,6 +77,18 @@ export function useAuth() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Defensive URL-hash cleanup after OAuth / magic-link callback.
+      // supabase-js's detectSessionInUrl normally strips the hash itself,
+      // but flow-type / version / React Router timing edges can leave
+      // #access_token=... visible in the URL bar even after the session
+      // is established. URL fragments aren't sent to servers (RFC 3986),
+      // but they do persist in browser history, screen sharing, and sync.
+      // Targeted check on token-shaped fragments only, so legitimate
+      // anchor hashes (e.g. #how-it-works on the landing page) are
+      // preserved.
+      if (window.location.hash && /access_token|refresh_token/.test(window.location.hash)) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+      }
       handleSession(session)
     })
 
