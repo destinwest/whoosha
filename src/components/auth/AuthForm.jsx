@@ -8,6 +8,15 @@ import { supabase } from '../../lib/supabaseClient'
 // the "or" divider are hidden — email/password is the only auth path.
 const GOOGLE_OAUTH_ENABLED = true
 
+// Email/password is hidden for the family/friends beta because there is no
+// password-recovery flow in place. Flipping this to false closes the silent
+// trap where a tester might sign up with a password, forget it, and have
+// no path back. Google OAuth verifies the email itself and doesn't depend
+// on Supabase's SMTP delivery (which is unreliable on the free tier).
+// Flip back to true once magic-link auth ships — the email input that
+// re-appears will then be a magic-link entry, not a password form.
+const EMAIL_PASSWORD_ENABLED = false
+
 // Google G SVG — matches official brand colors
 function GoogleIcon() {
   return (
@@ -159,97 +168,113 @@ export default function AuthForm({ mode }) {
             {isLogin ? 'Welcome back' : 'Create your account'}
           </h1>
 
-          {/* Google OAuth + "or" divider — hidden until GOOGLE_OAUTH_ENABLED is flipped on */}
+          {/* Google OAuth button — hidden until GOOGLE_OAUTH_ENABLED is flipped on */}
           {GOOGLE_OAUTH_ENABLED && (
-            <>
-              <button
-                type="button"
-                onClick={handleGoogleOAuth}
-                disabled={submitting}
-                className="w-full flex items-center justify-center gap-3 bg-white border border-text-sage/30 rounded-xl py-3.5 font-body font-semibold text-text-forest hover:bg-bg-mint/50 active:bg-bg-mint transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <GoogleIcon />
-                Continue with Google
-              </button>
-
-              <div className="flex items-center gap-4 my-6" aria-hidden="true">
-                <div className="flex-1 h-px bg-text-sage/25" />
-                <span className="font-body text-sm text-text-sage">or</span>
-                <div className="flex-1 h-px bg-text-sage/25" />
-              </div>
-            </>
+            <button
+              type="button"
+              onClick={handleGoogleOAuth}
+              disabled={submitting}
+              className="w-full flex items-center justify-center gap-3 bg-white border border-text-sage/30 rounded-xl py-3.5 font-body font-semibold text-text-forest hover:bg-bg-mint/50 active:bg-bg-mint transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <GoogleIcon />
+              Continue with Google
+            </button>
           )}
 
-          {/* Email + password form */}
-          <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
-            <div>
-              <label htmlFor="email" className="sr-only">Email address</label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email address"
-                required
-                autoComplete="email"
-                className="w-full rounded-xl border border-text-sage/25 bg-white px-4 py-3.5 font-body text-base text-text-forest placeholder:text-text-sage/60 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
-              />
+          {/* "or" divider — only renders when BOTH auth methods are visible */}
+          {GOOGLE_OAUTH_ENABLED && EMAIL_PASSWORD_ENABLED && (
+            <div className="flex items-center gap-4 my-6" aria-hidden="true">
+              <div className="flex-1 h-px bg-text-sage/25" />
+              <span className="font-body text-sm text-text-sage">or</span>
+              <div className="flex-1 h-px bg-text-sage/25" />
             </div>
+          )}
 
-            <div>
-              <label htmlFor="password" className="sr-only">Password</label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
-                required
-                autoComplete={isLogin ? 'current-password' : 'new-password'}
-                className="w-full rounded-xl border border-text-sage/25 bg-white px-4 py-3.5 font-body text-base text-text-forest placeholder:text-text-sage/60 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
-              />
-            </div>
+          {/* Email + password form — hidden during the Google-only beta window */}
+          {EMAIL_PASSWORD_ENABLED && (
+            <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+              <div>
+                <label htmlFor="email" className="sr-only">Email address</label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Email address"
+                  required
+                  autoComplete="email"
+                  className="w-full rounded-xl border border-text-sage/25 bg-white px-4 py-3.5 font-body text-base text-text-forest placeholder:text-text-sage/60 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
+                />
+              </div>
 
-            {/* Error message */}
-            {error && (
-              <p role="alert" className="font-body text-sm text-red-600 text-center pt-1">
-                {error}
-              </p>
-            )}
+              <div>
+                <label htmlFor="password" className="sr-only">Password</label>
+                <input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  required
+                  autoComplete={isLogin ? 'current-password' : 'new-password'}
+                  className="w-full rounded-xl border border-text-sage/25 bg-white px-4 py-3.5 font-body text-base text-text-forest placeholder:text-text-sage/60 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition"
+                />
+              </div>
 
-            {/* Primary action */}
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full bg-primary text-white rounded-xl py-3.5 font-body font-semibold text-lg hover:bg-primary/90 active:bg-primary/80 transition-colors disabled:opacity-60 disabled:cursor-not-allowed mt-2"
-            >
-              {submitting
-                ? 'One moment...'
-                : isLogin
-                  ? 'Log In'
-                  : 'Create Account'}
-            </button>
-          </form>
+              {/* Error message */}
+              {error && (
+                <p role="alert" className="font-body text-sm text-red-600 text-center pt-1">
+                  {error}
+                </p>
+              )}
+
+              {/* Primary action */}
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full bg-primary text-white rounded-xl py-3.5 font-body font-semibold text-lg hover:bg-primary/90 active:bg-primary/80 transition-colors disabled:opacity-60 disabled:cursor-not-allowed mt-2"
+              >
+                {submitting
+                  ? 'One moment...'
+                  : isLogin
+                    ? 'Log In'
+                    : 'Create Account'}
+              </button>
+            </form>
+          )}
+
+          {/* OAuth-only error display — when the email/password form (which
+              owns the inline error spot above) is hidden, surface OAuth
+              errors here so the user can see what went wrong. */}
+          {!EMAIL_PASSWORD_ENABLED && error && (
+            <p role="alert" className="font-body text-sm text-red-600 text-center pt-4">
+              {error}
+            </p>
+          )}
         </div>
 
-        {/* Toggle link — below the card */}
-        <p className="font-body text-text-sage mt-6 text-base text-center">
-          {isLogin ? (
-            <>
-              Don&apos;t have an account?{' '}
-              <Link to="/signup" className="font-semibold text-primary hover:underline">
-                Sign up
-              </Link>
-            </>
-          ) : (
-            <>
-              Already have an account?{' '}
-              <Link to="/login" className="font-semibold text-primary hover:underline">
-                Log in
-              </Link>
-            </>
-          )}
-        </p>
+        {/* Toggle link — only meaningful when email/password mode-switching exists.
+            With Google-only auth, /login and /signup do the same thing, so the
+            "switch mode" affordance just adds noise. */}
+        {EMAIL_PASSWORD_ENABLED && (
+          <p className="font-body text-text-sage mt-6 text-base text-center">
+            {isLogin ? (
+              <>
+                Don&apos;t have an account?{' '}
+                <Link to="/signup" className="font-semibold text-primary hover:underline">
+                  Sign up
+                </Link>
+              </>
+            ) : (
+              <>
+                Already have an account?{' '}
+                <Link to="/login" className="font-semibold text-primary hover:underline">
+                  Log in
+                </Link>
+              </>
+            )}
+          </p>
+        )}
       </div>
     </div>
   )
