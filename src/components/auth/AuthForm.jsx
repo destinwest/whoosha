@@ -6,7 +6,7 @@ import { supabase } from '../../lib/supabaseClient'
 // (Authentication → Providers → Google) AND the OAuth client is set up in
 // Google Cloud Console. While false, the "Continue with Google" button and
 // the "or" divider are hidden — email/password is the only auth path.
-const GOOGLE_OAUTH_ENABLED = false
+const GOOGLE_OAUTH_ENABLED = true
 
 // Google G SVG — matches official brand colors
 function GoogleIcon() {
@@ -39,10 +39,15 @@ export default function AuthForm({ mode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        // After OAuth redirect, Supabase returns the user to this origin.
-        // Make sure this URL is listed in your Supabase project's
-        // Authentication → URL Configuration → Redirect URLs.
-        redirectTo: window.location.origin,
+        // Land on /home after Google authorizes us. ProtectedRoute then
+        // handles the new-user case (redirect to /onboarding) and the
+        // returning-user case (stay at /home) without extra logic here.
+        //
+        // The full URL (origin + '/home') must match an entry in your
+        // Supabase project's Authentication → URL Configuration →
+        // Redirect URLs allowlist, or Supabase will fall back to the
+        // Site URL and the user will land at '/' instead.
+        redirectTo: window.location.origin + '/home',
       },
     })
     // On success, the browser is about to redirect — leaving submitting=true
