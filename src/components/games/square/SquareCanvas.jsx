@@ -546,7 +546,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     const child  = childPosRef.current
     if (pacing && child) {
       const dist = Math.hypot(child.clx - pacing.x, child.cly - pacing.y)
-      if (lapCountRef.current > 1 && dist <= 60 && now - lastEncouragementRef.current > 30_000) {
+      if (lapCountRef.current > 1 && dist <= 60 && now - lastEncouragementRef.current > 45_000) {
         const message = ENCOURAGEMENT_MESSAGES[Math.floor(Math.random() * ENCOURAGEMENT_MESSAGES.length)]
         encouragementRef.current     = { startTime: now, message }
         lastEncouragementRef.current = now
