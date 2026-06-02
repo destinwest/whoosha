@@ -214,16 +214,56 @@ export default class SoundDirector {
     this._bowlProgress       = 0
     this._lastUpdateAudioTime = null  // for dt computation in update()
 
-    // Lifecycle: suspend on hidden tab, resume on visible.
+    // ── Lifecycle: suspend on hidden tab, resume on visible ──
+    // On resume we ALSO replay the silent-buffer kick — iOS sometimes
+    // leaves the context in a state where ctx.resume() succeeds but no
+    // audio actually reaches the speaker until something is played. This
+    // is the suspected root of the intermittent "audio disappears after
+    // headphones plugged/unplugged on iOS" problem: plugging in headphones
+    // often involves backgrounding/foregrounding the app, which used to
+    // resume() without re-kicking the AudioSession.
     this._onVisibilityChange = () => {
       if (!this._unlocked) return
       if (document.hidden) {
         this.ctx.suspend().catch(() => {})
       } else {
         this.ctx.resume().catch(() => {})
+        this._playSilentBuffer()
       }
     }
     document.addEventListener('visibilitychange', this._onVisibilityChange)
+
+    // ── Defense-in-depth unlock listeners ──
+    // The game container's onPointerDown is still the primary unlock
+    // path during normal use. But on a page reload landing directly at
+    // /games/square, a user who lets the intro auto-complete and then
+    // begins tracing might not produce a pointerdown that propagates
+    // cleanly to the container in every scenario. These document-level
+    // listeners are a belt-and-suspenders catch: ANY user gesture
+    // anywhere on the page triggers unlock(), and the unlock() body is
+    // already idempotent so repeated calls are cheap.
+    this._unlockListener = () => this.unlock()
+    this._unlockEventTypes = ['pointerdown', 'touchstart', 'click', 'keydown']
+    this._unlockEventTypes.forEach((ev) => {
+      document.addEventListener(ev, this._unlockListener, { passive: true })
+    })
+  }
+
+  // ── _playSilentBuffer ─────────────────────────────────────────────────────
+  // The iOS AudioSession engage trick: playing a one-sample silent buffer
+  // forces the audio session backing Web Audio to actually start producing
+  // output. Used by unlock() and by the visibilitychange handler. Safe to
+  // call on a suspended context (the source just queues).
+  _playSilentBuffer() {
+    try {
+      const buf    = this.ctx.createBuffer(1, 1, 22050)
+      const source = this.ctx.createBufferSource()
+      source.buffer = buf
+      source.connect(this.ctx.destination)
+      source.start(0)
+    } catch (e) {
+      // Older browsers may throw if context is closed or buffer args are odd.
+    }
   }
 
   // ── unlock ────────────────────────────────────────────────────────────────
@@ -238,21 +278,8 @@ export default class SoundDirector {
   // prior implementation gated on a one-shot _unlocked flag, which made
   // it impossible to recover from that state — subsequent taps did nothing.
   unlock() {
-    // iOS audio-system kick: playing a 1-sample silent buffer forces the
-    // AudioSession that backs Web Audio to engage. ctx.resume() alone is
-    // sometimes insufficient — there are iOS states where it succeeds as
-    // a promise but no audio reaches the speaker until something is
-    // actually played. This costs a few microseconds; harmless on
-    // desktops, essential on iOS.
-    try {
-      const buf    = this.ctx.createBuffer(1, 1, 22050)
-      const source = this.ctx.createBufferSource()
-      source.buffer = buf
-      source.connect(this.ctx.destination)
-      source.start(0)
-    } catch (e) {
-      // Older browsers may throw if context is closed or buffer args are odd.
-    }
+    // Silent-buffer kick (see _playSilentBuffer). Essential on iOS.
+    this._playSilentBuffer()
 
     // Always attempt resume; the previous early-return blocked retries
     // when the first attempt didn't actually unlock the context.
@@ -519,6 +546,9 @@ export default class SoundDirector {
   dispose() {
     this._disposed = true
     document.removeEventListener('visibilitychange', this._onVisibilityChange)
+    this._unlockEventTypes?.forEach((ev) => {
+      document.removeEventListener(ev, this._unlockListener)
+    })
     this._breath?.dispose()
     this._rumble?.dispose()
     this._bowl?.dispose()
