@@ -279,6 +279,18 @@ export default class SoundDirector {
     this.masterGain.gain.linearRampToValueAtTime(target, now + RAMP_FAST)
   }
 
+  // ── fadeOut ───────────────────────────────────────────────────────────────
+  // Linearly ramps master gain to 0 over durationS seconds. Used by the
+  // game-completion phase to fade audio gracefully as the session ends.
+  // Cancels any currently-scheduled gain automation first, so calling this
+  // mid-fade or mid-startup-ramp behaves correctly.
+  fadeOut(durationS = 2.0) {
+    const now = this.ctx.currentTime
+    this.masterGain.gain.cancelScheduledValues(now)
+    this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, now)
+    this.masterGain.gain.linearRampToValueAtTime(0, now + Math.max(0.01, durationS))
+  }
+
   // ── startAmbient ──────────────────────────────────────────────────────────
   // Generates the noise buffers (one-time, ~50ms), instantiates the ambient
   // synth modules, connects them to their buses, then sets the master gain

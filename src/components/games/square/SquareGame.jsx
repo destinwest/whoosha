@@ -1,9 +1,20 @@
 import { useState, useRef, useEffect } from 'react'
-import GameIntro     from '../../ui/transitions/GameIntro'
-import StrokeSelector from './StrokeSelector'
-import SquareCanvas   from './SquareCanvas'
-import MuteButton     from '../../ui/MuteButton'
+import GameIntro        from '../../ui/transitions/GameIntro'
+import StrokeSelector   from './StrokeSelector'
+import SquareCanvas     from './SquareCanvas'
+import CompletionScreen from './CompletionScreen'
+import MuteButton       from '../../ui/MuteButton'
 import { useSoundDirector } from '../../../hooks/useSoundDirector'
+
+// Audio fade-out duration when the game ends (seconds). Long enough to
+// feel like a settle, short enough that the completion screen is silent
+// by the time the user reads it.
+const COMPLETION_AUDIO_FADE_S = 2.0
+
+// Game canvas opacity once completion phase begins. Dims toward zero so
+// the world recedes into the background as the completion card arrives.
+// Not all the way to 0 so the user retains a sense of place.
+const COMPLETION_CANVAS_OPACITY = 0.25
 
 // Hidden during the family/friends beta — the picker conflicts with the
 // mute button's screen real estate and the stroke variants aren't part of
@@ -162,7 +173,8 @@ const LABEL_ANGLES = [0, -Math.PI / 2, 0, Math.PI / 2]
 export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
 
   // ── Phase ──────────────────────────────────────────────────────────────────
-  const [phase, setPhase]           = useState('intro')   // 'intro' | 'game'
+  const [phase, setPhase]           = useState('intro')   // 'intro' | 'game' | 'completion'
+  const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
   const [labelGeo, setLabelGeo]     = useState(null)      // { labelMids, sq }
 
@@ -235,10 +247,32 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
   }
 
   // ── Exit ───────────────────────────────────────────────────────────────────
+  // Transition the game into the completion phase rather than immediately
+  // navigating to /home. The CompletionScreen overlays the dimming game
+  // canvas, the audio fades out, and the user dismisses via Done button
+  // or auto-timer — at which point handleCompletionDismiss fires and the
+  // parent (SquarePage) saves the session and navigates.
   function handleExit() {
+    // If we're already in completion, treat the back tap as a dismiss
+    // (the user wants to go home now, not sit through the timer).
+    if (phase === 'completion') {
+      handleCompletionDismiss()
+      return
+    }
+    // If somehow exit fires before the game starts, just go home.
+    if (phase !== 'game') {
+      onExit(0)
+      return
+    }
     document.documentElement.style.setProperty('--game-saturation', '1')
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
-    onExit(dur)
+    setCompletionSeconds(dur)
+    directorRef.current?.fadeOut(COMPLETION_AUDIO_FADE_S)
+    setPhase('completion')
+  }
+
+  function handleCompletionDismiss() {
+    onExit(completionSeconds)
   }
 
   // ── Audio unlock ───────────────────────────────────────────────────────────
@@ -272,7 +306,9 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
       {/* mute toggle — top-right, mirrors exit-button treatment */}
       <MuteButton className="absolute top-4 right-4 z-20" />
 
-      {/* game canvas — always mounted; blur/scale driven by CSS custom properties */}
+      {/* game canvas — always mounted; blur/scale driven by CSS custom properties.
+          During the completion phase the whole wrapper fades toward COMPLETION_CANVAS_OPACITY
+          (a soft dim that leaves the world visible behind the completion card). */}
       <div style={{
         position: 'absolute',
         inset: 0,
@@ -280,6 +316,8 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
         transform: 'translateY(var(--intro-y, 0px)) scale(var(--intro-scale, 1))',
         transformOrigin: 'center center',
         willChange: 'transform, filter',
+        opacity: phase === 'completion' ? COMPLETION_CANVAS_OPACITY : 1,
+        transition: phase === 'completion' ? 'opacity 1800ms ease' : undefined,
       }}>
         {/* Saturation wrapper — bg canvas and game canvas share one filter so
             the heat gauge desaturates the entire world in lockstep. */}
@@ -361,6 +399,16 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
         <StrokeSelector
           activeStroke={activeStroke}
           onSelect={handleStrokeSelect}
+        />
+      )}
+
+      {/* completion overlay — completion phase only.
+          Fades in over the dimming game canvas, displays the session
+          duration, and self-dismisses on Done or auto-timer. */}
+      {phase === 'completion' && (
+        <CompletionScreen
+          durationSeconds={completionSeconds}
+          onDismiss={handleCompletionDismiss}
         />
       )}
 
