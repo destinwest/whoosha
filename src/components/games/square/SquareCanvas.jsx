@@ -23,6 +23,18 @@ import * as layeredWash   from './strokes/layeredWash'
 const LAP_COLORS   = ['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']
 const CYCLE_MS     = 16_000
 
+// Initial pacing position when the game opens, expressed as a fraction of
+// the 16s breath cycle (0.0 = bottom-left corner, start of breathe-in;
+// 0.25 = start of right-hold; 0.5 = start of breathe-out; 0.75 = start of
+// left-hold).
+//
+// 0.75 places the circle at the top of the left edge — just past the
+// top-left corner, having "just exited" the breathe-out side. The user
+// then gets ~4 s of left-hold (during which the audio is intentionally
+// silent — both inhale and exhale windows are closed) to orient and place
+// a finger, before the breath cycle's first inhale audio fires.
+const START_AT_BREATH_PHASE = 0.75
+
 // Time for one full LAP_COLORS cycle in ms of active tracing.
 // 72 000ms = ~72 seconds — roughly four laps at pacing speed.
 const COLOR_CYCLE_MS = 72_000
@@ -348,7 +360,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       lastChildPos.current         = null
       prevFracRef.current          = null
       gameStartRef.current         = null
-      pacingStartRef.current       = performance.now()
+      // See START_AT_BREATH_PHASE — shift the reference time back so elapsed
+      // begins at the desired breath-phase fraction rather than at 0.
+      pacingStartRef.current       = performance.now() - START_AT_BREATH_PHASE * CYCLE_MS
       lapCountRef.current          = 0
       colorTimeRef.current         = 0
       lastEncouragementRef.current = -Infinity
@@ -853,7 +867,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       layeredWash.init({ paintCtx, lw, dpr, color, clipArgs })
     }
 
-    pacingStartRef.current = performance.now()
+    // See START_AT_BREATH_PHASE — same shift as in reset() so the very first
+    // game opening starts the pacing at the top-left, not the bottom-left.
+    pacingStartRef.current = performance.now() - START_AT_BREATH_PHASE * CYCLE_MS
     resize()
     const ro = new ResizeObserver(resize)
     ro.observe(canvas)
