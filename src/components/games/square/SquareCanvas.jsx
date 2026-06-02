@@ -47,8 +47,8 @@ const MAX_PATH_ADVANCE_MULT = 0.5
 // ── Heat gauge tuning ─────────────────────────────────────────────────────────
 const GAUGE_SPEED_THRESHOLD   = 1.2   // path rate ratio above which gauge charges
 const GAUGE_RECOVER_THRESHOLD = 3.0   // path rate ratio above which recovery timer resets — only true racing blocks recovery
-const GAUGE_CHARGE_DELAY      = 1000  // ms of sustained too-fast before the gauge starts ramping
-const GAUGE_DRAIN_DELAY       = 500   // ms of sustained recoverable-pace before recovery begins
+const GAUGE_CHARGE_DELAY      = 500   // ms of sustained too-fast before the gauge starts ramping
+const GAUGE_DRAIN_DELAY       = 250   // ms of sustained recoverable-pace before recovery begins
 const GAUGE_EFFECT_THRESHOLD = 0.3    // gauge value below which no visible effect appears
 
 // ── Synergy tuning ────────────────────────────────────────────────────────────
@@ -988,8 +988,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
 
         // ── Gauge state transitions ────────────────────────────────────────
         if (isTooFast && !gaugeActiveRef.current && tooFastTimerRef.current >= GAUGE_CHARGE_DELAY) {
-          // Charge delay met, still racing — ramp gauge to 1 over 4s
-          heatGaugeRef.current = Math.min(1, heatGaugeRef.current + dt / 4000)
+          // Charge delay met, still racing — ramp gauge to 1 over 2s
+          heatGaugeRef.current = Math.min(1, heatGaugeRef.current + dt / 2000)
           if (heatGaugeRef.current >= 1) {
             // Floor reached — clear paint canvas permanently. Synergy now
             // drains gracefully via the synergy block (3-second return rate
@@ -1001,11 +1001,11 @@ const SquareCanvas = forwardRef(function SquareCanvas(
             }
           }
         } else if (isGoodPace && !gaugeActiveRef.current && heatGaugeRef.current > 0) {
-          // Slowing/lifting before floor — drain gauge back over 2s, paint recovers
-          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 2000)
+          // Slowing/lifting before floor — drain gauge back over 1s, paint recovers
+          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 1000)
         } else if (gaugeActiveRef.current && goodPaceTimerRef.current >= GAUGE_DRAIN_DELAY) {
-          // Floor reached; good pace held for 0.5s — drain over 2s, only saturation returns
-          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 2000)
+          // Floor reached; good pace held for 0.25s — drain over 1s, only saturation returns
+          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 1000)
           if (heatGaugeRef.current <= 0) {
             gaugeActiveRef.current   = false
             goodPaceTimerRef.current = 0
