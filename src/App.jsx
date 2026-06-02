@@ -7,6 +7,8 @@ import LandingPage from './pages/LandingPage'
 import DemoPage from './pages/DemoPage'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
+import PrivacyPage from './pages/PrivacyPage'
+import TermsPage from './pages/TermsPage'
 import OnboardingPage from './pages/OnboardingPage'
 import HomePage from './pages/HomePage'
 import DashboardPage from './pages/DashboardPage'
@@ -72,6 +74,8 @@ function AppRoutes() {
       {/* ── Public routes ─────────────────────────────────────── */}
       <Route path="/" element={<LandingPage />} />
       <Route path="/demo" element={<DemoPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
       <Route
         path="/login"
         element={

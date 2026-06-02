@@ -680,10 +680,8 @@ function LandingFooter() {
           Whoosha
         </Link>
         <div className="flex flex-wrap items-center justify-center gap-6 font-body text-sm text-white/50">
-          {/* TODO: Link to real privacy policy page when created */}
-          <a href="#" className="hover:text-white/80 transition-colors">Privacy Policy</a>
-          {/* TODO: Link to real terms of service page when created */}
-          <a href="#" className="hover:text-white/80 transition-colors">Terms of Service</a>
+          <Link to="/privacy" className="hover:text-white/80 transition-colors">Privacy Policy</Link>
+          <Link to="/terms" className="hover:text-white/80 transition-colors">Terms of Service</Link>
           <span>© {year} Whoosha</span>
         </div>
       </div>
