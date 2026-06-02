@@ -66,9 +66,12 @@ const SYNERGY_MAX_STAGE         = 4
 
 // ── Encouragement messages ────────────────────────────────────────────────
 // Pool of phrases that may appear on a successful close-tracked lap
-// completion. One is picked at random per trigger. Emoji placement is
-// varied (some lead, some trail) so the rotation feels organic rather
-// than templated.
+// completion. Selection rules:
+//   1. Normal trigger: random pick from pool, excluding the most recently
+//      shown message (so back-to-back duplicates can't happen).
+//   2. Recovery trigger: if the user fully activated the heat gauge
+//      (gaugeActive = true) and then recovered, the next message is
+//      forced to RECOVERY_MESSAGE, acknowledging the return.
 const ENCOURAGEMENT_MESSAGES = [
   'Beautiful work 🌟',
   'You\'re doing great 🌱',
@@ -77,7 +80,13 @@ const ENCOURAGEMENT_MESSAGES = [
   'Lovely breath 🌸',
   '🍃 Right on pace',
   'Peace 🕊️',
+  'That feels better 💚',
 ]
+
+// Specific message shown the next time encouragement fires after the user
+// has fully activated the heat gauge and then recovered. Also in the
+// general pool so it can appear naturally even without prior dysregulation.
+const RECOVERY_MESSAGE = 'That feels better 💚'
 const SYNERGY_RETURN_MS         = 3000                                  // full return-to-start duration from max state
 const SYNERGY_RETURN_RATE       = SYNERGY_MAX_ACCUM_MS / SYNERGY_RETURN_MS  // accum-ms drained per real-ms during return
 const EMBER_PARTICLE_CAP        = 30
@@ -309,8 +318,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const colorTimeRef         = useRef(0)   // ms of active tracing time — drives color drift
   const prevFracRef          = useRef(null)
   const pacingPosRef         = useRef(null)
-  const lastEncouragementRef = useRef(-Infinity)
-  const encouragementRef     = useRef(null)
+  const lastEncouragementRef        = useRef(-Infinity)
+  const lastEncouragementMessageRef = useRef(null)   // anti-repeat memory — never pick this message twice in a row
+  const encouragementRef            = useRef(null)
+  const recoveredFromDysregRef      = useRef(false)  // set true when gaugeActive flips true→false; consumed by next encouragement
   const lastMoveTimeRef      = useRef(0)
   const fpImgRef             = useRef(null)    // loaded Image object
   const fpImgReadyRef        = useRef(false)   // true once image has loaded
@@ -380,8 +391,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       pacingStartRef.current       = performance.now() - START_AT_BREATH_PHASE * CYCLE_MS
       lapCountRef.current          = 0
       colorTimeRef.current         = 0
-      lastEncouragementRef.current = -Infinity
-      encouragementRef.current     = null
+      lastEncouragementRef.current        = -Infinity
+      lastEncouragementMessageRef.current = null
+      encouragementRef.current            = null
+      recoveredFromDysregRef.current      = false
 
       // Restore fingerprint; clear bloom
       fingerprintActiveRef.current = true
@@ -547,9 +560,24 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     if (pacing && child) {
       const dist = Math.hypot(child.clx - pacing.x, child.cly - pacing.y)
       if (lapCountRef.current > 1 && dist <= 60 && now - lastEncouragementRef.current > 45_000) {
-        const message = ENCOURAGEMENT_MESSAGES[Math.floor(Math.random() * ENCOURAGEMENT_MESSAGES.length)]
-        encouragementRef.current     = { startTime: now, message }
-        lastEncouragementRef.current = now
+        let message
+        if (recoveredFromDysregRef.current) {
+          // Recovery override: the user fully activated the heat gauge and
+          // came back. Acknowledge the return specifically.
+          message = RECOVERY_MESSAGE
+          recoveredFromDysregRef.current = false
+        } else {
+          // Normal pick: random from the pool, excluding the most recently
+          // shown message so back-to-back duplicates can't happen.
+          const last = lastEncouragementMessageRef.current
+          const candidates = last
+            ? ENCOURAGEMENT_MESSAGES.filter((m) => m !== last)
+            : ENCOURAGEMENT_MESSAGES
+          message = candidates[Math.floor(Math.random() * candidates.length)]
+        }
+        encouragementRef.current            = { startTime: now, message }
+        lastEncouragementRef.current        = now
+        lastEncouragementMessageRef.current = message
       }
     }
   }
@@ -1023,8 +1051,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           // Floor reached; good pace held for 0.25s — drain over 1s, only saturation returns
           heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 1000)
           if (heatGaugeRef.current <= 0) {
-            gaugeActiveRef.current   = false
-            goodPaceTimerRef.current = 0
+            gaugeActiveRef.current         = false
+            goodPaceTimerRef.current       = 0
+            recoveredFromDysregRef.current = true   // consumed by the next encouragement trigger
             // tooFastTimerRef stays at GAUGE_CHARGE_DELAY — re-racing re-triggers immediately
           }
         }
