@@ -63,6 +63,21 @@ const SYNERGY_TIME_3_TO_4_MS    = 16000   // Stage 3 → 4 — embers begin radi
 const SYNERGY_MAX_ACCUM_MS      = SYNERGY_TIME_0_TO_1_MS + SYNERGY_TIME_1_TO_2_MS
                                 + SYNERGY_TIME_2_TO_3_MS + SYNERGY_TIME_3_TO_4_MS  // 32s
 const SYNERGY_MAX_STAGE         = 4
+
+// ── Encouragement messages ────────────────────────────────────────────────
+// Pool of phrases that may appear on a successful close-tracked lap
+// completion. One is picked at random per trigger. Emoji placement is
+// varied (some lead, some trail) so the rotation feels organic rather
+// than templated.
+const ENCOURAGEMENT_MESSAGES = [
+  'Beautiful work 🌟',
+  'You\'re doing great 🌱',
+  '🌬️ Breathing well',
+  'That\'s the way 🌙',
+  'Lovely breath 🌸',
+  '🍃 Right on pace',
+  'Peace 🕊️',
+]
 const SYNERGY_RETURN_MS         = 3000                                  // full return-to-start duration from max state
 const SYNERGY_RETURN_RATE       = SYNERGY_MAX_ACCUM_MS / SYNERGY_RETURN_MS  // accum-ms drained per real-ms during return
 const EMBER_PARTICLE_CAP        = 30
@@ -532,7 +547,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     if (pacing && child) {
       const dist = Math.hypot(child.clx - pacing.x, child.cly - pacing.y)
       if (lapCountRef.current > 1 && dist <= 60 && now - lastEncouragementRef.current > 30_000) {
-        encouragementRef.current     = { startTime: now }
+        const message = ENCOURAGEMENT_MESSAGES[Math.floor(Math.random() * ENCOURAGEMENT_MESSAGES.length)]
+        encouragementRef.current     = { startTime: now, message }
         lastEncouragementRef.current = now
       }
     }
@@ -1288,7 +1304,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           ctx.shadowBlur   = 8
           ctx.shadowColor  = 'rgba(255,255,255,0.6)'
           ctx.fillStyle    = `rgba(255,255,255,${(alpha * 0.92).toFixed(3)})`
-          ctx.fillText('Beautiful work 🌟', cx, cy)
+          ctx.fillText(enc.message, cx, cy)
           ctx.restore()
         } else {
           encouragementRef.current = null
