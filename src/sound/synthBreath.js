@@ -62,10 +62,23 @@ const MODE_PARAMS = {
   //     For inhale: resStartHz < resEndHz (rising). For exhale: > (falling).
   //   Other fields same as above; LFO depth/rate optional (0 disables).
 
-  // A — Subtle sweep (small range, light LFO).
+  // A — Nature-shaped breath cue. Reworked to feel like wind/leaves rather
+  //     than a vocal-resonance throat sound. Three changes from earlier:
+  //       peakGain  0.20 → 0.10  — matches the ambient bed level, so the
+  //                                 breath sits inside the soundscape
+  //                                 rather than over it.
+  //       resQ      3.5  → 0.8   — much wider bandpass. Removes the
+  //                                 vocal/resonant peak; spectrum becomes
+  //                                 a gentle tilt rather than a tube.
+  //       sweep     150Hz → 600Hz range — broader sweep suggests air
+  //                                 movement passing through a place,
+  //                                 not airflow through a narrow opening.
+  //     Inhale rises (suggests opening), exhale falls (suggests settling).
+  //     The reverb send in SoundDirector puts both inside the same room as
+  //     the ambient bed.
   A: {
-    inhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 700, resEndHz: 850, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.10, peakGain: 0.20 },
-    exhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 850, resEndHz: 700, resQ: 3.5, resLFOHz: 0.09, resLFODepth: 0.10, peakGain: 0.20 },
+    inhale: { highpassHz: 200, hpQ: 0.7, resStartHz: 600, resEndHz: 1200, resQ: 0.8, resLFOHz: 0.09, resLFODepth: 0.15, peakGain: 0.10 },
+    exhale: { highpassHz: 180, hpQ: 0.7, resStartHz: 1100, resEndHz: 500, resQ: 0.8, resLFOHz: 0.09, resLFODepth: 0.15, peakGain: 0.10 },
   },
 
   // B — Moderate sweep (medium range, minimal LFO).

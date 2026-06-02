@@ -25,6 +25,7 @@ import { createBreath }       from './synthBreath'
 import { createRumble }       from './synthRumble'
 import { createBowl }         from './synthBowl'
 import { createAmbient }      from './synthAmbient'
+import { createReverb }       from './reverb'
 
 const RAMP_FAST = 0.05  // 50ms — for mute toggles
 
@@ -36,6 +37,12 @@ const LOWPASS_CLOSED_HZ    = 600     // fully-closed (world muffled) cutoff
 const AMBIENT_LEVEL_FULL   = 1.0
 const AMBIENT_LEVEL_MUFFLED = 0.45
 const RUMBLE_LEVEL_MAX     = 0.18    // top-of-gauge rumble bus gain
+
+// Reverb wet-send level for the synth breath. The dry breath continues
+// straight to the ambient bus; this controls how much wet reverb signal
+// runs alongside it. 0 = no reverb (dry only), 1.0 = wet equals dry.
+// 0.35 gives a noticeable sense of place without becoming washy.
+const REVERB_WET_LEVEL     = 0.35
 
 // Breath-texture suppression under dysregulation: at full gauge the inhale
 // and exhale textures duck to BREATH_DUCK_FLOOR so the dysregulation chain
@@ -124,11 +131,13 @@ export default class SoundDirector {
     this._mutedGain = 1      // last non-muted master target — restored on un-mute
 
     // Synth-module instances (populated lazily on first startAmbient).
-    this._breath   = null
-    this._rumble   = null
-    this._bowl     = null
-    this._ambient  = null
-    this._noiseBufs = null   // shared between modules
+    this._breath     = null
+    this._rumble     = null
+    this._bowl       = null
+    this._ambient    = null
+    this._reverb     = null
+    this._reverbSend = null
+    this._noiseBufs  = null   // shared between modules
 
     // Tracks dispose state so async ambient loading can no-op if the
     // director was torn down before the audio file finished downloading
@@ -235,8 +244,22 @@ export default class SoundDirector {
     //   ambient — sampled forest-meadow bed, loaded async, fades in when ready.
     this._breath = createBreath(this.ctx, this._noiseBufs.pink)
     this._rumble = createRumble(this.ctx)
-    this._breath.output.connect(this.ambientBus)
+    this._breath.output.connect(this.ambientBus)  // dry path
     this._rumble.output.connect(this.rumbleBus)
+
+    // Reverb send: breath also routes through a wet send into the reverb,
+    // then back into the ambient bus. Two parallel paths from one source:
+    //   breath.output ─┬──────────────────────────────────► ambientBus (dry)
+    //                  └─► reverbSend → reverb → ────────► ambientBus (wet)
+    // Because the wet returns to ambientBus, the reverb tail also gets the
+    // dysregulation lowpass/level treatment alongside the dry signal — the
+    // whole acoustic space muffles together when the gauge rises.
+    this._reverb = createReverb(this.ctx)
+    this._reverbSend = this.ctx.createGain()
+    this._reverbSend.gain.value = REVERB_WET_LEVEL
+    this._breath.output.connect(this._reverbSend)
+    this._reverbSend.connect(this._reverb.input)
+    this._reverb.output.connect(this.ambientBus)
 
     // Ambient bed loads asynchronously (fetch + decode). Fire and forget;
     // the synth breath plays immediately, and the ambient swells in once
@@ -365,7 +388,10 @@ export default class SoundDirector {
     this._rumble?.dispose()
     this._bowl?.dispose()
     this._ambient?.dispose()
+    this._reverb?.dispose()
+    try { this._reverbSend?.disconnect() } catch (e) { /* already disconnected */ }
     this._breath = this._rumble = this._bowl = this._ambient = null
+    this._reverb = this._reverbSend = null
     try { this.masterGain.disconnect() } catch (e) { /* already disconnected */ }
     try { this.compressor.disconnect()  } catch (e) { /* already disconnected */ }
     if (this.ctx.state !== 'closed') {
