@@ -3,6 +3,11 @@ import GameIntro     from '../../ui/transitions/GameIntro'
 import StrokeSelector from '../square/StrokeSelector'   // shared until refactor (game #3)
 import HexagonCanvas  from './HexagonCanvas'
 
+// Mirrors the flag in SquareGame.jsx — see comment there. The two games
+// share the StrokeSelector component, but each toggles its visibility
+// independently. Flip together when restoring the feature.
+const STROKE_SELECTOR_ENABLED = false
+
 // ── buildMeadowBg ─────────────────────────────────────────────────────────────
 // Bakes the entire static background — base gradient, ground texture (when the
 // asset is loaded), sun pools, green canopy dapples, top-edge depth, and four
@@ -312,8 +317,9 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
         zIndex: 15,
       }} />
 
-      {/* stroke selector — game phase only */}
-      {phase === 'game' && (
+      {/* stroke selector — game phase only.
+          Currently disabled via STROKE_SELECTOR_ENABLED (see top of file). */}
+      {STROKE_SELECTOR_ENABLED && phase === 'game' && (
         <StrokeSelector
           activeStroke={activeStroke}
           onSelect={handleStrokeSelect}

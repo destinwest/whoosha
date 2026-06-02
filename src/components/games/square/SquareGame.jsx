@@ -5,6 +5,13 @@ import SquareCanvas   from './SquareCanvas'
 import MuteButton     from '../../ui/MuteButton'
 import { useSoundDirector } from '../../../hooks/useSoundDirector'
 
+// Hidden during the family/friends beta — the picker conflicts with the
+// mute button's screen real estate and the stroke variants aren't part of
+// the v1 experience. Flip to true to restore the picker UI. The underlying
+// stroke-mode plumbing (strokeModeRef, canvas branches on 'classic' vs
+// 'watercolor') is intentionally left in place so re-enabling is JSX-only.
+const STROKE_SELECTOR_ENABLED = false
+
 // ── buildMeadowBg ─────────────────────────────────────────────────────────────
 // Bakes the entire static background — base gradient, ground texture (when the
 // asset is loaded), sun pools, green canopy dapples, top-edge depth, and four
@@ -347,8 +354,10 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
         zIndex: 15,
       }} />
 
-      {/* stroke selector — game phase only */}
-      {phase === 'game' && (
+      {/* stroke selector — game phase only.
+          Currently disabled via STROKE_SELECTOR_ENABLED while we keep the
+          top-right corner clear for the mute button. */}
+      {STROKE_SELECTOR_ENABLED && phase === 'game' && (
         <StrokeSelector
           activeStroke={activeStroke}
           onSelect={handleStrokeSelect}
