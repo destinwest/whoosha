@@ -79,12 +79,31 @@ const BREATH_DUCK_FLOOR = 0.5
 // SYNERGY_BREATH_DEPTH controls how much the bowl swells on each breath.
 // 0.2 = ±20% linear amplitude (≈ ±1.6 dB) — felt but never noticed.
 const SYNERGY_BREATH_DEPTH = 0.20
-// Top-of-stage synergy bus gain (dry path). Previously 0.85 — bowl
-// dominated the soundscape. Dropped to 0.12 so the bowl's DRY signal sits
-// below the breath texture's peak (0.10 × bell envelope). Most of the
-// bowl's audible presence now comes from its reverb tail — see
-// BOWL_REVERB_WET_LEVEL — which is the perceptual cue for "far away."
-const SYNERGY_BUS_BASE     = 0.06
+// Top-of-buildup synergy bus gain (dry path). The bowl reaches this level
+// after BOWL_BUILDUP_MS of sustained synergy at stage 4. Most of the
+// audible bowl is its reverb tail — see BOWL_REVERB_WET_LEVEL — which is
+// the perceptual cue for "far away."
+const SYNERGY_BUS_BASE     = 0.03
+
+// ── Bowl post-synergy buildup ──
+// The bowl is silent until the user reaches synergy stage 4 (all visual
+// synergy effects are complete). From that moment, a separate "bowl
+// progress" accumulator climbs from 0 to 1 over BOWL_BUILDUP_MS. If the
+// user drops below stage 4, the accumulator drains over BOWL_DRAIN_MS
+// — slower than buildup, so brief drift doesn't silence the bowl, but
+// sustained loss of synergy does.
+//
+// bowlProgress drives BOTH the bowl's per-partial stage emergence (so
+// the partials still appear progressively across the 16 s buildup) AND
+// the synergyBus gain (so the dry signal scales with progress too).
+const BOWL_BUILDUP_MS      = 16000
+const BOWL_DRAIN_MS        = 32000
+
+// Synergy stage threshold above which bowl progress accumulates. Below
+// this, progress drains. Set to 4 so the bowl is gated until all visual
+// synergy effects (amber glow, scale growth, ember particles) are
+// complete.
+const BOWL_PROGRESS_GATE_STAGE = 4
 const TC_BREATH            = 0.06    // fast-tracking — breathPhase is already smooth
 
 // setTargetAtTime time constants (seconds to ~63% of target).
@@ -189,6 +208,11 @@ export default class SoundDirector {
     this._lastSynergy = 0       // last synergyBus gain target (stage × breath swell)
     this._lastBreathDuck = 1    // last breath-textures output-gain target
     this._lastAmbientBedDuck = 1 // last ambientBedGain target — ducks to silence under dysreg
+
+    // Bowl progress accumulator (0..1). Climbs while synergyStage >= 4,
+    // drains otherwise. See BOWL_BUILDUP_MS / BOWL_DRAIN_MS.
+    this._bowlProgress       = 0
+    this._lastUpdateAudioTime = null  // for dt computation in update()
 
     // Lifecycle: suspend on hidden tab, resume on visible.
     this._onVisibilityChange = () => {
@@ -299,21 +323,20 @@ export default class SoundDirector {
     this._bowl.output.connect(this.synergyBus)
 
     // Reverb sends: both the breath and the bowl route through wet sends
-    // into the same reverb, which returns to the ambient bus. So both
-    // layers share the same acoustic space (the forest's reflections):
+    // into the same reverb, which returns to the ambient bus. Both layers
+    // share the same acoustic space (the forest's reflections):
     //
     //   breath.output ─┬──────────────────────────────────► ambientBus (dry)
     //                  └─► reverbSend (0.35) ─►┐
     //                                          ├─► reverb ─► ambientBus (wet)
-    //   bowl.output ───┬──► synergyBus ──────► master       │
-    //                  └─► bowlReverbSend (0.50) ───────────┘
+    //   bowl.output ─► synergyBus ──┬─────────► master      │
+    //                               └─► bowlReverbSend (0.75) ──────┘
     //
-    // The bowl's wet send is higher than the breath's so the bowl is
-    // perceived primarily through its reverb tail — the "far away in the
-    // forest" character. The bowl's dry path is intentionally quiet
-    // (SYNERGY_BUS_BASE = 0.12). Because the reverb returns to ambientBus,
-    // both layers' wet signals also get the dysregulation lowpass/level
-    // treatment alongside the dry breath.
+    // Bowl wet branches from synergyBus (NOT bowl.output directly), so the
+    // wet signal is also gated by the bowlProgress-driven bus gain. Result:
+    // both dry and wet stay silent until bowl progress begins after the
+    // user reaches synergy stage 4, and both ramp together over the
+    // BOWL_BUILDUP_MS window.
     this._reverb = createReverb(this.ctx)
     this._reverb.output.connect(this.ambientBus)
 
@@ -324,7 +347,7 @@ export default class SoundDirector {
 
     this._bowlReverbSend = this.ctx.createGain()
     this._bowlReverbSend.gain.value = BOWL_REVERB_WET_LEVEL
-    this._bowl.output.connect(this._bowlReverbSend)
+    this.synergyBus.connect(this._bowlReverbSend)
     this._bowlReverbSend.connect(this._reverb.input)
 
     // Ambient bed loads asynchronously (fetch + decode). Fire and forget;
@@ -436,21 +459,40 @@ export default class SoundDirector {
     }
 
     // ── Synergy bowl ──
-    // Per-partial fade-in is driven by synergyStage; the bus-level breath
-    // modulation is driven by breathPhase. Skip both if the bowl module
-    // hasn't been instantiated (defensive — startAmbient creates it).
+    // The bowl is gated by a "bowl progress" accumulator (0..1) that
+    // climbs while synergyStage >= BOWL_PROGRESS_GATE_STAGE and drains
+    // otherwise. Buildup: BOWL_BUILDUP_MS. Drain: BOWL_DRAIN_MS (slower,
+    // so brief drift doesn't punish the user). The accumulator drives
+    // BOTH the bowl's per-partial stage emergence (so partials still
+    // appear progressively across the buildup window) and the synergyBus
+    // gain (so the dry signal scales with progress too).
     if (this._bowl) {
-      const stage = Math.max(0, Math.min(4, snapshot.synergyStage || 0))
-      this._bowl.setStage(stage)
+      // Compute frame delta from the audio context clock. First call has
+      // no previous sample, default to ~one frame (16.67 ms).
+      const audioNow = now
+      const dtMs = this._lastUpdateAudioTime !== null
+        ? Math.max(0, (audioNow - this._lastUpdateAudioTime) * 1000)
+        : 16.67
+      this._lastUpdateAudioTime = audioNow
 
-      // Bus gain: scales with stage (so the bowl is silent at stage 0 even if
-      // the partials accidentally have residual output) AND breathes with the
-      // game's breath cycle. sin(2π·phase) gives a smooth ±1 swing; we map it
-      // into ±SYNERGY_BREATH_DEPTH around a unity mid-point.
-      const stageGate  = Math.min(1, stage)  // smoothly engages over stage 0→1
-      const phase      = snapshot.breathPhase || 0
-      const breathMul  = 1 + Math.sin(phase * Math.PI * 2) * SYNERGY_BREATH_DEPTH
-      const synergyTarget = SYNERGY_BUS_BASE * stageGate * breathMul
+      const synergyStage = Math.max(0, Math.min(4, snapshot.synergyStage || 0))
+      if (synergyStage >= BOWL_PROGRESS_GATE_STAGE) {
+        this._bowlProgress = Math.min(1, this._bowlProgress + dtMs / BOWL_BUILDUP_MS)
+      } else {
+        this._bowlProgress = Math.max(0, this._bowlProgress - dtMs / BOWL_DRAIN_MS)
+      }
+
+      // Drive the bowl's per-partial emergence from progress (×4 maps the
+      // [0,1] progress into the bowl's [0,4] stage range, so the partials
+      // appear at progress 0.25, 0.50, 0.75, 1.00).
+      this._bowl.setStage(this._bowlProgress * 4)
+
+      // Bus gain: scales linearly with progress and modulates with the
+      // breath. sin(2π·phase) gives a smooth ±1 swing mapped into
+      // ±SYNERGY_BREATH_DEPTH around unity.
+      const phase     = snapshot.breathPhase || 0
+      const breathMul = 1 + Math.sin(phase * Math.PI * 2) * SYNERGY_BREATH_DEPTH
+      const synergyTarget = SYNERGY_BUS_BASE * this._bowlProgress * breathMul
       if (Math.abs(synergyTarget - this._lastSynergy) > RESCHEDULE_EPS) {
         this.synergyBus.gain.setTargetAtTime(synergyTarget, now, TC_BREATH)
         this._lastSynergy = synergyTarget
