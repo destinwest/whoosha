@@ -247,6 +247,42 @@ export default class SoundDirector {
     this._unlockEventTypes.forEach((ev) => {
       document.addEventListener(ev, this._unlockListener, { passive: true })
     })
+
+    // ── Eager unlock attempt ──
+    // Most desktop browsers (Chrome with sufficient Media Engagement
+    // Index for the domain, Firefox, recent Safari) allow ctx.resume()
+    // to succeed WITHOUT a user gesture if the user has previously
+    // engaged with the domain. Critically, this covers the page-reload
+    // case: the user has already logged in, navigated, played a game —
+    // they have ample engagement signals. The browser permits eager
+    // resume. Audio plays on reload without requiring a click.
+    //
+    // On iOS Safari and other strict environments, this attempt is
+    // either ignored (state stays 'suspended') or quietly rejects. The
+    // gesture-based unlock listeners attached above then take over on
+    // the first user interaction. Either way, this call is harmless.
+    this._tryEagerUnlock()
+  }
+
+  // ── _tryEagerUnlock ──────────────────────────────────────────────────────
+  // Best-effort unlock for browsers that permit autoplay-with-sound on
+  // engaged domains. Does the silent-buffer kick + resume(); if the
+  // resume actually transitions the context to 'running', flips the
+  // _unlocked flag so the visibilitychange handler will manage state
+  // across background/foreground transitions.
+  _tryEagerUnlock() {
+    this._playSilentBuffer()
+    const resumePromise = this.ctx.resume()
+    // resume() always returns a Promise. We need to check state AFTER
+    // it resolves to know if it actually transitioned. If the browser
+    // refused, state stays 'suspended' silently — no error to catch.
+    if (resumePromise && typeof resumePromise.then === 'function') {
+      resumePromise.then(() => {
+        if (this.ctx.state === 'running') {
+          this._unlocked = true
+        }
+      }).catch(() => { /* refused — wait for gesture */ })
+    }
   }
 
   // ── _playSilentBuffer ─────────────────────────────────────────────────────
