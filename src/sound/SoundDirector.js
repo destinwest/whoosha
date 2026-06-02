@@ -35,8 +35,24 @@ const RAMP_FAST = 0.05  // 50ms — for mute toggles
 const LOWPASS_OPEN_HZ      = 18000   // fully-open (transparent) cutoff
 const LOWPASS_CLOSED_HZ    = 600     // fully-closed (world muffled) cutoff
 const AMBIENT_LEVEL_FULL   = 1.0
-const AMBIENT_LEVEL_MUFFLED = 0.45
-const RUMBLE_LEVEL_MAX     = 0.18    // top-of-gauge rumble bus gain
+// Disabled (was 0.45). Breath/reverb-bus level ducking is no longer in use
+// since the breath dysregulation response now happens entirely on the
+// breath module's own output gain (BREATH_DUCK_FLOOR). Kept at 1.0 so the
+// existing modulation block in update() is a harmless no-op.
+const AMBIENT_LEVEL_MUFFLED = 1.0
+
+// Ambient bed dysregulation floor — the sampled forest track ducks to
+// silence at full dysregulation. Combined with the breath ducking, the
+// dysregulated audio experience is "the world recedes and only your
+// breath remains, quietly."
+const AMBIENT_BED_FLOOR    = 0.0
+
+// Rumble level disabled (was 0.18). The low-frequency rumble that
+// previously appeared during dysregulation read as a penalty cue rather
+// than a co-regulating presence. Removed by skipping module instantiation
+// in startAmbient and guarding the update block; the rumble bus stays in
+// place as infrastructure for possible future use.
+const RUMBLE_LEVEL_MAX     = 0.0
 
 // Reverb wet-send level for the synth breath. The dry breath continues
 // straight to the ambient bus; this controls how much wet reverb signal
@@ -44,11 +60,13 @@ const RUMBLE_LEVEL_MAX     = 0.18    // top-of-gauge rumble bus gain
 // 0.35 gives a noticeable sense of place without becoming washy.
 const REVERB_WET_LEVEL     = 0.35
 
-// Breath-texture suppression under dysregulation: at full gauge the inhale
-// and exhale textures duck to BREATH_DUCK_FLOOR so the dysregulation chain
-// (lowpass + rumble) takes over. The constant drone keeps playing — pulling
-// the harmonic ground out from under the user would feel jarring.
-const BREATH_DUCK_FLOOR = 0.10
+// Breath-texture suppression under dysregulation: the inhale and exhale
+// textures duck to BREATH_DUCK_FLOOR at full gauge. Previously 0.10 —
+// raised to 0.5 so the breath stays clearly audible. With the ambient
+// bed silenced and the rumble removed, the breath is now the only audible
+// layer during dysregulation; "50% quieter" preserves its presence as a
+// gentle cue rather than disappearing it.
+const BREATH_DUCK_FLOOR = 0.5
 
 // ── Synergy / breath modulation ──
 // breathPhase is a 0–1 saw — sin(2π·phase) gives a smooth ±1 oscillator.
@@ -91,13 +109,14 @@ export default class SoundDirector {
     this.masterGain.connect(this.compressor).connect(this.ctx.destination)
 
     // ── Ambient signal chain ──
-    // [air + meadow] → ambientBus → ambientLowpass → ambientLevel → master
+    // Two parallel paths into masterGain, each ducking independently:
+    //   sampled forest bed → ambientBedGain → master
+    //   synth breath + reverb → ambientBus → ambientLowpass → ambientLevel → master
     //
-    // Leaves are no longer a separate submix — they're spawned inside the
-    // meadow's breeze events (physically coupled to wind), so the whole
-    // ambient bed passes through the dysregulation chain uniformly. When
-    // gauge rises, new meadow events are also suppressed (the world "holds
-    // its breath" — see meadow.setActivity in update()).
+    // The split allows the bed to duck to silence under dysregulation
+    // (AMBIENT_BED_FLOOR = 0) while the breath stays clearly audible at
+    // 50% (BREATH_DUCK_FLOOR = 0.5). The breath's spectral muffling via
+    // ambientLowpass is preserved on its own path.
     this.ambientBus = this.ctx.createGain()
     this.ambientBus.gain.value = 1
 
@@ -108,6 +127,13 @@ export default class SoundDirector {
 
     this.ambientLevel = this.ctx.createGain()
     this.ambientLevel.gain.value = AMBIENT_LEVEL_FULL
+
+    // Dedicated gain for the sampled forest bed — ducks separately from the
+    // breath path so the user's dysregulation experience is "ambient fades
+    // to silence; breath stays present, half as loud."
+    this.ambientBedGain = this.ctx.createGain()
+    this.ambientBedGain.gain.value = 1
+    this.ambientBedGain.connect(this.masterGain)
 
     this.ambientBus.connect(this.ambientLowpass)
                    .connect(this.ambientLevel)
@@ -148,8 +174,9 @@ export default class SoundDirector {
     this._lastLowpass = LOWPASS_OPEN_HZ
     this._lastLevel   = AMBIENT_LEVEL_FULL
     this._lastRumble  = 0
-    this._lastSynergy = 0    // last synergyBus gain target (stage × breath swell)
-    this._lastBreathDuck = 1 // last breath-textures output-gain target
+    this._lastSynergy = 0       // last synergyBus gain target (stage × breath swell)
+    this._lastBreathDuck = 1    // last breath-textures output-gain target
+    this._lastAmbientBedDuck = 1 // last ambientBedGain target — ducks to silence under dysreg
 
     // Lifecycle: suspend on hidden tab, resume on visible.
     this._onVisibilityChange = () => {
@@ -236,16 +263,22 @@ export default class SoundDirector {
     }
 
     // Spin up the ambient modules.
-    //   breath  — drone + inhale/exhale textures locked to breathPhase.
-    //             Replaces the prior nature-mimicry approach with intentional
-    //             musical ambient that actively guides the breath cycle.
-    //   rumble  — silent at gauge=0; rises with dysregulation.
-    //   bowl    — silent at synergy=0; partials fade in across stages 0–4.
-    //   ambient — sampled forest-meadow bed, loaded async, fades in when ready.
+    //   breath  — inhale/exhale textures locked to breathPhase. Routes
+    //             through ambientBus → ambientLowpass → ambientLevel → master.
+    //   rumble  — DISABLED. Previously appeared during dysregulation; read
+    //             as a penalty rather than a co-regulating cue. Lines below
+    //             commented out; the rumbleBus infrastructure remains in
+    //             place for possible future re-introduction.
+    //   bowl    — DISABLED while tuning the ambient layer.
+    //   ambient — sampled forest-meadow bed, loaded async. Routes through
+    //             its own ambientBedGain → master (NOT through ambientBus)
+    //             so it can duck independently of the breath path.
     this._breath = createBreath(this.ctx, this._noiseBufs.pink)
-    this._rumble = createRumble(this.ctx)
     this._breath.output.connect(this.ambientBus)  // dry path
-    this._rumble.output.connect(this.rumbleBus)
+
+    // Rumble disabled — uncomment to re-enable.
+    // this._rumble = createRumble(this.ctx)
+    // this._rumble.output.connect(this.rumbleBus)
 
     // Reverb send: breath also routes through a wet send into the reverb,
     // then back into the ambient bus. Two parallel paths from one source:
@@ -273,7 +306,7 @@ export default class SoundDirector {
           return
         }
         this._ambient = ambient
-        ambient.output.connect(this.ambientBus)
+        ambient.output.connect(this.ambientBedGain)
       })
       .catch((err) => {
         // Non-fatal: the game works without the ambient bed. Capture so
@@ -323,11 +356,26 @@ export default class SoundDirector {
       this._lastLowpass = lpTarget
     }
 
-    // ── Ambient level ──
+    // ── Ambient level (breath/reverb bus) ──
+    // Currently a no-op since AMBIENT_LEVEL_FULL == AMBIENT_LEVEL_MUFFLED.
+    // The breath's dysregulation duck happens at the breath-module level
+    // below (BREATH_DUCK_FLOOR), not here. Block kept so re-enabling the
+    // bus-level duck is a single constant change.
     const levelTarget = AMBIENT_LEVEL_FULL + (AMBIENT_LEVEL_MUFFLED - AMBIENT_LEVEL_FULL) * lpRatio
     if (Math.abs(levelTarget - this._lastLevel) > RESCHEDULE_EPS) {
       this.ambientLevel.gain.setTargetAtTime(levelTarget, now, TC_LEVEL)
       this._lastLevel = levelTarget
+    }
+
+    // ── Ambient bed (sampled forest track) ──
+    // Ducks from 1.0 (regulated) toward AMBIENT_BED_FLOOR (0 = silent) as
+    // the gauge climbs. The bed lives on its own gain node directly into
+    // master, separate from ambientBus, so this duck does NOT affect the
+    // breath or its reverb tail.
+    const bedTarget = 1 + (AMBIENT_BED_FLOOR - 1) * lpRatio
+    if (Math.abs(bedTarget - this._lastAmbientBedDuck) > RESCHEDULE_EPS) {
+      this.ambientBedGain.gain.setTargetAtTime(bedTarget, now, TC_LEVEL)
+      this._lastAmbientBedDuck = bedTarget
     }
 
     // ── Breath textures ──
@@ -346,12 +394,15 @@ export default class SoundDirector {
     }
 
     // ── Rumble level ──
-    // Linear ramp from silent to RUMBLE_LEVEL_MAX. Slight perceptual lag
-    // (TC_RUMBLE > TC_FILTER) so the rumble "appears" rather than slams in.
-    const rumbleTarget = RUMBLE_LEVEL_MAX * lpRatio
-    if (Math.abs(rumbleTarget - this._lastRumble) > RESCHEDULE_EPS) {
-      this.rumbleBus.gain.setTargetAtTime(rumbleTarget, now, TC_RUMBLE)
-      this._lastRumble = rumbleTarget
+    // Guarded — _rumble is null when the rumble module is disabled in
+    // startAmbient. Block kept so re-enabling the rumble is a single
+    // uncomment in startAmbient.
+    if (this._rumble) {
+      const rumbleTarget = RUMBLE_LEVEL_MAX * lpRatio
+      if (Math.abs(rumbleTarget - this._lastRumble) > RESCHEDULE_EPS) {
+        this.rumbleBus.gain.setTargetAtTime(rumbleTarget, now, TC_RUMBLE)
+        this._lastRumble = rumbleTarget
+      }
     }
 
     // ── Synergy bowl ──
@@ -389,7 +440,8 @@ export default class SoundDirector {
     this._bowl?.dispose()
     this._ambient?.dispose()
     this._reverb?.dispose()
-    try { this._reverbSend?.disconnect() } catch (e) { /* already disconnected */ }
+    try { this._reverbSend?.disconnect()  } catch (e) { /* already disconnected */ }
+    try { this.ambientBedGain.disconnect() } catch (e) { /* already disconnected */ }
     this._breath = this._rumble = this._bowl = this._ambient = null
     this._reverb = this._reverbSend = null
     try { this.masterGain.disconnect() } catch (e) { /* already disconnected */ }
