@@ -64,7 +64,7 @@ const BREATH_REVERB_WET_LEVEL = 0.35
 // because the bowl is meant to feel far away — "the environment growing
 // happy with the user," not a foreground reward bell. Larger wet:dry
 // ratio is the standard perceptual cue for distance.
-const BOWL_REVERB_WET_LEVEL   = 0.50
+const BOWL_REVERB_WET_LEVEL   = 0.75
 
 // Breath-texture suppression under dysregulation: the inhale and exhale
 // textures duck to BREATH_DUCK_FLOOR at full gauge. Previously 0.10 —
@@ -84,7 +84,7 @@ const SYNERGY_BREATH_DEPTH = 0.20
 // below the breath texture's peak (0.10 × bell envelope). Most of the
 // bowl's audible presence now comes from its reverb tail — see
 // BOWL_REVERB_WET_LEVEL — which is the perceptual cue for "far away."
-const SYNERGY_BUS_BASE     = 0.12
+const SYNERGY_BUS_BASE     = 0.06
 const TC_BREATH            = 0.06    // fast-tracking — breathPhase is already smooth
 
 // setTargetAtTime time constants (seconds to ~63% of target).
