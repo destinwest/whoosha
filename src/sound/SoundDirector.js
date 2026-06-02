@@ -58,7 +58,13 @@ const RUMBLE_LEVEL_MAX     = 0.0
 // straight to the ambient bus; this controls how much wet reverb signal
 // runs alongside it. 0 = no reverb (dry only), 1.0 = wet equals dry.
 // 0.35 gives a noticeable sense of place without becoming washy.
-const REVERB_WET_LEVEL     = 0.35
+const BREATH_REVERB_WET_LEVEL = 0.35
+
+// Reverb wet-send level for the synergy bowl. Higher than the breath's
+// because the bowl is meant to feel far away — "the environment growing
+// happy with the user," not a foreground reward bell. Larger wet:dry
+// ratio is the standard perceptual cue for distance.
+const BOWL_REVERB_WET_LEVEL   = 0.50
 
 // Breath-texture suppression under dysregulation: the inhale and exhale
 // textures duck to BREATH_DUCK_FLOOR at full gauge. Previously 0.10 —
@@ -73,7 +79,12 @@ const BREATH_DUCK_FLOOR = 0.5
 // SYNERGY_BREATH_DEPTH controls how much the bowl swells on each breath.
 // 0.2 = ±20% linear amplitude (≈ ±1.6 dB) — felt but never noticed.
 const SYNERGY_BREATH_DEPTH = 0.20
-const SYNERGY_BUS_BASE     = 0.85    // top-of-stage synergy bus gain (sits under the bed)
+// Top-of-stage synergy bus gain (dry path). Previously 0.85 — bowl
+// dominated the soundscape. Dropped to 0.12 so the bowl's DRY signal sits
+// below the breath texture's peak (0.10 × bell envelope). Most of the
+// bowl's audible presence now comes from its reverb tail — see
+// BOWL_REVERB_WET_LEVEL — which is the perceptual cue for "far away."
+const SYNERGY_BUS_BASE     = 0.12
 const TC_BREATH            = 0.06    // fast-tracking — breathPhase is already smooth
 
 // setTargetAtTime time constants (seconds to ~63% of target).
@@ -157,13 +168,14 @@ export default class SoundDirector {
     this._mutedGain = 1      // last non-muted master target — restored on un-mute
 
     // Synth-module instances (populated lazily on first startAmbient).
-    this._breath     = null
-    this._rumble     = null
-    this._bowl       = null
-    this._ambient    = null
-    this._reverb     = null
-    this._reverbSend = null
-    this._noiseBufs  = null   // shared between modules
+    this._breath          = null
+    this._rumble          = null
+    this._bowl            = null
+    this._ambient         = null
+    this._reverb          = null
+    this._reverbSend      = null
+    this._bowlReverbSend  = null
+    this._noiseBufs       = null   // shared between modules
 
     // Tracks dispose state so async ambient loading can no-op if the
     // director was torn down before the audio file finished downloading
@@ -286,19 +298,34 @@ export default class SoundDirector {
     this._bowl = createBowl(this.ctx)
     this._bowl.output.connect(this.synergyBus)
 
-    // Reverb send: breath also routes through a wet send into the reverb,
-    // then back into the ambient bus. Two parallel paths from one source:
+    // Reverb sends: both the breath and the bowl route through wet sends
+    // into the same reverb, which returns to the ambient bus. So both
+    // layers share the same acoustic space (the forest's reflections):
+    //
     //   breath.output ─┬──────────────────────────────────► ambientBus (dry)
-    //                  └─► reverbSend → reverb → ────────► ambientBus (wet)
-    // Because the wet returns to ambientBus, the reverb tail also gets the
-    // dysregulation lowpass/level treatment alongside the dry signal — the
-    // whole acoustic space muffles together when the gauge rises.
+    //                  └─► reverbSend (0.35) ─►┐
+    //                                          ├─► reverb ─► ambientBus (wet)
+    //   bowl.output ───┬──► synergyBus ──────► master       │
+    //                  └─► bowlReverbSend (0.50) ───────────┘
+    //
+    // The bowl's wet send is higher than the breath's so the bowl is
+    // perceived primarily through its reverb tail — the "far away in the
+    // forest" character. The bowl's dry path is intentionally quiet
+    // (SYNERGY_BUS_BASE = 0.12). Because the reverb returns to ambientBus,
+    // both layers' wet signals also get the dysregulation lowpass/level
+    // treatment alongside the dry breath.
     this._reverb = createReverb(this.ctx)
+    this._reverb.output.connect(this.ambientBus)
+
     this._reverbSend = this.ctx.createGain()
-    this._reverbSend.gain.value = REVERB_WET_LEVEL
+    this._reverbSend.gain.value = BREATH_REVERB_WET_LEVEL
     this._breath.output.connect(this._reverbSend)
     this._reverbSend.connect(this._reverb.input)
-    this._reverb.output.connect(this.ambientBus)
+
+    this._bowlReverbSend = this.ctx.createGain()
+    this._bowlReverbSend.gain.value = BOWL_REVERB_WET_LEVEL
+    this._bowl.output.connect(this._bowlReverbSend)
+    this._bowlReverbSend.connect(this._reverb.input)
 
     // Ambient bed loads asynchronously (fetch + decode). Fire and forget;
     // the synth breath plays immediately, and the ambient swells in once
@@ -443,10 +470,11 @@ export default class SoundDirector {
     this._bowl?.dispose()
     this._ambient?.dispose()
     this._reverb?.dispose()
-    try { this._reverbSend?.disconnect()  } catch (e) { /* already disconnected */ }
-    try { this.ambientBedGain.disconnect() } catch (e) { /* already disconnected */ }
+    try { this._reverbSend?.disconnect()     } catch (e) { /* already disconnected */ }
+    try { this._bowlReverbSend?.disconnect() } catch (e) { /* already disconnected */ }
+    try { this.ambientBedGain.disconnect()   } catch (e) { /* already disconnected */ }
     this._breath = this._rumble = this._bowl = this._ambient = null
-    this._reverb = this._reverbSend = null
+    this._reverb = this._reverbSend = this._bowlReverbSend = null
     try { this.masterGain.disconnect() } catch (e) { /* already disconnected */ }
     try { this.compressor.disconnect()  } catch (e) { /* already disconnected */ }
     if (this.ctx.state !== 'closed') {
