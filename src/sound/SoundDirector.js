@@ -269,7 +269,7 @@ export default class SoundDirector {
     //             as a penalty rather than a co-regulating cue. Lines below
     //             commented out; the rumbleBus infrastructure remains in
     //             place for possible future re-introduction.
-    //   bowl    — DISABLED while tuning the ambient layer.
+    //   bowl    — synergy reward, partials fade in stage by stage.
     //   ambient — sampled forest-meadow bed, loaded async. Routes through
     //             its own ambientBedGain → master (NOT through ambientBus)
     //             so it can duck independently of the breath path.
@@ -279,6 +279,12 @@ export default class SoundDirector {
     // Rumble disabled — uncomment to re-enable.
     // this._rumble = createRumble(this.ctx)
     // this._rumble.output.connect(this.rumbleBus)
+
+    // Synergy bowl — fades in stage by stage as the user maintains close
+    // pacing. See synthBowl.js for the four variants and per-partial
+    // tunables. Disposal is handled via this._bowl?.dispose() in dispose().
+    this._bowl = createBowl(this.ctx)
+    this._bowl.output.connect(this.synergyBus)
 
     // Reverb send: breath also routes through a wet send into the reverb,
     // then back into the ambient bus. Two parallel paths from one source:
@@ -317,12 +323,9 @@ export default class SoundDirector {
         }
       })
 
-    // ── Synergy bowl disabled while tuning the ambient breath layer ─────
-    // Uncomment these two lines to re-enable. The update() and dispose()
-    // bowl blocks below are guarded by `if (this._bowl)` / `?.`, so leaving
-    // them untouched is safe — when _bowl is null they degrade to no-ops.
-    // this._bowl = createBowl(this.ctx)
-    // this._bowl.output.connect(this.synergyBus)
+    // synergyBus starts silent (gain 0). update() ramps it up the moment
+    // synergyStage > 0, modulated also by breathPhase for the gentle
+    // breath-locked swell.
     this.synergyBus.gain.value = 0
 
     if (this._muted) return  // user is muted; un-mute will restore via setMuted's ramp
