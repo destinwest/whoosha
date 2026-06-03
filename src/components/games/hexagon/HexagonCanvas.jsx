@@ -38,9 +38,9 @@ const SIDE_START_MS = SIDE_DURATIONS_MS.reduce((acc, dur, i) => {
 }, [])
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-// Placeholder lap palette (teal family — distinct from Square's sage/lavender).
-// Final palette TBD.
-const LAP_COLORS = ['#5B9FAA', '#76B2BC', '#8BC0C9', '#A0CFD6']
+// Southern-Utah desert lap palette — warm terracotta/orange/dusty-rose with a
+// sage-green accent, the warm counterpart to Square's cool forest sage/lavender.
+const LAP_COLORS = ['#BC5E36', '#D08A4A', '#C58A8A', '#9BA67C']
 
 // Time for one full LAP_COLORS cycle in ms of active tracing.
 // 72 000ms = ~72 seconds — roughly four laps at pacing speed.
@@ -125,18 +125,28 @@ function buildGeo(rect) {
     verts.push({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) })
   }
 
-  // Side length = circumradius R for a regular hexagon. Straight portion of
-  // each side (between corner arcs) is shorter by 2r along the edge direction.
-  // The corner arc replaces the sharp vertex; its arc length is r·(π - interior).
-  // For a hex, interior angle = 2π/3, so exterior = π/3, arc length = r·π/3.
+  // Corner-arc geometry. For an inscribed arc of radius r tangent to both edges
+  // of a corner with interior angle θ, the tangent points sit at distance
+  // r/tan(θ/2) from the vertex along each edge (NOT distance r — that's only
+  // correct for a 90° square corner, where tan(45°)=1). Using the full r here
+  // was the bug that made the traceable centerline diverge from the visible
+  // track — which is drawn correctly by roundedNgonPath/arcTo — at every
+  // hexagon corner, so the path couldn't be traced through the corners.
+  const interiorAngle = (SIDES - 2) * Math.PI / SIDES   // 120° for a hexagon
+  const exteriorAngle = Math.PI - interiorAngle          // 60° — the corner-arc sweep
+  const cornerTangent = r / Math.tan(interiorAngle / 2)  // vertex→tangent-point distance
+
+  // Side length = circumradius R for a regular hexagon. The straight portion of
+  // each side is shorter by 2·cornerTangent (one tangent inset at each end); the
+  // corner arc (length r·exterior) replaces the sharp vertex.
   const sideLen = R
-  const LS      = sideLen - 2 * r          // straight-segment length per side
-  const LA      = r * Math.PI / 3          // corner arc length
-  const sf      = LS / (LS + LA)           // straight-fraction within each side
+  const LS      = sideLen - 2 * cornerTangent  // straight-segment length per side
+  const LA      = r * exteriorAngle            // corner arc length
+  const sf      = LS / (LS + LA)               // straight-fraction within each side
 
   // Per-side: straightFrom[i] is the start of the straight segment of side i;
   // straightTo[i] is the end. Both lie on the line between vertex i and i+1,
-  // offset inward from each end by r along the edge direction.
+  // offset inward from each end by cornerTangent along the edge direction.
   const straightFrom = []
   const straightTo   = []
   for (let i = 0; i < SIDES; i++) {
@@ -147,8 +157,8 @@ function buildGeo(rect) {
     const len = Math.hypot(dx, dy)
     const ux = dx / len
     const uy = dy / len
-    straightFrom.push({ x: a.x + ux * r, y: a.y + uy * r })
-    straightTo.push  ({ x: b.x - ux * r, y: b.y - uy * r })
+    straightFrom.push({ x: a.x + ux * cornerTangent, y: a.y + uy * cornerTangent })
+    straightTo.push  ({ x: b.x - ux * cornerTangent, y: b.y - uy * cornerTangent })
   }
 
   // arcCenters[i] is the center of the corner-rounding arc at vertex i+1
@@ -203,9 +213,9 @@ function buildGeo(rect) {
     } else {
       const arcT  = (s - sf) / (1 - sf)                     // 0 → 1 across the arc
       const ac    = arcCenters[si]
-      // Arc spans CW by π/3 (= exterior angle of regular hex).
-      // In canvas coords (y down), "CW visually" = increasing angle.
-      const angle = arcStartAngles[si] + arcT * Math.PI / 3
+      // Arc sweeps by the exterior angle (π/3 for a hexagon). In canvas coords
+      // (y down), "CW visually" = increasing angle.
+      const angle = arcStartAngles[si] + arcT * exteriorAngle
       points.push({ x: ac.x + r * Math.cos(angle), y: ac.y + r * Math.sin(angle) })
     }
   }

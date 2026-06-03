@@ -23,7 +23,7 @@ export const HOME_DEFAULT_INDEX = HOME_GAMES.findIndex((g) => g.id === 'square')
 // Per-card background gradients keyed by gameKey.
 export const GAME_GRADIENTS = {
   square:      'linear-gradient(160deg, #C8E0CD, #A0C8B0)',
-  hexagon:     'linear-gradient(160deg, #B6D7DC, #88B5BD)',
+  hexagon:     'linear-gradient(160deg, #E4B48C, #C77E5A)',
   infinity:    'linear-gradient(160deg, #D2C9E5, #B0A3D0)',
   flower:      'linear-gradient(160deg, #EBD4A8, #D6B27C)',
   placeholder: 'linear-gradient(160deg, #E0E8DF, #BFCEC1)',

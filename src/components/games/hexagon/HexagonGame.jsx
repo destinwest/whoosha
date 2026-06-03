@@ -8,64 +8,57 @@ import HexagonCanvas  from './HexagonCanvas'
 // independently. Flip together when restoring the feature.
 const STROKE_SELECTOR_ENABLED = false
 
-// ── buildMeadowBg ─────────────────────────────────────────────────────────────
-// Bakes the entire static background — base gradient, ground texture (when the
-// asset is loaded), sun pools, green canopy dapples, top-edge depth, and four
-// slanted shafts — into a single offscreen canvas at device-pixel resolution.
-// All composition happens in canvas-land via globalCompositeOperation; no CSS
-// blend layers needed at runtime.
-function buildMeadowBg(w, h, dpr, textureImg) {
+// ── buildDesertBg ─────────────────────────────────────────────────────────────
+// Bakes the entire static background — base gradient, warm sun pools, sage-scrub
+// dapples, top-edge depth, and four slanted shafts (two canyon-wall shadows, two
+// desert sunbeams) — into a single offscreen canvas at device-pixel resolution.
+// Southern-Utah desert palette: warm red-rock and sandstone with sage accents,
+// counterpart to the Square game's cool forest-bathing scene. All composition
+// happens in canvas-land via globalCompositeOperation; no CSS blend layers.
+function buildDesertBg(w, h, dpr) {
   const oc = document.createElement('canvas')
   oc.width  = w * dpr
   oc.height = h * dpr
   const ctx = oc.getContext('2d')
   ctx.scale(dpr, dpr)
 
-  // Base diagonal wash — deep emerald-teal, lighter top-left to darker bottom-right
+  // Base diagonal wash — sandstone/red-rock, lighter top-left to darker
+  // bottom-right (golden sand → terracotta → deep canyon shadow).
   const bg = ctx.createLinearGradient(0, 0, w * 0.6, h)
-  bg.addColorStop(0,    '#28C5AD')
-  bg.addColorStop(0.30, '#159986')
-  bg.addColorStop(0.55, '#097969')
-  bg.addColorStop(0.78, '#094E44')
-  bg.addColorStop(1.0,  '#082B26')
+  bg.addColorStop(0,    '#D99E6A')   // warm light sandstone
+  bg.addColorStop(0.30, '#C47A4A')   // sandstone orange
+  bg.addColorStop(0.55, '#A85636')   // terracotta red rock
+  bg.addColorStop(0.78, '#803D28')   // deep red rock
+  bg.addColorStop(1.0,  '#56291A')   // dark canyon shadow
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
-
-  // Ground texture — moss/grass/earth marks tiled across the meadow. Drawn
-  // before the lighting passes so canopy light naturally illuminates it.
-  if (textureImg) {
-    const pattern = ctx.createPattern(textureImg, 'repeat')
-    if (pattern) {
-      ctx.fillStyle = pattern
-      ctx.fillRect(0, 0, w, h)
-    }
-  }
 
   // Screen-blend phase — all subsequent fills brighten what's below
   ctx.globalCompositeOperation = 'screen'
 
-  // Amber sun pools — soft warm canopy light
+  // Warm desert sun pools — intense golden light
   for (const { cx, cy, rf, a } of [
-    { cx: 0.22, cy: 0.28, rf: 0.38, a: 0.12 },
-    { cx: 0.72, cy: 0.20, rf: 0.28, a: 0.09 },
-    { cx: 0.60, cy: 0.68, rf: 0.34, a: 0.10 },
-    { cx: 0.18, cy: 0.72, rf: 0.24, a: 0.08 },
+    { cx: 0.22, cy: 0.28, rf: 0.38, a: 0.13 },
+    { cx: 0.72, cy: 0.20, rf: 0.28, a: 0.10 },
+    { cx: 0.60, cy: 0.68, rf: 0.34, a: 0.11 },
+    { cx: 0.18, cy: 0.72, rf: 0.24, a: 0.09 },
   ]) {
     const px = cx * w, py = cy * h, r = rf * Math.max(w, h)
     const g = ctx.createRadialGradient(px, py, 0, px, py, r)
-    g.addColorStop(0, `rgba(218,195,128,${a})`)
+    g.addColorStop(0, `rgba(238,200,138,${a})`)
     g.addColorStop(1, 'rgba(0,0,0,0)')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, w, h)
   }
 
-  // Warm canopy dapples — gold-olive pools, light filtered through autumn leaves
+  // Sage-scrub dapples — muted desert-sage pools, the cool accent against the
+  // warm rock (desert sagebrush catching light).
   for (const { cx, cy, rf, color } of [
-    { cx: 0.21, cy: 0.26, rf: 0.33, color: 'rgba(165,150,70,0.12)' },
-    { cx: 0.71, cy: 0.19, rf: 0.26, color: 'rgba(155,140,65,0.09)' },
-    { cx: 0.80, cy: 0.60, rf: 0.29, color: 'rgba(160,145,68,0.11)' },
-    { cx: 0.33, cy: 0.72, rf: 0.31, color: 'rgba(150,138,62,0.10)' },
-    { cx: 0.54, cy: 0.44, rf: 0.23, color: 'rgba(145,130,58,0.08)' },
+    { cx: 0.21, cy: 0.26, rf: 0.33, color: 'rgba(150,162,120,0.11)' },
+    { cx: 0.71, cy: 0.19, rf: 0.26, color: 'rgba(142,156,116,0.08)' },
+    { cx: 0.80, cy: 0.60, rf: 0.29, color: 'rgba(148,160,118,0.10)' },
+    { cx: 0.33, cy: 0.72, rf: 0.31, color: 'rgba(138,152,112,0.09)' },
+    { cx: 0.54, cy: 0.44, rf: 0.23, color: 'rgba(145,158,116,0.07)' },
   ]) {
     const px = cx * w, py = cy * h, r = rf * Math.max(w, h)
     const g = ctx.createRadialGradient(px, py, 0, px, py, r)
@@ -75,50 +68,50 @@ function buildMeadowBg(w, h, dpr, textureImg) {
     ctx.fillRect(0, 0, w, h)
   }
 
-  // Top-edge depth — warm dark sepia wash on upper 22% (warm canopy shadow)
+  // Top-edge depth — warm red-brown wash on upper 22% (canyon-rim shadow)
   const topShadow = ctx.createLinearGradient(0, 0, 0, h * 0.22)
-  topShadow.addColorStop(0,     'rgba(75,60,35,0.14)')
-  topShadow.addColorStop(0.636, 'rgba(55,42,22,0.05)')
+  topShadow.addColorStop(0,     'rgba(85,45,30,0.15)')
+  topShadow.addColorStop(0.636, 'rgba(64,34,22,0.06)')
   topShadow.addColorStop(1,     'rgba(0,0,0,0)')
   ctx.fillStyle = topShadow
   ctx.fillRect(0, 0, w, h * 0.22)
 
-  // Slanted shafts — two dark (tree-trunk shadows), two bright (sunbeams)
+  // Slanted shafts — two dark (canyon-wall shadows), two bright (desert sunbeams)
   paintShaft(ctx, w, h,
     [[0.02, 0], [0.31, 0], [0.44, 1], [0.15, 1]],
     [
-      [0,    'rgba(88,74,24,0)'],
-      [0.30, 'rgba(88,74,24,0.22)'],
-      [0.55, 'rgba(72,60,18,0.28)'],
-      [0.78, 'rgba(55,46,14,0.18)'],
-      [1.00, 'rgba(35,28,8,0.05)'],
+      [0,    'rgba(92,46,28,0)'],
+      [0.30, 'rgba(92,46,28,0.22)'],
+      [0.55, 'rgba(74,36,20,0.28)'],
+      [0.78, 'rgba(56,28,16,0.18)'],
+      [1.00, 'rgba(36,18,10,0.05)'],
     ])
   paintShaft(ctx, w, h,
     [[0.62, 0], [0.80, 0], [0.91, 1], [0.74, 1]],
     [
-      [0,    'rgba(85,72,22,0)'],
-      [0.28, 'rgba(85,72,22,0.18)'],
-      [0.58, 'rgba(68,57,16,0.24)'],
-      [0.80, 'rgba(50,42,12,0.14)'],
-      [1.00, 'rgba(30,25,7,0.04)'],
+      [0,    'rgba(90,44,26,0)'],
+      [0.28, 'rgba(90,44,26,0.18)'],
+      [0.58, 'rgba(70,34,18,0.24)'],
+      [0.80, 'rgba(52,26,14,0.14)'],
+      [1.00, 'rgba(32,16,9,0.04)'],
     ])
   paintShaft(ctx, w, h,
     [[0.05, 0], [0.15, 0], [0.36, 1], [0.18, 1]],
     [
-      [0,    'rgba(255,240,175,0)'],
-      [0.18, 'rgba(255,240,175,0.28)'],
-      [0.50, 'rgba(248,228,158,0.24)'],
-      [0.80, 'rgba(235,215,140,0.12)'],
-      [1.00, 'rgba(255,240,175,0)'],
+      [0,    'rgba(255,226,160,0)'],
+      [0.18, 'rgba(255,226,160,0.28)'],
+      [0.50, 'rgba(250,212,148,0.24)'],
+      [0.80, 'rgba(240,200,135,0.12)'],
+      [1.00, 'rgba(255,226,160,0)'],
     ])
   paintShaft(ctx, w, h,
     [[0.60, 0], [0.70, 0], [0.84, 1], [0.70, 1]],
     [
-      [0,    'rgba(255,240,175,0)'],
-      [0.22, 'rgba(255,240,175,0.22)'],
-      [0.55, 'rgba(248,228,158,0.18)'],
-      [0.82, 'rgba(235,215,140,0.10)'],
-      [1.00, 'rgba(255,240,175,0)'],
+      [0,    'rgba(255,226,160,0)'],
+      [0.22, 'rgba(255,226,160,0.22)'],
+      [0.55, 'rgba(250,212,148,0.18)'],
+      [0.82, 'rgba(240,200,135,0.10)'],
+      [1.00, 'rgba(255,226,160,0)'],
     ])
 
   ctx.globalCompositeOperation = 'source-over'
@@ -172,15 +165,10 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
   const bgCanvasRef     = useRef(null)
   const pacingCanvasRef = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
 
-  // ── Meadow background — baked once per resize ──────────────────────────────
+  // ── Desert background — baked once per resize ──────────────────────────────
   useEffect(() => {
     const el = bgCanvasRef.current
     if (!el) return
-
-    // Ground texture — loaded once. First bake may run before image resolves;
-    // a re-bake fires via onload so texture appears as soon as it's ready.
-    const textureImg = new Image()
-    let textureReady = false
 
     function draw() {
       const w = el.offsetWidth
@@ -189,14 +177,8 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
       const dpr = window.devicePixelRatio || 1
       el.width  = w * dpr
       el.height = h * dpr
-      el.getContext('2d').drawImage(
-        buildMeadowBg(w, h, dpr, textureReady ? textureImg : null),
-        0, 0,
-      )
+      el.getContext('2d').drawImage(buildDesertBg(w, h, dpr), 0, 0)
     }
-
-    textureImg.onload = () => { textureReady = true; draw() }
-    textureImg.src = '/textures/meadow-ground.svg'
 
     draw()
     const ro = new ResizeObserver(draw)
@@ -221,7 +203,7 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
 
   return (
     <div
-      className="absolute inset-0 bg-bg-eucalyptus overflow-hidden select-none"
+      className="absolute inset-0 bg-bg-cream overflow-hidden select-none"
       style={{ touchAction: 'none' }}
     >
       {/* back button */}
@@ -295,7 +277,7 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
                     fontFamily: "'Nunito', sans-serif",
                     fontWeight: 700,
                     fontSize:   `${fs}px`,
-                    color:      'rgba(44,74,62,1)',
+                    color:      'rgba(92,46,28,1)',   // warm canyon red-brown (desert label)
                     whiteSpace: 'nowrap',
                     willChange: 'transform, opacity',
                   }}
