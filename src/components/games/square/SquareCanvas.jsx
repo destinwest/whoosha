@@ -18,6 +18,7 @@
 import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
 import * as stampStroke   from './strokes/stampStroke'
 import * as layeredWash   from './strokes/layeredWash'
+import { createHeatGauge } from '../_shared/heatGauge'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const LAP_COLORS   = ['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']
@@ -45,11 +46,19 @@ const COLOR_CYCLE_MS = 72_000
 const MAX_PATH_ADVANCE_MULT = 0.5
 
 // ── Heat gauge tuning ─────────────────────────────────────────────────────────
-const GAUGE_SPEED_THRESHOLD   = 1.2   // path rate ratio above which gauge charges
-const GAUGE_RECOVER_THRESHOLD = 3.0   // path rate ratio above which recovery timer resets — only true racing blocks recovery
-const GAUGE_CHARGE_DELAY      = 500   // ms of sustained too-fast before the gauge starts ramping
-const GAUGE_DRAIN_DELAY       = 250   // ms of sustained recoverable-pace before recovery begins
-const GAUGE_EFFECT_THRESHOLD = 0.3    // gauge value below which no visible effect appears
+// Consumed by the shared createHeatGauge state machine (see _shared/heatGauge).
+// speedThreshold is also referenced directly by the synergy block below, so
+// it stays a named const.
+const GAUGE_SPEED_THRESHOLD = 1.2   // path rate ratio above which gauge charges
+const GAUGE_CONFIG = {
+  speedThreshold:   GAUGE_SPEED_THRESHOLD,
+  recoverThreshold: 3.0,    // ratio above which the recovery timer resets (true racing)
+  chargeDelayMs:    500,    // sustained too-fast before the gauge starts ramping
+  drainDelayMs:     250,    // sustained good-pace before recovery begins (post-floor)
+  rampUpMs:         2000,   // gauge 0 → 1 ramp duration
+  rampDownMs:       1000,   // gauge 1 → 0 drain duration
+  effectThreshold:  0.3,    // gauge value below which no visible effect appears
+}
 
 // ── Synergy tuning ────────────────────────────────────────────────────────────
 // Time-based continuous reward. An on-pace accumulator grows while the user
@@ -345,11 +354,14 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const paintPressureRafRef  = useRef(null)             // RAF handle for paint pressure ramp
 
   // ── Heat gauge ────────────────────────────────────────────────────────────
-  const heatGaugeRef         = useRef(0)     // 0.0–1.0, invisible gauge
-  const tooFastTimerRef      = useRef(0)     // ms accumulated above speed threshold
-  const goodPaceTimerRef     = useRef(0)     // ms accumulated at or below speed threshold
+  // The state machine (value, timers, active flag) lives in the shared
+  // createHeatGauge module. gaugeActiveRef + gaugeEffectRef bridge its
+  // per-frame result out to the draw code and the onGameStateTick snapshot,
+  // which read them in many places.
+  const gaugeMachineRef      = useRef(null)
+  if (!gaugeMachineRef.current) gaugeMachineRef.current = createHeatGauge(GAUGE_CONFIG)
   const gaugeActiveRef       = useRef(false) // true once desaturation has fully fired
-  const gaugeEffectRef       = useRef(0)     // computed gFx, written by gauge block, read by draw loop
+  const gaugeEffectRef       = useRef(0)     // eased effect strength, read by draw loop
   const childPathRateRef     = useRef(0)     // path fraction-units/ms, smoothed
   const pacingEmphasisRef    = useRef(0)     // 0–1, eased toward gaugeActive — drives pacing-circle grow + glow
   // ── Synergy reward (time-based continuous progression) ────────────────────
@@ -414,9 +426,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       cancelAnimationFrame(bloomAttackRafRef.current)
       cancelAnimationFrame(paintPressureRafRef.current)
 
-      heatGaugeRef.current        = 0
-      tooFastTimerRef.current     = 0
-      goodPaceTimerRef.current    = 0
+      gaugeMachineRef.current.reset()
       gaugeActiveRef.current      = false
       gaugeEffectRef.current      = 0
       childPathRateRef.current    = 0
@@ -1003,72 +1013,40 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       }
 
       // ── Heat gauge update ─────────────────────────────────────────────────
+      // State machine lives in the shared createHeatGauge module. Square's
+      // pacing rate is constant (4 fraction-units per lap per CYCLE_MS), so
+      // speedRatio is a simple division. The module returns the frame's
+      // gauge state + two edge-trigger flags handled below.
       if (startedRef.current) {
-        // ── Speed ratio ────────────────────────────────────────────────────
-        // Pacing rate is constant — 4 fraction-units per lap per CYCLE_MS.
         const pacingRate = 4 / CYCLE_MS
         const speedRatio = childPathRateRef.current / pacingRate
 
-        const isTooFast  = touchRef.current && speedRatio > GAUGE_SPEED_THRESHOLD
-        const isGoodPace = !touchRef.current || speedRatio <= GAUGE_SPEED_THRESHOLD
+        const r = gaugeMachineRef.current.update(dt, {
+          speedRatio,
+          touching: touchRef.current,
+        })
 
-        // ── Charge timer — 1.2× threshold ─────────────────────────────────
-        if (isTooFast) {
-          tooFastTimerRef.current = Math.min(GAUGE_CHARGE_DELAY, tooFastTimerRef.current + dt)
-        } else if (isGoodPace && !gaugeActiveRef.current) {
-          // Slowing before floor — slowly decay the charge timer
-          tooFastTimerRef.current = Math.max(0, tooFastTimerRef.current - dt * 0.5)
-        }
+        // Bridge the result out to the refs the draw code + snapshot read.
+        gaugeActiveRef.current = r.gaugeActive
+        gaugeEffectRef.current = r.gaugeEffect
 
-        // ── Recovery timer — 3× threshold ─────────────────────────────────
-        // Only genuinely racing (> 3× pacing) resets recovery. Normal variation
-        // and moderate speed above 1.2× doesn't block the recovery window.
-        const isTrulyRacing = touchRef.current && speedRatio > GAUGE_RECOVER_THRESHOLD
-        if (isTrulyRacing) {
-          goodPaceTimerRef.current = 0
-        } else {
-          goodPaceTimerRef.current = Math.min(GAUGE_DRAIN_DELAY, goodPaceTimerRef.current + dt)
-        }
-
-        // ── Gauge state transitions ────────────────────────────────────────
-        if (isTooFast && !gaugeActiveRef.current && tooFastTimerRef.current >= GAUGE_CHARGE_DELAY) {
-          // Charge delay met, still racing — ramp gauge to 1 over 2s
-          heatGaugeRef.current = Math.min(1, heatGaugeRef.current + dt / 2000)
-          if (heatGaugeRef.current >= 1) {
-            // Floor reached — clear paint canvas permanently. Synergy now
-            // drains gracefully via the synergy block (3-second return rate
-            // engages while gaugeActiveRef.current is true).
-            gaugeActiveRef.current = true
-            stampStroke.clear()
-            if (paintCtxRef.current && clipArgsRef.current) {
-              applyPaintClip(paintCtxRef.current, clipArgsRef.current)
-            }
-          }
-        } else if (isGoodPace && !gaugeActiveRef.current && heatGaugeRef.current > 0) {
-          // Slowing/lifting before floor — drain gauge back over 1s, paint recovers
-          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 1000)
-        } else if (gaugeActiveRef.current && goodPaceTimerRef.current >= GAUGE_DRAIN_DELAY) {
-          // Floor reached; good pace held for 0.25s — drain over 1s, only saturation returns
-          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 1000)
-          if (heatGaugeRef.current <= 0) {
-            gaugeActiveRef.current         = false
-            goodPaceTimerRef.current       = 0
-            recoveredFromDysregRef.current = true   // consumed by the next encouragement trigger
-            // tooFastTimerRef stays at GAUGE_CHARGE_DELAY — re-racing re-triggers immediately
+        // justHitFloor → clear the paint canvas permanently (re-clipped).
+        if (r.justHitFloor) {
+          stampStroke.clear()
+          if (paintCtxRef.current && clipArgsRef.current) {
+            applyPaintClip(paintCtxRef.current, clipArgsRef.current)
           }
         }
 
-        heatGaugeRef.current = Math.max(0, Math.min(1, heatGaugeRef.current))
+        // justRecovered → flag the next encouragement as "that feels better".
+        if (r.justRecovered) {
+          recoveredFromDysregRef.current = true
+        }
 
-        // ── Apply effects ──────────────────────────────────────────────────
-        const g   = heatGaugeRef.current
-        const gFx = g < GAUGE_EFFECT_THRESHOLD
-          ? 0
-          : Math.pow((g - GAUGE_EFFECT_THRESHOLD) / (1 - GAUGE_EFFECT_THRESHOLD), 2)
-
-        gaugeEffectRef.current = gFx
         // Drain saturation toward grayscale — the color drains from the world.
-        document.documentElement.style.setProperty('--game-saturation', (1 - gFx * 0.9).toFixed(3))
+        document.documentElement.style.setProperty(
+          '--game-saturation', (1 - r.gaugeEffect * 0.9).toFixed(3),
+        )
       }
 
       // ── Synergy update ────────────────────────────────────────────────────
