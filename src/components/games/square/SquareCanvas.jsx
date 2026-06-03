@@ -19,6 +19,7 @@ import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
 import * as stampStroke   from './strokes/stampStroke'
 import * as layeredWash   from './strokes/layeredWash'
 import { createHeatGauge } from '../_shared/heatGauge'
+import { createSynergy }   from '../_shared/synergy'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const LAP_COLORS   = ['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']
@@ -64,14 +65,19 @@ const GAUGE_CONFIG = {
 // Time-based continuous reward. An on-pace accumulator grows while the user
 // stays close + in pace and decays when they drift. Stage 0→4 is mapped
 // directly from the accumulator via piecewise-linear thresholds.
+// SYNERGY_DIST_THRESHOLD_LW stays here — it's combined with lw (geometry) to
+// compute the "close" boolean the synergy machine consumes. The stage timings
+// and drain rate are config for the shared createSynergy machine.
 const SYNERGY_DIST_THRESHOLD_LW = 0.8     // user within lw * 0.8 of pacing counts as close
-const SYNERGY_TIME_0_TO_1_MS    = 4000    // 0 → Stage 1 — amber grows to pacing size
-const SYNERGY_TIME_1_TO_2_MS    = 4000    // Stage 1 → 2 — pacing fill shifts to amber
-const SYNERGY_TIME_2_TO_3_MS    = 8000    // Stage 2 → 3 — both circles grow to 1.5×
-const SYNERGY_TIME_3_TO_4_MS    = 16000   // Stage 3 → 4 — embers begin radiating
-const SYNERGY_MAX_ACCUM_MS      = SYNERGY_TIME_0_TO_1_MS + SYNERGY_TIME_1_TO_2_MS
-                                + SYNERGY_TIME_2_TO_3_MS + SYNERGY_TIME_3_TO_4_MS  // 32s
-const SYNERGY_MAX_STAGE         = 4
+const SYNERGY_CONFIG = {
+  // durations (ms) for stages 0→1, 1→2, 2→3, 3→4
+  //   stage 1 — amber grows to pacing size
+  //   stage 2 — pacing fill shifts to amber
+  //   stage 3 — both circles grow to 1.5×
+  //   stage 4 — embers begin radiating
+  stageTimesMs: [4000, 4000, 8000, 16000],
+  returnMs:     3000,   // full drain from max when finger lifts / gauge floors
+}
 
 // ── Encouragement messages ────────────────────────────────────────────────
 // Pool of phrases that may appear on a successful close-tracked lap
@@ -96,8 +102,7 @@ const ENCOURAGEMENT_MESSAGES = [
 // has fully activated the heat gauge and then recovered. Also in the
 // general pool so it can appear naturally even without prior dysregulation.
 const RECOVERY_MESSAGE = 'That feels better 💚'
-const SYNERGY_RETURN_MS         = 3000                                  // full return-to-start duration from max state
-const SYNERGY_RETURN_RATE       = SYNERGY_MAX_ACCUM_MS / SYNERGY_RETURN_MS  // accum-ms drained per real-ms during return
+
 const EMBER_PARTICLE_CAP        = 30
 const EMBER_SPAWN_RATE_AT_FULL  = 14      // particles per second at Stage 4.0
 const ALPHA_ACTIVE = 0.75
@@ -365,8 +370,12 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const childPathRateRef     = useRef(0)     // path fraction-units/ms, smoothed
   const pacingEmphasisRef    = useRef(0)     // 0–1, eased toward gaugeActive — drives pacing-circle grow + glow
   // ── Synergy reward (time-based continuous progression) ────────────────────
-  const synergyStageRef      = useRef(0)     // 0.0 → 4.0, derived from accumulator each frame
-  const onPaceAccumRef       = useRef(0)     // ms of on-pace time, caps at SYNERGY_MAX_ACCUM_MS
+  // Accumulator + stage curve live in the shared createSynergy module.
+  // synergyStageRef bridges its per-frame result out to the draw code and the
+  // onGameStateTick snapshot.
+  const synergyMachineRef    = useRef(null)
+  if (!synergyMachineRef.current) synergyMachineRef.current = createSynergy(SYNERGY_CONFIG)
+  const synergyStageRef      = useRef(0)     // 0.0 → 4.0, read by draw loop + snapshot
   const emberParticlesRef    = useRef([])    // pooled ember particles (Stage 4)
   const lastEmberSpawnRef    = useRef(0)     // ms timestamp of last ember spawn
 
@@ -431,8 +440,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       gaugeEffectRef.current      = 0
       childPathRateRef.current    = 0
       pacingEmphasisRef.current   = 0
+      synergyMachineRef.current.reset()
       synergyStageRef.current     = 0
-      onPaceAccumRef.current      = 0
       emberParticlesRef.current   = []
       lastEmberSpawnRef.current   = 0
       document.documentElement.style.setProperty('--game-saturation', '1')
@@ -1050,40 +1059,26 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       }
 
       // ── Synergy update ────────────────────────────────────────────────────
-      // Three behaviors:
-      //   - Finger lifted OR gauge-floor active → fast return to 0 over 3s
-      //     (from max). Both events should drain the synergy reward.
-      //   - Touching + on-pace               → accumulator grows at +dt.
-      //   - Touching + off-pace              → symmetric 1:1 slow decay.
-      if (!touchRef.current || gaugeActiveRef.current) {
-        onPaceAccumRef.current = Math.max(
-          0, onPaceAccumRef.current - dt * SYNERGY_RETURN_RATE,
-        )
-      } else if (startedRef.current && pacingPos && childPosRef.current) {
-        const child      = childPosRef.current
-        const dist       = Math.hypot(child.clx - pacingPos.x, child.cly - pacingPos.y)
-        const speedRatio = childPathRateRef.current / (4 / CYCLE_MS)
-        const close      = dist <= lw * SYNERGY_DIST_THRESHOLD_LW
-        const inPace     = speedRatio <= GAUGE_SPEED_THRESHOLD
-        if (close && inPace) {
-          onPaceAccumRef.current = Math.min(SYNERGY_MAX_ACCUM_MS, onPaceAccumRef.current + dt)
-        } else {
-          onPaceAccumRef.current = Math.max(0, onPaceAccumRef.current - dt)
-        }
-      }
-
-      // Map accumulator → continuous stage (piecewise linear)
+      // Accumulator + stage curve live in the shared createSynergy module.
+      // The canvas computes the geometry-dependent inputs (close / in-pace /
+      // can-evaluate) and the module returns the continuous stage.
       {
-        const a = onPaceAccumRef.current
-        const t1 = SYNERGY_TIME_0_TO_1_MS
-        const t2 = t1 + SYNERGY_TIME_1_TO_2_MS
-        const t3 = t2 + SYNERGY_TIME_2_TO_3_MS
-        const t4 = t3 + SYNERGY_TIME_3_TO_4_MS
-        if      (a >= t4) synergyStageRef.current = 4
-        else if (a >= t3) synergyStageRef.current = 3 + (a - t3) / SYNERGY_TIME_3_TO_4_MS
-        else if (a >= t2) synergyStageRef.current = 2 + (a - t2) / SYNERGY_TIME_2_TO_3_MS
-        else if (a >= t1) synergyStageRef.current = 1 + (a - t1) / SYNERGY_TIME_1_TO_2_MS
-        else              synergyStageRef.current = a / SYNERGY_TIME_0_TO_1_MS
+        let close = false, inPace = false
+        const canEvaluate = startedRef.current && pacingPos && childPosRef.current
+        if (canEvaluate) {
+          const child      = childPosRef.current
+          const dist       = Math.hypot(child.clx - pacingPos.x, child.cly - pacingPos.y)
+          const speedRatio = childPathRateRef.current / (4 / CYCLE_MS)
+          close  = dist <= lw * SYNERGY_DIST_THRESHOLD_LW
+          inPace = speedRatio <= GAUGE_SPEED_THRESHOLD
+        }
+        synergyStageRef.current = synergyMachineRef.current.update(dt, {
+          touching:    touchRef.current,
+          gaugeActive: gaugeActiveRef.current,
+          canEvaluate,
+          close,
+          inPace,
+        })
       }
 
       // Derived stage values for visual mapping
