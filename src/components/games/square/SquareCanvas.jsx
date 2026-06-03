@@ -41,10 +41,21 @@ const START_AT_BREATH_PHASE = 0.75
 // 72 000ms = ~72 seconds — roughly four laps at pacing speed.
 const COLOR_CYCLE_MS = 72_000
 
-// Maximum path advancement per pointer event — prevents corner-cut visual gaps.
-// Expressed as a multiplier of lw; 0.5 = half a track width of path per event.
-// At normal tracing speed and 60fps this cap is never reached.
-const MAX_PATH_ADVANCE_MULT = 0.5
+// ── Tracing core (groove model) ───────────────────────────────────────────────
+// The user circle is a bead constrained to the path. Each frame the finger is
+// projected onto the path by LOCAL search around the bead, then the bead moves
+// to the projection if (a) the finger is within ACCEPTANCE perpendicular of the
+// groove and (b) the projection is within LEASH arc-length of the bead. If
+// either fails the bead is "not attached": it freezes and all game systems
+// (heat gauge, synergy) drain toward default. Both checks are symmetric in
+// direction, which is also what prevents corner-cutting in either winding.
+//
+// LEASH is the heart of the trace UX: how far the finger may lead/lag the bead
+// before the groove lets go. Larger = more forgiving of fast/loose tracing;
+// smaller = stricter, more intentional. ACCEPTANCE is how far sideways off the
+// groove the finger may stray before it counts as off-track.
+const LEASH_TRACK_WIDTHS      = 1.4   // finger↔bead max arc-distance, in track widths
+const ACCEPTANCE_TRACK_WIDTHS = 0.75  // finger↔groove max perpendicular distance, in track widths
 
 // ── Heat gauge tuning ─────────────────────────────────────────────────────────
 // Consumed by the shared createHeatGauge state machine (see _shared/heatGauge).
@@ -186,17 +197,24 @@ function buildGeo(rect) {
     y: (a.y + straightTo[i].y) / 2,
   }))
 
-  let totalPathLength = 0
+  // Cumulative arc-length at each point index (cumLen[0] = 0,
+  // cumLen[N] = totalPathLength). The groove tracing core measures
+  // finger-to-bead distance ALONG the path, and points are sampled by
+  // parameter (not uniform arc-length), so we need real cumulative lengths.
+  const cumLen = new Array(N + 1)
+  cumLen[0] = 0
   for (let i = 0; i < N; i++) {
-    totalPathLength += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y)
+    cumLen[i + 1] = cumLen[i] + Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y)
   }
+  const totalPathLength = cumLen[N]
 
   return {
     cx, cy, sq, half, lw, r, sf,
     arcCenters, arcStartAngles,
     straightFrom, straightTo,
     points, labelMids,
-    totalPathLength,
+    cumLen, totalPathLength,
+    sides: 4,
     w, h,
   }
 }
@@ -303,6 +321,99 @@ function applyPaintClip(ctx, { left, top, sqW, cr, lw }) {
   ctx.clip('evenodd')
 }
 
+// ── Groove tracing core (pure helpers) ────────────────────────────────────────
+// These operate purely on geo (points, cumLen, sides) + scalars — no refs, no
+// canvas. They are the to-be-extracted "module 3" path math, written here first
+// so the new tracing core can be felt-tested on Square before extraction.
+
+// Signed shortest arc distance (px) from index a to index b around the closed
+// loop. Positive = b is forward of a. Indices are floats in [0, N].
+function arcGapPx(geo, aIdx, bIdx) {
+  const { cumLen, totalPathLength } = geo
+  const a = lerpCumLen(cumLen, aIdx)
+  const b = lerpCumLen(cumLen, bIdx)
+  let d = b - a
+  if (d >  totalPathLength / 2) d -= totalPathLength
+  if (d < -totalPathLength / 2) d += totalPathLength
+  return d
+}
+
+// Cumulative arc-length at a fractional index (linear within the segment).
+function lerpCumLen(cumLen, idx) {
+  const N = cumLen.length - 1
+  const i = Math.max(0, Math.min(N - 1, Math.floor(idx)))
+  const t = idx - i
+  return cumLen[i] + (cumLen[i + 1] - cumLen[i]) * t
+}
+
+// Pixel position at a fractional index.
+function pointAt(points, idx) {
+  const N = points.length - 1
+  const i = Math.max(0, Math.min(N - 1, Math.floor(idx)))
+  const t = idx - i
+  const a = points[i]
+  const b = points[i + 1]
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+}
+
+// Fraction (0..sides) at a fractional index.
+function fractionAt(geo, idx) {
+  const N = geo.points.length - 1
+  return (idx / N) * geo.sides
+}
+
+// Project (px,py) onto the path, searching ONLY segments whose midpoint is
+// within `windowPx` arc-length of `centerIdx` (local search — required for
+// self-passing paths). Returns { idx, x, y, perpDist } of the nearest point,
+// or null if the window is empty. Handles loop wraparound.
+function projectLocal(geo, centerIdx, px, py, windowPx) {
+  const { points, cumLen, totalPathLength } = geo
+  const N = points.length - 1
+  const centerLen = lerpCumLen(cumLen, centerIdx)
+
+  let best = null
+  for (let i = 0; i < N; i++) {
+    // Arc distance from centerLen to this segment's start, wrapped.
+    let segLen = cumLen[i] - centerLen
+    if (segLen >  totalPathLength / 2) segLen -= totalPathLength
+    if (segLen < -totalPathLength / 2) segLen += totalPathLength
+    if (Math.abs(segLen) > windowPx) continue
+
+    const a = points[i], b = points[i + 1]
+    const dx = b.x - a.x, dy = b.y - a.y
+    const lsq = dx * dx + dy * dy
+    if (lsq === 0) continue
+    const t  = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / lsq))
+    const nx = a.x + t * dx, ny = a.y + t * dy
+    const d  = Math.hypot(px - nx, py - ny)
+    if (!best || d < best.perpDist) {
+      best = { idx: i + t, x: nx, y: ny, perpDist: d }
+    }
+  }
+  return best
+}
+
+// Global nearest projection (whole path) — used only for the very first touch,
+// where there is no bead yet to search around.
+function projectGlobal(geo, px, py) {
+  const { points } = geo
+  const N = points.length - 1
+  let best = null
+  for (let i = 0; i < N; i++) {
+    const a = points[i], b = points[i + 1]
+    const dx = b.x - a.x, dy = b.y - a.y
+    const lsq = dx * dx + dy * dy
+    if (lsq === 0) continue
+    const t  = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / lsq))
+    const nx = a.x + t * dx, ny = a.y + t * dy
+    const d  = Math.hypot(px - nx, py - ny)
+    if (!best || d < best.perpDist) {
+      best = { idx: i + t, x: nx, y: ny, perpDist: d }
+    }
+  }
+  return best
+}
+
 // ── SquareCanvas ──────────────────────────────────────────────────────────────
 const SquareCanvas = forwardRef(function SquareCanvas(
   { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onGameStateTick, onResize, interactive },
@@ -325,9 +436,12 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const pacingStartRef       = useRef(null)    // clock for pacing circle — starts at mount
   const gameStartRef         = useRef(null)
   const startedRef           = useRef(false)
-  const touchRef             = useRef(false)
-  const childPosRef          = useRef(null)
-  const lastChildPos         = useRef(null)
+  const touchRef             = useRef(false)    // finger/mouse is down
+  const childPosRef          = useRef(null)     // bead pixel position {x,y,clx,cly,fraction}
+  // ── Groove tracing core state ──
+  const beadIdxRef           = useRef(null)     // bead position as a float index into geo.points
+  const fingerPosRef         = useRef(null)     // latest finger pixel pos {x,y}, set by pointer handlers
+  const tracingRef           = useRef(false)    // bead attached + following this frame (drives gauge/synergy)
   const lapCountRef          = useRef(0)   // laps completed — used only for encouragement gate
   const colorTimeRef         = useRef(0)   // ms of active tracing time — drives color drift
   const prevFracRef          = useRef(null)
@@ -336,7 +450,6 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const lastEncouragementMessageRef = useRef(null)   // anti-repeat memory — never pick this message twice in a row
   const encouragementRef            = useRef(null)
   const recoveredFromDysregRef      = useRef(false)  // set true when gaugeActive flips true→false; consumed by next encouragement
-  const lastMoveTimeRef      = useRef(0)
   const fpImgRef             = useRef(null)    // loaded Image object
   const fpImgReadyRef        = useRef(false)   // true once image has loaded
   const fingerprintActiveRef = useRef(true)             // true until first touch
@@ -404,7 +517,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       startedRef.current           = false
       touchRef.current             = false
       childPosRef.current          = null
-      lastChildPos.current         = null
+      beadIdxRef.current           = null
+      fingerPosRef.current         = null
+      tracingRef.current           = false
       prevFracRef.current          = null
       gameStartRef.current         = null
       // See START_AT_BREATH_PHASE — shift the reference time back so elapsed
@@ -481,94 +596,29 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     }
   }
 
-  // ── Project finger onto path ───────────────────────────────────────────────
-  // Returns the nearest centerline point plus fraction. Returns null if the
-  // touch is outside the acceptance zone (lw * 0.75 from centerline).
-  function project(px, py) {
-    const geo = geoRef.current
-    if (!geo) return null
-    const { points, lw } = geo
-    const N    = points.length - 1
-    let   best = { dist: Infinity, x: 0, y: 0, fraction: 0 }
-
-    for (let i = 0; i < N; i++) {
-      const a   = points[i]
-      const b   = points[i + 1]
-      const dx  = b.x - a.x
-      const dy  = b.y - a.y
-      const lsq = dx * dx + dy * dy
-      if (lsq === 0) continue
-      const t  = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / lsq))
-      const nx = a.x + t * dx
-      const ny = a.y + t * dy
-      const d  = Math.hypot(px - nx, py - ny)
-      if (d < best.dist) {
-        best = { dist: d, x: nx, y: ny, fraction: (i + t) / N * 4 }
-      }
-    }
-
-    // Reject touches outside the track acceptance zone
-    if (best.dist > lw * 0.75) return null
-
-    return {
-      dist:     best.dist,
-      x:        best.x,
-      y:        best.y,
-      clx:      best.x,
-      cly:      best.y,
-      fraction: best.fraction,
-    }
-  }
-
-  // ── advanceAlongPath ──────────────────────────────────────────────────────
-  // Given a starting fraction on the path (0–4) and a target fraction, return
-  // the position that is at most maxDist (CSS px) ahead of the start along the
-  // path. If the gap is within maxDist, returns the target unchanged. If it
-  // exceeds maxDist, walks forward and returns the capped position and fraction.
-  // Handles the wrap-around at fraction 4→0.
-  function advanceAlongPath(prevFrac, targetFrac, maxDist, points, totalPathLength) {
+  // ── paintBeadSegment ───────────────────────────────────────────────────────
+  // Paint the groove from one bead index to another by walking the intermediate
+  // path points, so the stroke follows corners exactly (no chord-cutting). The
+  // stroke modules interpolate stamps between successive points internally.
+  function paintBeadSegment(geo, fromIdx, toIdx) {
+    const { points } = geo
     const N = points.length - 1
+    const color = getDriftColor(colorTimeRef.current)
+    stampStroke.updateColor(color)
+    layeredWash.updateColor(color)
 
-    function fracToIndex(frac) {
-      return Math.round((frac / 4) * N)
+    const gap = arcGapPx(geo, fromIdx, toIdx)   // signed, short direction
+    const dir = gap >= 0 ? 1 : -1
+    let i   = Math.round(fromIdx)
+    const end = Math.round(toIdx)
+    let steps = 0
+    while (i !== end && steps < N) {
+      i = ((i + dir) % N + N) % N
+      addStrokePoint(points[i].x, points[i].y, 0)
+      steps++
     }
-
-    const prevIdx   = fracToIndex(prevFrac)
-    const targetIdx = fracToIndex(targetFrac)
-
-    // Handle forward wrap-around: if target appears behind prev in index space
-    // but the fraction difference is small and positive, adjust for wrap.
-    let idxDiff = targetIdx - prevIdx
-    if (idxDiff < -N / 2) idxDiff += N   // wrapped forward
-    if (idxDiff < 0) {
-      // Child moved backward — allow drift, don't cap forward advancement.
-      return { x: points[targetIdx % N].x, y: points[targetIdx % N].y, fraction: targetFrac }
-    }
-
-    // Measure actual path distance from prevIdx to targetIdx
-    let pathDist = 0
-    for (let i = prevIdx; i < prevIdx + idxDiff; i++) {
-      const a = points[i % N]
-      const b = points[(i + 1) % N]
-      pathDist += Math.hypot(b.x - a.x, b.y - a.y)
-      if (pathDist >= maxDist) {
-        // Hit the cap — return the position at exactly maxDist from prevIdx
-        const cappedIdx  = i % N
-        const cappedFrac = (cappedIdx / N) * 4
-        return { x: points[cappedIdx].x, y: points[cappedIdx].y, fraction: cappedFrac }
-      }
-    }
-
-    // Gap was within maxDist — return target unchanged
-    return { x: points[targetIdx % N].x, y: points[targetIdx % N].y, fraction: targetFrac }
-  }
-
-  // ── Lap detection ──────────────────────────────────────────────────────────
-  function checkLap(pos) {
-    if (!pos) return
-    const prev = prevFracRef.current
-    if (prev !== null && prev > 3.7 && pos.fraction < 0.3) onLapComplete()
-    prevFracRef.current = pos.fraction
+    const ep = pointAt(points, toIdx)
+    addStrokePoint(ep.x, ep.y, 0)
   }
 
   function onLapComplete() {
@@ -648,30 +698,42 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     return { x: src.clientX - rect.left, y: src.clientY - rect.top }
   }
 
-  function onPointerDown(px, py) {
-    if (!geoRef.current) return
+  // ── Pointer handlers ──────────────────────────────────────────────────────
+  // The handlers only record intent: where the finger is and whether it's down.
+  // ALL bead motion, painting, lap detection, and the gauge/synergy "tracing"
+  // signal are computed once per frame in the bead-update block of the rAF loop
+  // (using the latest finger position), so the feel is frame-rate independent
+  // and decoupled from pointer-event delivery rate.
 
-    const pos = project(px, py)
-    if (!pos) return   // outside acceptance zone — silent rejection
+  function onPointerDown(px, py) {
+    const geo = geoRef.current
+    if (!geo) return
+
+    fingerPosRef.current = { x: px, y: py }
 
     if (!startedRef.current) {
-      startedRef.current      = true
-      gameStartRef.current    = performance.now()
-      touchRef.current        = true
-      lastMoveTimeRef.current = performance.now()
+      // First touch must land on the path to begin. Global projection finds
+      // where on the groove the user started; the bead is placed there.
+      const proj = projectGlobal(geo, px, py)
+      if (!proj || proj.perpDist > geo.lw * ACCEPTANCE_TRACK_WIDTHS) return  // silent reject
+
+      startedRef.current   = true
+      gameStartRef.current = performance.now()
+      touchRef.current     = true
       onGameStart?.()
-      childPosRef.current  = pos
-      lastChildPos.current = pos
-      prevFracRef.current  = pos.fraction
-      addStrokePoint(pos.clx, pos.cly, 0)
+
+      beadIdxRef.current   = proj.idx
+      const frac           = fractionAt(geo, proj.idx)
+      prevFracRef.current  = frac
+      childPosRef.current  = { x: proj.x, y: proj.y, clx: proj.x, cly: proj.y, fraction: frac }
+      addStrokePoint(proj.x, proj.y, 0)
       startPressureRamp()
 
       fingerprintActiveRef.current = false
       fpDismissingRef.current      = true
       fpDismissTRef.current        = 0
       touchActiveRef.current       = true
-      lastTouchRef.current         = { x: pos.x, y: pos.y }
-
+      lastTouchRef.current         = { x: proj.x, y: proj.y }
       startBloomAttack()
 
       cancelAnimationFrame(dismissRafRef.current)
@@ -689,95 +751,28 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       dismissRafRef.current = requestAnimationFrame(dismissTick)
 
     } else {
-      touchRef.current        = true
-      lastMoveTimeRef.current = performance.now()
-      childPosRef.current     = pos
-      lastChildPos.current    = pos
-      prevFracRef.current     = pos.fraction
-      addStrokePoint(pos.clx, pos.cly, 0)
+      // Re-touch after a lift. Don't move the bead — the frame loop will
+      // re-attach it if the finger is within the groove's leash of where the
+      // bead froze. Just resume touch + restart the bloom/pressure feedback.
+      touchRef.current       = true
       startPressureRamp()
-
       touchActiveRef.current = true
       bloomFadingRef.current = false
       bloomFadeRef.current   = 1
       cancelAnimationFrame(bloomFadeRafRef.current)
-      lastTouchRef.current   = { x: pos.x, y: pos.y }
-
       startBloomAttack()
     }
   }
 
   function onPointerMove(px, py) {
-    if (!startedRef.current || !touchRef.current) return
-    const last = lastChildPos.current
-    if (last && Math.hypot(px - last.x, py - last.y) < 0.5) return
-
-    const now  = performance.now()
-    const dt   = now - lastMoveTimeRef.current
-    const dist = last ? Math.hypot(px - last.x, py - last.y) : 0
-    const vel  = dt > 0 ? dist / dt : 0
-    lastMoveTimeRef.current = now
-
-    const prevFrac = prevFracRef.current  // capture before checkLap overwrites it
-
-    const pos = project(px, py)
-    childPosRef.current  = pos
-    lastChildPos.current = pos
-    checkLap(pos)
-
-    if (pos && prevFrac !== null && dt > 0) {
-      let dfrac = pos.fraction - prevFrac
-      if (dfrac < -2) dfrac += 4   // forward lap wrap
-      if (dfrac >= 0) {
-        childPathRateRef.current = childPathRateRef.current * 0.5 + (dfrac / dt) * 0.5
-      }
-    }
-
-    if (pos) {
-      const geo        = geoRef.current
-      const maxAdvance = geo.lw * MAX_PATH_ADVANCE_MULT
-
-      // Cap path advancement — prevents corner-cut stamp gaps.
-      // Uses prevFrac (captured before checkLap overwrote prevFracRef).
-      const capped = advanceAlongPath(
-        prevFrac,
-        pos.fraction,
-        maxAdvance,
-        geo.points,
-        geo.totalPathLength,
-      )
-      const paintX = capped.x
-      const paintY = capped.y
-
-      // Update refs with capped values so the next event caps from here
-      childPosRef.current = { x: paintX, y: paintY, clx: paintX, cly: paintY, fraction: capped.fraction }
-      prevFracRef.current = capped.fraction
-
-      const color = getDriftColor(colorTimeRef.current)
-      stampStroke.updateColor(color)
-      layeredWash.updateColor(color)
-      addStrokePoint(paintX, paintY, vel)
-
-      // Speed + tangent — capture prev before overwriting
-      const prevTouch = lastTouchRef.current
-      lastTouchRef.current = { x: paintX, y: paintY }
-
-      const moveDt = now - lastTouchTimeRef.current
-      if (moveDt > 0 && moveDt < 100) {
-        const dx = pos.x - prevTouch.x
-        const dy = pos.y - prevTouch.y
-        const rawSpeed = Math.hypot(dx, dy) / moveDt
-        fingerSpeedRef.current = fingerSpeedRef.current * 0.7 + rawSpeed * 0.3
-        const len = Math.hypot(dx, dy)
-        if (len > 0.5) trackTangentRef.current = { x: dx / len, y: dy / len }
-      }
-      lastTouchTimeRef.current = now
-    }
+    if (!touchRef.current) return
+    fingerPosRef.current = { x: px, y: py }
   }
 
   function onPointerUp() {
     touchRef.current         = false
     touchActiveRef.current   = false
+    tracingRef.current       = false
     particleFrameRef.current = 0
     childPathRateRef.current = 0
     stampStroke.lift()
@@ -1009,10 +1004,68 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const pacingPos = getPacing(now - pacingStartRef.current)
       if (pacingPos) pacingPosRef.current = pacingPos
 
+      // ── Bead tracing core ─────────────────────────────────────────────────
+      // Move the bead toward the finger along the groove, or freeze it if the
+      // finger has left the leash/acceptance window. tracingRef is the single
+      // "actively tracing" signal the gauge + synergy consume as their
+      // "touching" input: attached → systems evaluate live; detached (lift,
+      // off-track, or leash-snap) → systems drain toward default.
+      tracingRef.current = false
+      if (startedRef.current && touchRef.current && fingerPosRef.current && beadIdxRef.current !== null) {
+        const fp       = fingerPosRef.current
+        const leashPx  = geo.lw * LEASH_TRACK_WIDTHS
+        const acceptPx = geo.lw * ACCEPTANCE_TRACK_WIDTHS
+        const proj     = projectLocal(geo, beadIdxRef.current, fp.x, fp.y, leashPx)
+
+        if (proj && proj.perpDist <= acceptPx) {
+          // Attached — advance the bead to the finger's projection.
+          const prevIdx = beadIdxRef.current
+          const newIdx  = proj.idx
+          const newFrac = fractionAt(geo, newIdx)
+
+          // Bead arc-velocity (fraction-units/ms), smoothed — gauge speedRatio.
+          const gapFrac = (arcGapPx(geo, prevIdx, newIdx) / geo.totalPathLength) * geo.sides
+          if (dt > 0) {
+            childPathRateRef.current = childPathRateRef.current * 0.5 + (Math.abs(gapFrac) / dt) * 0.5
+          }
+
+          // Paint the groove between old and new bead index (corner-correct).
+          paintBeadSegment(geo, prevIdx, newIdx)
+
+          // Commit bead position before lap detection (onLapComplete reads it).
+          beadIdxRef.current  = newIdx
+          childPosRef.current = { x: proj.x, y: proj.y, clx: proj.x, cly: proj.y, fraction: newFrac }
+
+          // Lap detection on the bead fraction wrap.
+          const prevFrac = prevFracRef.current
+          if (prevFrac !== null && prevFrac > geo.sides - 0.3 && newFrac < 0.3) onLapComplete()
+          prevFracRef.current = newFrac
+
+          // Feed bloom/particle trackers from bead motion.
+          const prevTouch = lastTouchRef.current
+          lastTouchRef.current = { x: proj.x, y: proj.y }
+          if (prevTouch) {
+            const ddx = proj.x - prevTouch.x, ddy = proj.y - prevTouch.y
+            const len = Math.hypot(ddx, ddy)
+            if (len > 0.5) {
+              trackTangentRef.current = { x: ddx / len, y: ddy / len }
+              if (dt > 0) fingerSpeedRef.current = fingerSpeedRef.current * 0.7 + (len / dt) * 0.3
+              lastTouchTimeRef.current = now   // particle speed-decay gate
+            }
+          }
+
+          tracingRef.current = true
+        }
+      }
+      if (!tracingRef.current) {
+        // Not attached — bead frozen; path rate decays so the gauge reads good pace.
+        childPathRateRef.current = 0
+      }
+
       // ── Color drift ───────────────────────────────────────────────────────
-      // Advance timer only while finger is on track; compute color every frame
+      // Advance timer only while actively tracing; compute color every frame
       // so stamps always use the current drifted value.
-      if (startedRef.current && touchRef.current) {
+      if (tracingRef.current) {
         colorTimeRef.current += dt
       }
       if (startedRef.current) {
@@ -1032,7 +1085,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
 
         const r = gaugeMachineRef.current.update(dt, {
           speedRatio,
-          touching: touchRef.current,
+          touching: tracingRef.current,   // attached-and-tracing, not merely finger-down
         })
 
         // Bridge the result out to the refs the draw code + snapshot read.
@@ -1073,7 +1126,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           inPace = speedRatio <= GAUGE_SPEED_THRESHOLD
         }
         synergyStageRef.current = synergyMachineRef.current.update(dt, {
-          touching:    touchRef.current,
+          touching:    tracingRef.current,   // attached-and-tracing, not merely finger-down
           gaugeActive: gaugeActiveRef.current,
           canEvaluate,
           close,
