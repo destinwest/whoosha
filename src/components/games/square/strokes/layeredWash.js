@@ -4,7 +4,7 @@
 // and alpha. Velocity EMA drives opacity and stroke weight. Catmull-Rom spline
 // smoothing for organic curves.
 //
-// These canvases are separate from the shared taperedStroke paint canvas.
+// These canvases are separate from the shared stampStroke paint canvas.
 // The annular clip is applied to each layer canvas internally on init().
 // clear() uses clearRect (NOT canvas.width reassignment) so the clip persists.
 //
