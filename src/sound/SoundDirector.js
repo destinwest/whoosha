@@ -115,12 +115,25 @@ const TC_RUMBLE  = 0.12
 // micro-modulation of already-stable params.
 const RESCHEDULE_EPS = 0.005
 
+// ── Shared AudioContext singleton ──────────────────────────────────────────
+// One AudioContext for the app's lifetime, created lazily and reused across
+// every game session. Browsers cap AudioContexts per page (~4 on iOS Safari)
+// and don't reliably release closed ones, so creating a fresh context per
+// game-mount risks permanently breaking audio after a handful of entries.
+// We create exactly one and SUSPEND (never close) it between games.
+let _sharedCtx = null
+function getSharedAudioContext() {
+  if (!_sharedCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext  // webkit prefix for older Safari
+    _sharedCtx = new Ctx()
+  }
+  return _sharedCtx
+}
+
 export default class SoundDirector {
   constructor() {
-    // Use webkit prefix for Safari < 14.5 compatibility, though our floor is
-    // iOS 14+ (iPhone 12 era). Defensive.
-    const Ctx = window.AudioContext || window.webkitAudioContext
-    this.ctx = new Ctx()
+    // Reuse the app-lifetime shared context (see getSharedAudioContext).
+    this.ctx = getSharedAudioContext()
 
     // Master compressor — gentle safety net. Ratio 2:1, soft knee, slow attack
     // so transients aren't squashed; release medium to recover gracefully.
@@ -214,22 +227,42 @@ export default class SoundDirector {
     this._bowlProgress       = 0
     this._lastUpdateAudioTime = null  // for dt computation in update()
 
-    // ── Lifecycle: suspend on hidden tab, resume on visible ──
-    // On resume we ALSO replay the silent-buffer kick — iOS sometimes
-    // leaves the context in a state where ctx.resume() succeeds but no
-    // audio actually reaches the speaker until something is played. This
-    // is the suspected root of the intermittent "audio disappears after
-    // headphones plugged/unplugged on iOS" problem: plugging in headphones
-    // often involves backgrounding/foregrounding the app, which used to
-    // resume() without re-kicking the AudioSession.
-    this._onVisibilityChange = () => {
-      if (!this._unlocked) return
-      if (document.hidden) {
-        this.ctx.suspend().catch(() => {})
-      } else {
-        this.ctx.resume().catch(() => {})
-        this._playSilentBuffer()
+    // True once the context has entered iOS Safari's non-standard
+    // 'interrupted' state since the last successful (re)build. When that
+    // happens, iOS has STOPPED every playing source node (buffer sources +
+    // oscillators), and they are one-shot — resume() alone restores the
+    // context clock but not the dead sources. So on recovery we must rebuild
+    // the source graph. Desktop uses 'suspended' (not 'interrupted') and
+    // keeps its sources alive, so this stays false there and no rebuild fires.
+    this._sawInterrupted = false
+
+    // ── Lifecycle: statechange-driven interruption recovery ──
+    // statechange reflects the actual audio-engine state — the correct signal
+    // for catching iOS audio-session interruptions (background, phone call,
+    // another app grabbing audio), including ones that don't change tab
+    // visibility. We do NOT suspend on hidden ourselves: letting iOS produce
+    // its 'interrupted' state keeps the recovery signal clean, and a
+    // backgrounded desktop tab is auto-throttled by the browser anyway.
+    this._onStateChange = () => {
+      const state = this.ctx.state
+      if (state === 'interrupted') {
+        this._sawInterrupted = true
+      } else if (state === 'running' && this._sawInterrupted && this._started && !this._disposed) {
+        // Recovered from an iOS interruption — the source nodes died. Rebuild.
+        this._sawInterrupted = false
+        this.rebuildSources()
       }
+    }
+    this.ctx.addEventListener('statechange', this._onStateChange)
+
+    // ── Visibility: nudge the context back to running on foreground ──
+    // On return to foreground we resume() (iOS needs this to move out of
+    // 'interrupted' → 'running', which then triggers _onStateChange's rebuild)
+    // and replay the silent-buffer kick to re-engage the iOS AudioSession.
+    this._onVisibilityChange = () => {
+      if (!this._unlocked || document.hidden) return
+      this.ctx.resume().catch(() => {})
+      this._playSilentBuffer()
     }
     document.addEventListener('visibilitychange', this._onVisibilityChange)
 
@@ -366,52 +399,40 @@ export default class SoundDirector {
     this._started   = true
     this._mutedGain = targetGain
 
-    // One-time noise buffer generation. Synchronous (~50ms on a phone) but
-    // we're inside a user-gesture-adjacent path (post-intro), not on the
-    // critical path of the first paint, so it's fine.
+    this._buildSources()
+
+    if (this._muted) return  // user is muted; un-mute will restore via setMuted's ramp
+    const now = this.ctx.currentTime
+    this.masterGain.gain.cancelScheduledValues(now)
+    this.masterGain.gain.setValueAtTime(targetGain, now)
+  }
+
+  // ── _buildSources ───────────────────────────────────────────────────────
+  // Creates the source modules (breath, bowl, reverb sends, sampled bed) and
+  // connects them to the persistent bus spine. Separated from startAmbient so
+  // it can be re-run by rebuildSources() after an iOS interruption kills the
+  // source nodes. Does NOT touch master gain — the caller owns that.
+  _buildSources() {
+    // One-time noise buffer generation (~50ms). Kept across rebuilds.
     if (!this._noiseBufs) {
       this._noiseBufs = createNoiseBuffers(this.ctx)
     }
 
-    // Spin up the ambient modules.
+    const gen = this._buildGen = (this._buildGen || 0) + 1
+
     //   breath  — inhale/exhale textures locked to breathPhase. Routes
     //             through ambientBus → ambientLowpass → ambientLevel → master.
-    //   rumble  — DISABLED. Previously appeared during dysregulation; read
-    //             as a penalty rather than a co-regulating cue. Lines below
-    //             commented out; the rumbleBus infrastructure remains in
-    //             place for possible future re-introduction.
     //   bowl    — synergy reward, partials fade in stage by stage.
-    //   ambient — sampled forest-meadow bed, loaded async. Routes through
-    //             its own ambientBedGain → master (NOT through ambientBus)
-    //             so it can duck independently of the breath path.
+    //   ambient — sampled forest-meadow bed, loaded async, → ambientBedGain.
+    //   (rumble is disabled; rumbleBus infrastructure remains for the future.)
     this._breath = createBreath(this.ctx, this._noiseBufs.pink)
     this._breath.output.connect(this.ambientBus)  // dry path
 
-    // Rumble disabled — uncomment to re-enable.
-    // this._rumble = createRumble(this.ctx)
-    // this._rumble.output.connect(this.rumbleBus)
-
-    // Synergy bowl — fades in stage by stage as the user maintains close
-    // pacing. See synthBowl.js for the four variants and per-partial
-    // tunables. Disposal is handled via this._bowl?.dispose() in dispose().
     this._bowl = createBowl(this.ctx)
     this._bowl.output.connect(this.synergyBus)
 
-    // Reverb sends: both the breath and the bowl route through wet sends
-    // into the same reverb, which returns to the ambient bus. Both layers
-    // share the same acoustic space (the forest's reflections):
-    //
-    //   breath.output ─┬──────────────────────────────────► ambientBus (dry)
-    //                  └─► reverbSend (0.35) ─►┐
-    //                                          ├─► reverb ─► ambientBus (wet)
-    //   bowl.output ─► synergyBus ──┬─────────► master      │
-    //                               └─► bowlReverbSend (0.75) ──────┘
-    //
-    // Bowl wet branches from synergyBus (NOT bowl.output directly), so the
-    // wet signal is also gated by the bowlProgress-driven bus gain. Result:
-    // both dry and wet stay silent until bowl progress begins after the
-    // user reaches synergy stage 4, and both ramp together over the
-    // BOWL_BUILDUP_MS window.
+    // Reverb sends: breath (dry to ambientBus, wet via reverbSend) and bowl
+    // (wet via bowlReverbSend off synergyBus) share one reverb → ambientBus.
     this._reverb = createReverb(this.ctx)
     this._reverb.output.connect(this.ambientBus)
 
@@ -425,14 +446,15 @@ export default class SoundDirector {
     this.synergyBus.connect(this._bowlReverbSend)
     this._bowlReverbSend.connect(this._reverb.input)
 
-    // Ambient bed loads asynchronously (fetch + decode). Fire and forget;
-    // the synth breath plays immediately, and the ambient swells in once
-    // the file is ready (typically 100–500ms). The promise can resolve
-    // AFTER dispose() in the worst case (user backs out of the game during
-    // a slow first load), so we check _disposed and clean up if so.
+    // synergyBus starts silent; update() ramps it from bowl progress.
+    this.synergyBus.gain.value = 0
+
+    // Ambient bed loads asynchronously (fetch + decode; cached after first
+    // load). The `gen` guard drops the result if a dispose or a newer
+    // _buildSources (rebuild) happened while this promise was in flight.
     createAmbient(this.ctx)
       .then((ambient) => {
-        if (this._disposed) {
+        if (this._disposed || gen !== this._buildGen) {
           ambient.dispose()
           return
         }
@@ -440,23 +462,46 @@ export default class SoundDirector {
         ambient.output.connect(this.ambientBedGain)
       })
       .catch((err) => {
-        // Non-fatal: the game works without the ambient bed. Capture so
-        // delivery failures show up in observability, not the user's
-        // browser console.
         if (typeof window !== 'undefined' && window.Sentry) {
           window.Sentry.captureException(err, { tags: { area: 'ambient-load' } })
         }
       })
+  }
 
-    // synergyBus starts silent (gain 0). update() ramps it up the moment
-    // synergyStage > 0, modulated also by breathPhase for the gentle
-    // breath-locked swell.
-    this.synergyBus.gain.value = 0
+  // ── _disposeSources ─────────────────────────────────────────────────────
+  // Stops + disconnects the source modules and reverb sends, leaving the
+  // persistent bus spine intact. Used by both rebuildSources and dispose.
+  _disposeSources() {
+    this._breath?.dispose()
+    this._rumble?.dispose()
+    this._bowl?.dispose()
+    this._ambient?.dispose()
+    this._reverb?.dispose()
+    try { this._reverbSend?.disconnect()     } catch (e) { /* already disconnected */ }
+    try { this._bowlReverbSend?.disconnect() } catch (e) { /* already disconnected */ }
+    this._breath = this._rumble = this._bowl = this._ambient = null
+    this._reverb = this._reverbSend = this._bowlReverbSend = null
+  }
 
-    if (this._muted) return  // user is muted; un-mute will restore via setMuted's ramp
+  // ── rebuildSources ──────────────────────────────────────────────────────
+  // Called by the statechange handler after recovering from an iOS
+  // 'interrupted' state, which silently kills every playing source node.
+  // Tears down the dead sources and respawns them on the surviving context
+  // and buses, then restores the master gain so audio returns automatically
+  // — the in-session equivalent of the old "exit and re-enter the game" fix.
+  rebuildSources() {
+    if (this._disposed || !this._started) return
+    this._disposeSources()
+    // Reset per-frame throttle trackers + bowl progress so update() re-applies
+    // cleanly and the bowl re-emerges gently rather than snapping to full.
+    this._lastSynergy    = 0
+    this._lastBreathDuck = 1
+    this._bowlProgress   = 0
+    this._buildSources()
+    if (this._muted) return
     const now = this.ctx.currentTime
     this.masterGain.gain.cancelScheduledValues(now)
-    this.masterGain.gain.setValueAtTime(targetGain, now)
+    this.masterGain.gain.setValueAtTime(this._mutedGain, now)
   }
 
   // ── update ────────────────────────────────────────────────────────────────
@@ -576,29 +621,27 @@ export default class SoundDirector {
   }
 
   // ── dispose ───────────────────────────────────────────────────────────────
-  // Idempotent cleanup. Stops all synth modules, closes the AudioContext
-  // (which releases the audio thread + cancels every scheduled event), and
-  // removes lifecycle listeners.
+  // Idempotent cleanup for a game session. Stops + disconnects the sources and
+  // this director's bus spine, removes lifecycle listeners, and SUSPENDS (does
+  // NOT close) the shared AudioContext — the context is an app-lifetime
+  // singleton reused by the next game (see getSharedAudioContext). Closing it
+  // here would risk the per-page AudioContext limit on repeated entry/exit.
   dispose() {
     this._disposed = true
+    this._started  = false
     document.removeEventListener('visibilitychange', this._onVisibilityChange)
+    this.ctx.removeEventListener('statechange', this._onStateChange)
     this._unlockEventTypes?.forEach((ev) => {
       document.removeEventListener(ev, this._unlockListener)
     })
-    this._breath?.dispose()
-    this._rumble?.dispose()
-    this._bowl?.dispose()
-    this._ambient?.dispose()
-    this._reverb?.dispose()
-    try { this._reverbSend?.disconnect()     } catch (e) { /* already disconnected */ }
-    try { this._bowlReverbSend?.disconnect() } catch (e) { /* already disconnected */ }
-    try { this.ambientBedGain.disconnect()   } catch (e) { /* already disconnected */ }
-    this._breath = this._rumble = this._bowl = this._ambient = null
-    this._reverb = this._reverbSend = this._bowlReverbSend = null
-    try { this.masterGain.disconnect() } catch (e) { /* already disconnected */ }
-    try { this.compressor.disconnect()  } catch (e) { /* already disconnected */ }
-    if (this.ctx.state !== 'closed') {
-      this.ctx.close().catch(() => {})
+    this._disposeSources()
+    try { this.ambientBedGain.disconnect() } catch (e) { /* already disconnected */ }
+    try { this.masterGain.disconnect()     } catch (e) { /* already disconnected */ }
+    try { this.compressor.disconnect()     } catch (e) { /* already disconnected */ }
+    // Suspend (not close) so the singleton context survives for the next game
+    // while releasing the audio thread between sessions.
+    if (this.ctx.state === 'running') {
+      this.ctx.suspend().catch(() => {})
     }
   }
 }
