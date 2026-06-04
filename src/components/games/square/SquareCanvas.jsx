@@ -57,6 +57,13 @@ const COLOR_CYCLE_MS = 72_000
 const LEASH_TRACK_WIDTHS      = 1.4   // finger↔bead max arc-distance, in track widths
 const ACCEPTANCE_TRACK_WIDTHS = 0.75  // finger↔groove max perpendicular distance, in track widths
 
+// Lap validity: a seam crossing only counts as a lap if, since the last lap,
+// the bead has progressed at least this fraction of the way around the loop
+// (a checkpoint just past the seam-bounce zone). Prevents wiggling across the
+// seam from inflating the lap count. Detected by a forward crossing of the
+// checkpoint fraction, so merely being near the seam can't trip it.
+const LAP_MIN_PROGRESS = 0.15   // 15% of a lap
+
 // ── Heat gauge tuning ─────────────────────────────────────────────────────────
 // Consumed by the shared createHeatGauge state machine (see _shared/heatGauge).
 // speedThreshold is also referenced directly by the synergy block below, so
@@ -449,6 +456,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const lastEncouragementRef        = useRef(-Infinity)
   const lastEncouragementMessageRef = useRef(null)   // anti-repeat memory — never pick this message twice in a row
   const encouragementRef            = useRef(null)
+  const passedLapCheckpointRef      = useRef(false)  // bead crossed LAP_MIN_PROGRESS forward since last lap
   const recoveredFromDysregRef      = useRef(false)  // set true when gaugeActive flips true→false; consumed by next encouragement
   const fpImgRef             = useRef(null)    // loaded Image object
   const fpImgReadyRef        = useRef(false)   // true once image has loaded
@@ -530,6 +538,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       lastEncouragementRef.current        = -Infinity
       lastEncouragementMessageRef.current = null
       encouragementRef.current            = null
+      passedLapCheckpointRef.current      = false
       recoveredFromDysregRef.current      = false
 
       // Restore fingerprint; clear bloom
@@ -609,8 +618,13 @@ const SquareCanvas = forwardRef(function SquareCanvas(
 
     const gap = arcGapPx(geo, fromIdx, toIdx)   // signed, short direction
     const dir = gap >= 0 ? 1 : -1
-    let i   = Math.round(fromIdx)
-    const end = Math.round(toIdx)
+    // Normalize both ends into [0, N-1]. Math.round(toIdx) can equal N (at the
+    // seam, when toIdx ≥ N-0.5), but the walked index lives in [0, N-1], so an
+    // un-normalized `end === N` never matches → the loop would run all N steps
+    // and paint the ENTIRE track. points[N] === points[0] geometrically, so
+    // mapping N → 0 is correct.
+    let i     = Math.round(fromIdx) % N
+    const end = Math.round(toIdx) % N
     let steps = 0
     while (i !== end && steps < N) {
       i = ((i + dir) % N + N) % N
@@ -1036,9 +1050,26 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           beadIdxRef.current  = newIdx
           childPosRef.current = { x: proj.x, y: proj.y, clx: proj.x, cly: proj.y, fraction: newFrac }
 
-          // Lap detection on the bead fraction wrap.
-          const prevFrac = prevFracRef.current
-          if (prevFrac !== null && prevFrac > geo.sides - 0.3 && newFrac < 0.3) onLapComplete()
+          // Lap detection. A seam crossing (high fraction → low fraction)
+          // only counts once the bead has progressed past the lap checkpoint
+          // forward since the previous lap — so wiggling across the seam can't
+          // inflate the count. The checkpoint flag is set by a *forward
+          // crossing* of LAP_MIN_PROGRESS·sides (not by merely being beyond
+          // it, which would be true near the seam too).
+          const prevFrac     = prevFracRef.current
+          const checkpoint   = LAP_MIN_PROGRESS * geo.sides
+          if (prevFrac !== null && prevFrac < checkpoint && newFrac >= checkpoint) {
+            passedLapCheckpointRef.current = true
+          }
+          if (
+            prevFrac !== null &&
+            prevFrac > geo.sides - 0.3 &&
+            newFrac < 0.3 &&
+            passedLapCheckpointRef.current
+          ) {
+            onLapComplete()
+            passedLapCheckpointRef.current = false
+          }
           prevFracRef.current = newFrac
 
           // Feed bloom/particle trackers from bead motion.
@@ -1339,9 +1370,14 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       // ── 7. Encouragement moment ───────────────────────────────────────────
       const enc = encouragementRef.current
       if (enc) {
-        const t = (now - enc.startTime) / 2_000
+        const t = (now - enc.startTime) / 2_600   // total lifetime (ms)
         if (t < 1) {
-          const alpha = 1 - t
+          // Envelope: ease in (0→18%), hold (18→35%), ease out (35→100%).
+          // smoothstep on each ramp keeps the bloom gentle at both ends.
+          let alpha
+          if      (t < 0.18) alpha = smoothstep(t / 0.18)
+          else if (t < 0.35) alpha = 1
+          else               alpha = smoothstep(1 - (t - 0.35) / 0.65)
           const glowR = half * 1.2
           const grad  = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
           grad.addColorStop(0, `rgba(212,160,86,${(alpha * 0.3).toFixed(3)})`)
