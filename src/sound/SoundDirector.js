@@ -29,6 +29,16 @@ import { createReverb }       from './reverb'
 
 const RAMP_FAST = 0.05  // 50ms — for mute toggles
 
+// ── Interruption recovery pump ──
+// After an iOS interruption the context often lands in 'suspended', and a
+// single resume() right after the app returns to the foreground doesn't take
+// (the audio session hasn't finished tearing down the interruption). Rather
+// than force the user to tap, we retry resume() on a short interval until the
+// context reports 'running'. Capped so the timer can't spin forever if recovery
+// genuinely needs a user gesture — the next touch on the game restarts it.
+const RECOVERY_INTERVAL_MS  = 400
+const RECOVERY_MAX_ATTEMPTS = 40   // ~16s of retrying while the page is visible
+
 // ── Dysregulation modulation targets ──
 // gaugeEffect (0 → ~0.9) drives all of these. Maxima are calibrated against
 // the gauge's effective range, not its theoretical 0–1.
@@ -184,6 +194,11 @@ export default class SoundDirector {
     // keeps its sources alive, so this stays false there and no rebuild fires.
     this._sawInterrupted = false
 
+    // setInterval handle + attempt counter for the post-interruption resume
+    // pump (see _startRecoveryPump). null when no recovery is in progress.
+    this._recoveryTimer    = null
+    this._recoveryAttempts = 0
+
     // ── TEMP audio-lifecycle debug log ──
     // Ring buffer of {t, event, state} for the on-screen AudioDebugOverlay so
     // we can see exactly what iOS does through a background/return. Remove
@@ -204,22 +219,36 @@ export default class SoundDirector {
       this._record('state:' + state)
       if (this._disposed) return
       if (state === 'interrupted') {
+        // iOS Safari interruption (screen lock, phone call, app background).
+        // Every playing source node (buffer sources + oscillators) is now dead
+        // and one-shot — resume() restores the context clock but NOT the
+        // sources. Crucially we must NOT respawn them until the context is
+        // 'running' again (see the 'running' branch below): a source started
+        // against a non-running context after an interruption is silently
+        // dropped by iOS. That is exactly why the old in-place rebuild reached
+        // 'running' but stayed SILENT, while exit-and-re-enter — which builds
+        // sources only after navigation gestures have resumed the context —
+        // worked. So here we just record the interruption and wait for running.
         this._sawInterrupted = true
       } else if (state === 'running' && this._sawInterrupted && this._started) {
-        // Auto-recovered to running (the common plain lock/unlock path): the
-        // one-shot source nodes died but the context itself is fine — just
-        // rebuild the sources on it.
+        // Context is live again — NOW it is safe to respawn the dead sources.
+        // This is the single recovery point: every path (auto-return, the
+        // resume pump, a user gesture) funnels the context to 'running' and
+        // lets THIS branch do the rebuild, so sources are always born on a
+        // running clock and actually produce sound.
         this._sawInterrupted = false
+        this._stopRecoveryPump()
         this._record('->rebuild')
         this.rebuildSources()
       } else if (state === 'suspended' && this._sawInterrupted && this._started) {
-        // Interruption resolved to 'suspended' rather than auto-returning to
-        // 'running'. A suspended context can only be resumed from a user
-        // gesture, so we can't recover here — leave _sawInterrupted set and let
-        // the next unlock() do resume + a full in-place graph rebuild
-        // (recoverGraph). This covers BOTH a plain lock that stuck at suspended
-        // and route-change corruption (headphone pulled mid-session).
-        this._record('->awaitGestureRecover')
+        // Interruption resolved to 'suspended' instead of auto-returning to
+        // 'running'. Drive it back to 'running' with the recovery pump (a
+        // retried resume + silent-buffer kick); the 'running' branch above then
+        // respawns the sources. We deliberately do NOT build sources here —
+        // they would be born dead. The pump no-ops while backgrounded and is
+        // (re)started on the next 'visible' event or user gesture.
+        this._record('->pumpResume')
+        this._startRecoveryPump()
       }
     }
     this.ctx.addEventListener('statechange', this._onStateChange)
@@ -234,16 +263,25 @@ export default class SoundDirector {
     // suspend happens with _sawInterrupted=false, the statechange handler's
     // 'suspended' branch ignores it (no false recreate).
     //
-    // On visible: resume() (iOS needs this to move 'interrupted' → 'running',
-    // which triggers the rebuild; and it un-suspends our tab-switch suspend)
-    // and replay the silent-buffer kick to re-engage the iOS AudioSession.
+    // On visible: if an interruption killed our sources, start the recovery
+    // pump to drive the context back to 'running' (the statechange 'running'
+    // branch then respawns the sources). No user gesture required — and if iOS
+    // refuses a gesture-free resume, the next natural touch on the game carries
+    // it (unlock() pumps too). For a plain tab-switch suspend, just resume +
+    // silent-buffer kick suffices.
     this._onVisibilityChange = () => {
       this._record(document.hidden ? 'hidden' : 'visible')
       if (!this._unlocked) return
       if (document.hidden) {
+        this._stopRecoveryPump()
         if (this.ctx.state === 'running') {
           this.ctx.suspend().catch(() => {})
         }
+        return
+      }
+      if (this._sawInterrupted && this._started && !this._disposed) {
+        this._record('->visibleRecover')
+        this._startRecoveryPump()
         return
       }
       this.ctx.resume().catch(() => {})
@@ -396,23 +434,22 @@ export default class SoundDirector {
   unlock() {
     this._record('unlock')
 
-    // If an interruption left the context unrecovered (it landed in 'suspended'
-    // instead of auto-returning to 'running'), THIS gesture is our chance to
-    // recover: resume + a full in-place graph rebuild. A suspended context can
-    // only be resumed from inside a user gesture.
-    if (this._sawInterrupted && this._started && !this._disposed) {
-      this.recoverGraph()
-      this._unlocked = true
-      return
-    }
-
     // Silent-buffer kick (see _playSilentBuffer). Essential on iOS.
     this._playSilentBuffer()
 
-    // Always attempt resume; the previous early-return blocked retries
-    // when the first attempt didn't actually unlock the context.
-    if (this.ctx.state === 'suspended') {
+    // Always attempt resume from inside the gesture — a user gesture is the
+    // strongest signal iOS accepts for leaving 'suspended'/'interrupted', and
+    // the gesture credit is consumed at call time, not at promise resolution.
+    if (this.ctx.state !== 'running') {
       this.ctx.resume().catch(() => {})
+    }
+
+    // If an interruption killed the sources, keep nudging the context toward
+    // 'running' until the statechange handler confirms it and respawns them.
+    // We deliberately do NOT rebuild sources here: building them before the
+    // context is 'running' is what produced the silent-at-running failure.
+    if (this._sawInterrupted && this._started && !this._disposed) {
+      this._startRecoveryPump()
     }
 
     // Marker for the visibilitychange handler — once flipped to true it
@@ -571,20 +608,22 @@ export default class SoundDirector {
   // ── recoverGraph ────────────────────────────────────────────────────────────
   // In-place full graph rebuild on the SAME AudioContext: tears down the source
   // modules AND the bus spine, rebuilds both, resumes, and restores master gain.
-  // This is the programmatic equivalent of exit-and-re-enter (which reuses the
-  // singleton context and rebuilds its whole graph) — the only recovery proven
-  // to work on iOS for a context stuck in 'suspended' after an interruption, and
-  // for route-change corruption (headphone pulled mid-session).
+  //
+  // NOTE: this is NO LONGER on the lock/unlock interruption path. It rebuilds
+  // sources synchronously right after ctx.resume() — i.e. while the context is
+  // still 'suspended' — which is precisely the "born-dead sources" bug that left
+  // the context 'running' but silent. The interruption path now defers source
+  // rebuilding to the statechange 'running' branch (via the recovery pump), so
+  // sources are only ever started on a live context.
+  //
+  // Retained as a manual heavy hammer for bus-spine corruption (e.g. a route
+  // change / headphone pull that breaks the master→destination path, which a
+  // sources-only rebuild can't fix). If it's ever rewired to the interruption
+  // path, move its _buildSources() call into the 'running' branch too.
   //
   // We deliberately do NOT create a new AudioContext: a fresh context started
   // mid-interruption does not reliably bind to the iOS audio session (and an
   // un-awaited close() race was the source of the "Lock was stolen" AbortError).
-  // Rebuilding the bus spine — not just the sources — is what restores the
-  // master→destination path a route change corrupts, which a sources-only
-  // rebuild misses.
-  //
-  // MUST be called from inside a user gesture (unlock): a 'suspended' context
-  // can only be resumed by a gesture.
   recoverGraph() {
     if (this._disposed || !this._started) return
     this._record('recoverGraph')
@@ -622,6 +661,46 @@ export default class SoundDirector {
     const now = this.ctx.currentTime
     this.masterGain.gain.cancelScheduledValues(now)
     this.masterGain.gain.setValueAtTime(this._mutedGain, now)
+  }
+
+  // ── _startRecoveryPump / _stopRecoveryPump ──────────────────────────────────
+  // The automatic, gesture-free half of interruption recovery. After an iOS
+  // interruption leaves the context 'suspended', this retries resume() (plus the
+  // silent-buffer kick) on a short interval until the context reports 'running'.
+  // Reaching 'running' fires the statechange handler's 'running' branch, which
+  // respawns the interruption-killed sources on the now-live context — so audio
+  // returns WITHOUT a user gesture. If iOS refuses the gesture-free resume, the
+  // pump simply keeps trying (capped); the user's next natural touch on the game
+  // calls unlock(), whose in-gesture resume reaches 'running' and triggers the
+  // same rebuild. Either way, sources are only ever built on a running context.
+  _startRecoveryPump() {
+    if (this._disposed || this._recoveryTimer || document.hidden) return
+    if (this.ctx.state === 'running') return
+    this._record('pumpStart')
+    this._recoveryAttempts = 0
+    const tick = () => {
+      this._recoveryAttempts++
+      // Stop once we're disposed, backgrounded, recovered, or out of attempts.
+      // (On 'running' the statechange handler also calls _stopRecoveryPump; the
+      // guard here covers the gap before that event dispatches.)
+      if (this._disposed || document.hidden
+          || this.ctx.state === 'running'
+          || this._recoveryAttempts > RECOVERY_MAX_ATTEMPTS) {
+        this._stopRecoveryPump()
+        return
+      }
+      this.ctx.resume().catch(() => {})
+      this._playSilentBuffer()
+    }
+    tick()  // immediate first attempt — don't wait a full interval
+    this._recoveryTimer = setInterval(tick, RECOVERY_INTERVAL_MS)
+  }
+
+  _stopRecoveryPump() {
+    if (!this._recoveryTimer) return
+    clearInterval(this._recoveryTimer)
+    this._recoveryTimer = null
+    this._record('pumpStop')
   }
 
   // ── update ────────────────────────────────────────────────────────────────
@@ -751,9 +830,11 @@ export default class SoundDirector {
   getDebugSnapshot() {
     return {
       state:          this.ctx.state,
+      currentTime:    this.ctx.currentTime,   // advancing ⇒ audio clock is live
       unlocked:       this._unlocked,
       started:        this._started,
       sawInterrupted: this._sawInterrupted,
+      pumping:        this._recoveryTimer !== null,
       muted:          this._muted,
       disposed:       this._disposed,
       log:            this._log,
@@ -770,6 +851,7 @@ export default class SoundDirector {
     this._record('dispose')
     this._disposed = true
     this._started  = false
+    this._stopRecoveryPump()
     document.removeEventListener('visibilitychange', this._onVisibilityChange)
     this.ctx.removeEventListener('statechange', this._onStateChange)
     this._unlockEventTypes?.forEach((ev) => {
