@@ -17,9 +17,24 @@ import SquarePage from './pages/games/SquarePage'
 import DragonPage from './pages/games/DragonPage'
 import HexagonPage from './pages/games/HexagonPage'
 
+// ── TEMP: auth bypass ───────────────────────────────────────────────────────
+// Supabase auth is unavailable (account disabled), so the normal login flow
+// can't be used. While this flag is true:
+//   • protected routes render WITHOUT authentication (no /login redirect,
+//     no /onboarding gate), and
+//   • "/" goes straight to /home instead of the marketing LandingPage.
+// All protected pages are null-safe with no user (HomePage greets "Hi there",
+// useSession.saveSession no-ops without an active child), so nothing crashes.
+// To restore normal auth: set this to false (and ideally delete this block and
+// the two `BYPASS_AUTH` checks below).
+const BYPASS_AUTH = true
+
 // Gates protected routes: requires authentication, and forces a first-time
 // signup through /onboarding before any other protected route is reachable.
 function ProtectedRoute({ children }) {
+  // TEMP auth bypass — see BYPASS_AUTH above.
+  if (BYPASS_AUTH) return children
+
   const user = useStore((state) => state.user)
   const loading = useStore((state) => state.loading)
   const childProfiles = useStore((state) => state.childProfiles)
@@ -72,7 +87,9 @@ function AppRoutes() {
   return (
     <Routes>
       {/* ── Public routes ─────────────────────────────────────── */}
-      <Route path="/" element={<LandingPage />} />
+      {/* TEMP auth bypass — "/" skips the landing page and goes to /home.
+          Restore `<LandingPage />` when BYPASS_AUTH is turned off. */}
+      <Route path="/" element={BYPASS_AUTH ? <Navigate to="/home" replace /> : <LandingPage />} />
       <Route path="/demo" element={<DemoPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/terms" element={<TermsPage />} />
