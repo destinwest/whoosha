@@ -3,14 +3,22 @@
 // synth breath as the foundation layer of the regulated-state soundscape —
 // the "place" the breath is happening inside.
 //
-// Two complications the source file presents are handled here so the caller
-// doesn't have to know about them:
+// ── Why an HTMLMediaElement, not an AudioBufferSourceNode ──
+// The bed plays from a durable <audio> element routed into the graph via a
+// MediaElementAudioSourceNode, rather than from decoded AudioBufferSourceNodes.
+// The reason is iOS audio-session interruptions (backgrounding, phone calls,
+// another app grabbing audio): they STOP every playing AudioBufferSourceNode,
+// and those nodes are one-shot — once stopped they're dead and must be rebuilt.
+// A media element is owned by the browser's media pipeline instead; it survives
+// the interruption and resumes (on its own, or via play() — see resume()). So
+// the bed never participates in SoundDirector's source-rebuild path.
 //
-//   1. The file is not authored as a loop. Naïve loop playback would
-//      produce an audible click/thud at every seam. Solved by scheduling
-//      overlapping playbacks with crossfade envelopes — by the time one
-//      copy is fading out, the next is fading in at the same point in the
-//      file, smoothing across the seam.
+// Two file properties are still handled here so the caller doesn't have to:
+//
+//   1. Looping. The element loops natively (el.loop = true). The source file
+//      should be authored to loop cleanly; if an audible seam appears at the
+//      wrap, the follow-up is a two-element crossfade — but native loop is the
+//      simplest thing that can work and is tried first.
 //
 //   2. The file is mono. A mono source on headphones sounds "stuck in the
 //      middle of the head." Solved with Haas-effect widening: the same
@@ -18,42 +26,40 @@
 //      the brain interprets as spatial width. Collapses gracefully on
 //      phone speakers (where stereo is meaningless anyway).
 //
-// Loading is asynchronous — createAmbient returns a Promise. SoundDirector
-// fires it and continues; the ambient fades in whenever it's ready (usually
-// within a few hundred ms on a warm cache, possibly seconds on cold first
-// load). The synth breath plays in the interim without waiting.
+// createAmbient is synchronous: the element loads in the background and starts
+// when buffered, while the output-gain fade-in gives the soft entrance. The
+// synth breath plays in the interim without waiting.
 
-const FILE_URL    = '/sounds/squareGameAmbience.mp3'
-const PEAK_GAIN   = 0.12          // bed volume — present but never foreground
-const CROSSFADE_S = 5             // overlap duration at every loop seam
-const HAAS_DELAY_S = 0.012        // ~12ms — sweet spot for stereo widening from mono
-const FADE_IN_S   = 3             // ambient swells in over this duration at start
-const LOOKAHEAD_S = 8             // ensure next scheduled source is at least this far ahead
+const FILE_URL     = '/sounds/squareGameAmbience.mp3'
+const PEAK_GAIN    = 0.12          // bed volume — present but never foreground
+const HAAS_DELAY_S = 0.012         // ~12ms — sweet spot for stereo widening from mono
+const FADE_IN_S    = 3             // ambient swells in over this duration at start
 
-export async function createAmbient(ctx) {
-  // ── Fetch + decode ──
-  // decodeAudioData is also async; combined latency is typically 100–500ms
-  // for a 2-minute MP3 on a fast device. Caller handles the case where this
-  // resolves after the rest of the audio graph is already running.
-  const response = await fetch(FILE_URL)
-  if (!response.ok) {
-    throw new Error(`synthAmbient: fetch failed (${response.status}) for ${FILE_URL}`)
-  }
-  const arrayBuffer = await response.arrayBuffer()
-  const buffer      = await ctx.decodeAudioData(arrayBuffer)
+export function createAmbient(ctx) {
+  // ── Durable media-element source ──
+  const el = new Audio()
+  el.src     = FILE_URL
+  el.loop    = true
+  el.preload = 'auto'
+  // No crossOrigin: the asset is same-origin, so the MediaElementSource is
+  // never tainted. (Setting 'anonymous' here would only matter for a CORS CDN,
+  // and would silently mute the bed if that CDN didn't send CORS headers.)
+
+  // createMediaElementSource may be called only ONCE per element. We create a
+  // fresh element per createAmbient call, so this is safe across game mounts.
+  const source = ctx.createMediaElementSource(el)
 
   // ── Output gain ──
   // Starts at 0; ramps to PEAK_GAIN over FADE_IN_S so the bed materializes
-  // softly rather than slamming in at full level. SoundDirector's
-  // dysregulation ducker writes additional automation to this same gain
-  // (via the ambient bus chain it routes into).
+  // softly rather than slamming in. SoundDirector's dysregulation ducker writes
+  // additional automation downstream (via the ambientBedGain it connects into).
   const output = ctx.createGain()
   output.gain.value = 0
 
   // ── Stereo widening (Haas-effect on mono input) ──
   // Channel routing:
-  //   widenInput → ChannelMerger.channel 0 (direct, no delay) — left
-  //   widenInput → Delay(12ms) → ChannelMerger.channel 1     — right
+  //   source → ChannelMerger.channel 0 (direct, no delay) — left
+  //   source → Delay(12ms) → ChannelMerger.channel 1       — right
   // Inter-aural time difference of ~10–30ms reads to the brain as spatial
   // width without adding any decorrelated content. Works on headphones;
   // on speakers (especially phone speakers <5cm apart) it's a no-op
@@ -68,88 +74,43 @@ export async function createAmbient(ctx) {
   delay.connect(merger, 0, 1)        // delayed → R
   merger.connect(output)
 
-  // ── Crossfade loop scheduler ──
-  // Each playback of the file is a fresh AudioBufferSourceNode (they can't
-  // be reused after stop). Each has its own gain envelope that fades in
-  // over CROSSFADE_S at the start and fades out over CROSSFADE_S at the
-  // end. We schedule new sources to start exactly when the previous one
-  // begins fading out — so the two fades overlap and sum to ~1.0, hiding
-  // the seam.
-  //
-  // ensureFutureBuffered() keeps at least LOOKAHEAD_S of audio scheduled
-  // ahead of audioContext.currentTime, and is polled once per second. The
-  // polling is in wall-clock time but the checks against ctx.currentTime
-  // are robust across pause/resume — when the context suspends (tab hidden,
-  // etc.) ctx.currentTime pauses too, so the lookahead check sees no time
-  // passing and schedules nothing new during the pause.
-  let nextStartTime = ctx.currentTime
-  let disposed      = false
-  const activeSources = new Set()
+  source.connect(widenInput)
 
-  function spawnSource() {
-    if (disposed) return
+  // Start playback. play() can reject if the element hasn't earned autoplay
+  // credit yet (no gesture, suspended context); SoundDirector's unlock and
+  // visibilitychange handlers call resume() to re-assert it. The output-gain
+  // fade-in runs regardless — when audio actually begins it's already ramping.
+  el.play().catch(() => {})
 
-    const source   = ctx.createBufferSource()
-    source.buffer  = buffer
-
-    const envelope = ctx.createGain()
-    source.connect(envelope).connect(widenInput)
-
-    const startTime = Math.max(nextStartTime, ctx.currentTime)
-    const endTime   = startTime + buffer.duration
-
-    // Crossfade envelope — fade in at start, fade out at end.
-    envelope.gain.setValueAtTime(0, startTime)
-    envelope.gain.linearRampToValueAtTime(1, startTime + CROSSFADE_S)
-    envelope.gain.setValueAtTime(1, endTime - CROSSFADE_S)
-    envelope.gain.linearRampToValueAtTime(0, endTime)
-
-    source.start(startTime)
-    source.stop(endTime + 0.1)  // small grace period past the fade-out
-
-    activeSources.add(source)
-    source.onended = () => {
-      activeSources.delete(source)
-      try { source.disconnect()   } catch (e) {}
-      try { envelope.disconnect() } catch (e) {}
-    }
-
-    // Next source begins exactly when this one starts fading out, so
-    // their envelopes overlap by CROSSFADE_S seconds.
-    nextStartTime = endTime - CROSSFADE_S
-  }
-
-  function ensureFutureBuffered() {
-    if (disposed) return
-    while (nextStartTime < ctx.currentTime + LOOKAHEAD_S) {
-      spawnSource()
-    }
-  }
-
-  // Schedule the first two playbacks immediately so the crossfade has
-  // something to crossfade BETWEEN as the first one nears its end.
-  ensureFutureBuffered()
-
-  // ── Game-start fade-in ──
-  // Audible playback begins now (the first source's envelope ramps from 0
-  // to 1 over CROSSFADE_S). The outer output gain on top adds an additional
-  // game-start swell over FADE_IN_S so the bed materializes softly — feels
-  // like the world is arriving, not like someone hit play.
   const now = ctx.currentTime
   output.gain.setValueAtTime(0, now)
   output.gain.linearRampToValueAtTime(PEAK_GAIN, now + FADE_IN_S)
 
-  // Recurring re-check every second to keep the schedule healthy for as
-  // long as playback continues.
-  const intervalId = setInterval(ensureFutureBuffered, 1000)
+  let disposed = false
 
   return {
     output,
+
+    // ── resume ──
+    // Re-assert playback after an iOS interruption/resume. iOS may pause the
+    // element when it interrupts the audio session; calling play() on
+    // foreground return brings the bed back without rebuilding any node.
+    // Cheap and idempotent — safe to call on every visibility/unlock event.
+    resume() {
+      if (disposed) return
+      el.play().catch(() => {})
+    },
+
+    // ── dispose ──
+    // Final teardown for a game session. Pauses and releases the element and
+    // disconnects the routing nodes. NOT called by the source-rebuild path —
+    // the bed is durable and outlives interruption recovery.
     dispose() {
       disposed = true
-      clearInterval(intervalId)
-      activeSources.forEach((s) => { try { s.stop() } catch (e) {} })
-      activeSources.clear()
+      try { el.pause() } catch (e) {}
+      el.src = ''
+      try { el.load() } catch (e) {}   // release the network/decoder resource
+      try { source.disconnect()     } catch (e) {}
       try { output.disconnect()     } catch (e) {}
       try { merger.disconnect()     } catch (e) {}
       try { delay.disconnect()      } catch (e) {}

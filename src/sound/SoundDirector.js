@@ -236,6 +236,13 @@ export default class SoundDirector {
     // keeps its sources alive, so this stays false there and no rebuild fires.
     this._sawInterrupted = false
 
+    // ── TEMP audio-lifecycle debug log ──
+    // Ring buffer of {t, event, state} for the on-screen AudioDebugOverlay so
+    // we can see exactly what iOS does through a background/return. Remove
+    // this (and the overlay) once the interruption bug is fixed.
+    this._log = []
+    this._record('construct')
+
     // ── Lifecycle: statechange-driven interruption recovery ──
     // statechange reflects the actual audio-engine state — the correct signal
     // for catching iOS audio-session interruptions (background, phone call,
@@ -245,11 +252,13 @@ export default class SoundDirector {
     // backgrounded desktop tab is auto-throttled by the browser anyway.
     this._onStateChange = () => {
       const state = this.ctx.state
+      this._record('state:' + state)
       if (state === 'interrupted') {
         this._sawInterrupted = true
       } else if (state === 'running' && this._sawInterrupted && this._started && !this._disposed) {
         // Recovered from an iOS interruption — the source nodes died. Rebuild.
         this._sawInterrupted = false
+        this._record('->rebuild')
         this.rebuildSources()
       }
     }
@@ -260,9 +269,13 @@ export default class SoundDirector {
     // 'interrupted' → 'running', which then triggers _onStateChange's rebuild)
     // and replay the silent-buffer kick to re-engage the iOS AudioSession.
     this._onVisibilityChange = () => {
+      this._record(document.hidden ? 'hidden' : 'visible')
       if (!this._unlocked || document.hidden) return
       this.ctx.resume().catch(() => {})
       this._playSilentBuffer()
+      // iOS may have paused the durable bed's media element on interruption;
+      // re-assert playback on foreground return.
+      this._ambient?.resume()
     }
     document.addEventListener('visibilitychange', this._onVisibilityChange)
 
@@ -347,6 +360,7 @@ export default class SoundDirector {
   // prior implementation gated on a one-shot _unlocked flag, which made
   // it impossible to recover from that state — subsequent taps did nothing.
   unlock() {
+    this._record('unlock')
     // Silent-buffer kick (see _playSilentBuffer). Essential on iOS.
     this._playSilentBuffer()
 
@@ -355,6 +369,13 @@ export default class SoundDirector {
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {})
     }
+
+    // The ambient bed is an HTMLMediaElement, which has its OWN autoplay gate
+    // separate from the AudioContext: el.play() must be initiated from within a
+    // user gesture on iOS. startAmbient() runs from a React effect (no gesture),
+    // so its initial play() is rejected; this gesture-driven retry is what
+    // actually starts the bed on the user's first touch.
+    this._ambient?.resume()
 
     // Marker for the visibilitychange handler — once flipped to true it
     // stays true, so background/foreground transitions can manage the
@@ -398,8 +419,10 @@ export default class SoundDirector {
     if (this._started) return
     this._started   = true
     this._mutedGain = targetGain
+    this._record('startAmbient')
 
     this._buildSources()
+    this._buildAmbient()   // durable bed — built once, survives rebuilds
 
     if (this._muted) return  // user is muted; un-mute will restore via setMuted's ramp
     const now = this.ctx.currentTime
@@ -418,13 +441,14 @@ export default class SoundDirector {
       this._noiseBufs = createNoiseBuffers(this.ctx)
     }
 
-    const gen = this._buildGen = (this._buildGen || 0) + 1
-
     //   breath  — inhale/exhale textures locked to breathPhase. Routes
     //             through ambientBus → ambientLowpass → ambientLevel → master.
     //   bowl    — synergy reward, partials fade in stage by stage.
-    //   ambient — sampled forest-meadow bed, loaded async, → ambientBedGain.
     //   (rumble is disabled; rumbleBus infrastructure remains for the future.)
+    //   (ambient — the sampled forest bed — is NOT built here. It's a durable
+    //    <audio> element built once in _buildAmbient() and deliberately kept
+    //    alive across rebuilds, because a media element survives iOS
+    //    interruptions and never needs the source-node rebuild this path does.)
     this._breath = createBreath(this.ctx, this._noiseBufs.pink)
     this._breath.output.connect(this.ambientBus)  // dry path
 
@@ -448,38 +472,42 @@ export default class SoundDirector {
 
     // synergyBus starts silent; update() ramps it from bowl progress.
     this.synergyBus.gain.value = 0
+  }
 
-    // Ambient bed loads asynchronously (fetch + decode; cached after first
-    // load). The `gen` guard drops the result if a dispose or a newer
-    // _buildSources (rebuild) happened while this promise was in flight.
-    createAmbient(this.ctx)
-      .then((ambient) => {
-        if (this._disposed || gen !== this._buildGen) {
-          ambient.dispose()
-          return
-        }
-        this._ambient = ambient
-        ambient.output.connect(this.ambientBedGain)
-      })
-      .catch((err) => {
-        if (typeof window !== 'undefined' && window.Sentry) {
-          window.Sentry.captureException(err, { tags: { area: 'ambient-load' } })
-        }
-      })
+  // ── _buildAmbient ─────────────────────────────────────────────────────────
+  // Creates the durable sampled forest bed (a MediaElement-backed source) and
+  // connects it to ambientBedGain. Separated from _buildSources and called
+  // ONCE from startAmbient — never from rebuildSources — because the media
+  // element survives iOS interruptions and must NOT be torn down and rebuilt
+  // with the one-shot synth sources (and createMediaElementSource can only run
+  // once per element anyway). Idempotent: a second call is a no-op.
+  _buildAmbient() {
+    if (this._disposed || this._ambient) return
+    try {
+      const ambient = createAmbient(this.ctx)
+      this._ambient = ambient
+      ambient.output.connect(this.ambientBedGain)
+    } catch (err) {
+      if (typeof window !== 'undefined' && window.Sentry) {
+        window.Sentry.captureException(err, { tags: { area: 'ambient-load' } })
+      }
+    }
   }
 
   // ── _disposeSources ─────────────────────────────────────────────────────
-  // Stops + disconnects the source modules and reverb sends, leaving the
-  // persistent bus spine intact. Used by both rebuildSources and dispose.
+  // Stops + disconnects the one-shot source modules and reverb sends, leaving
+  // the persistent bus spine intact. Used by both rebuildSources and dispose.
+  // Deliberately does NOT touch the ambient bed — that's a durable media
+  // element managed separately (built in _buildAmbient, torn down only in
+  // dispose) so it survives the interruption-driven rebuild untouched.
   _disposeSources() {
     this._breath?.dispose()
     this._rumble?.dispose()
     this._bowl?.dispose()
-    this._ambient?.dispose()
     this._reverb?.dispose()
     try { this._reverbSend?.disconnect()     } catch (e) { /* already disconnected */ }
     try { this._bowlReverbSend?.disconnect() } catch (e) { /* already disconnected */ }
-    this._breath = this._rumble = this._bowl = this._ambient = null
+    this._breath = this._rumble = this._bowl = null
     this._reverb = this._reverbSend = this._bowlReverbSend = null
   }
 
@@ -491,6 +519,7 @@ export default class SoundDirector {
   // — the in-session equivalent of the old "exit and re-enter the game" fix.
   rebuildSources() {
     if (this._disposed || !this._started) return
+    this._record('rebuildSources')
     this._disposeSources()
     // Reset per-frame throttle trackers + bowl progress so update() re-applies
     // cleanly and the bowl re-emerges gently rather than snapping to full.
@@ -498,6 +527,10 @@ export default class SoundDirector {
     this._lastBreathDuck = 1
     this._bowlProgress   = 0
     this._buildSources()
+    // The bed wasn't rebuilt (it's durable), but the same iOS interruption
+    // that killed the synth sources may have paused the media element — nudge
+    // it back to playing.
+    this._ambient?.resume()
     if (this._muted) return
     const now = this.ctx.currentTime
     this.masterGain.gain.cancelScheduledValues(now)
@@ -620,6 +653,26 @@ export default class SoundDirector {
     }
   }
 
+  // ── TEMP debug instrumentation ──────────────────────────────────────────
+  // Records a lifecycle event with a timestamp + the current context state.
+  // Consumed by AudioDebugOverlay. Remove with the overlay once fixed.
+  _record(event) {
+    this._log.push({ t: Date.now(), event, state: this.ctx.state })
+    if (this._log.length > 40) this._log.shift()
+  }
+
+  getDebugSnapshot() {
+    return {
+      state:          this.ctx.state,
+      unlocked:       this._unlocked,
+      started:        this._started,
+      sawInterrupted: this._sawInterrupted,
+      muted:          this._muted,
+      disposed:       this._disposed,
+      log:            this._log,
+    }
+  }
+
   // ── dispose ───────────────────────────────────────────────────────────────
   // Idempotent cleanup for a game session. Stops + disconnects the sources and
   // this director's bus spine, removes lifecycle listeners, and SUSPENDS (does
@@ -627,6 +680,7 @@ export default class SoundDirector {
   // singleton reused by the next game (see getSharedAudioContext). Closing it
   // here would risk the per-page AudioContext limit on repeated entry/exit.
   dispose() {
+    this._record('dispose')
     this._disposed = true
     this._started  = false
     document.removeEventListener('visibilitychange', this._onVisibilityChange)
@@ -635,6 +689,10 @@ export default class SoundDirector {
       document.removeEventListener(ev, this._unlockListener)
     })
     this._disposeSources()
+    // The durable bed is kept out of _disposeSources (so rebuilds don't touch
+    // it); tear it down explicitly here at end-of-session.
+    this._ambient?.dispose()
+    this._ambient = null
     try { this.ambientBedGain.disconnect() } catch (e) { /* already disconnected */ }
     try { this.masterGain.disconnect()     } catch (e) { /* already disconnected */ }
     try { this.compressor.disconnect()     } catch (e) { /* already disconnected */ }
