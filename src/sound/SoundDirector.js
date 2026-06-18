@@ -135,63 +135,11 @@ export default class SoundDirector {
     // Reuse the app-lifetime shared context (see getSharedAudioContext).
     this.ctx = getSharedAudioContext()
 
-    // Master compressor — gentle safety net. Ratio 2:1, soft knee, slow attack
-    // so transients aren't squashed; release medium to recover gracefully.
-    this.compressor = this.ctx.createDynamicsCompressor()
-    this.compressor.threshold.value = -18
-    this.compressor.knee.value      = 12
-    this.compressor.ratio.value     = 2
-    this.compressor.attack.value    = 0.02
-    this.compressor.release.value   = 0.25
-
-    // Master gain — single point of control for mute and master volume.
-    // Starts at 0 so the first audible content can fade in cleanly.
-    this.masterGain = this.ctx.createGain()
-    this.masterGain.gain.value = 0
-
-    this.masterGain.connect(this.compressor).connect(this.ctx.destination)
-
-    // ── Ambient signal chain ──
-    // Two parallel paths into masterGain, each ducking independently:
-    //   sampled forest bed → ambientBedGain → master
-    //   synth breath + reverb → ambientBus → ambientLowpass → ambientLevel → master
-    //
-    // The split allows the bed to duck to silence under dysregulation
-    // (AMBIENT_BED_FLOOR = 0) while the breath stays clearly audible at
-    // 50% (BREATH_DUCK_FLOOR = 0.5). The breath's spectral muffling via
-    // ambientLowpass is preserved on its own path.
-    this.ambientBus = this.ctx.createGain()
-    this.ambientBus.gain.value = 1
-
-    this.ambientLowpass = this.ctx.createBiquadFilter()
-    this.ambientLowpass.type = 'lowpass'
-    this.ambientLowpass.frequency.value = LOWPASS_OPEN_HZ
-    this.ambientLowpass.Q.value = 0.7  // mild resonance — natural-sounding sweep
-
-    this.ambientLevel = this.ctx.createGain()
-    this.ambientLevel.gain.value = AMBIENT_LEVEL_FULL
-
-    // Dedicated gain for the sampled forest bed — ducks separately from the
-    // breath path so the user's dysregulation experience is "ambient fades
-    // to silence; breath stays present, half as loud."
-    this.ambientBedGain = this.ctx.createGain()
-    this.ambientBedGain.gain.value = 1
-    this.ambientBedGain.connect(this.masterGain)
-
-    this.ambientBus.connect(this.ambientLowpass)
-                   .connect(this.ambientLevel)
-                   .connect(this.masterGain)
-
-    // ── Synergy bus (Phase 4) ──
-    this.synergyBus = this.ctx.createGain()
-    this.synergyBus.gain.value = 1
-    this.synergyBus.connect(this.masterGain)
-
-    // ── Rumble bus ──
-    // Starts silent; gaugeEffect drives the level up under dysregulation.
-    this.rumbleBus = this.ctx.createGain()
-    this.rumbleBus.gain.value = 0
-    this.rumbleBus.connect(this.masterGain)
+    // Build the persistent bus spine (compressor, master gain, ambient /
+    // synergy / rumble buses) on the context. Factored into a method so
+    // recreateContext() can rebuild it on a fresh context after an
+    // unrecoverable (route-change) interruption.
+    this._buildBusSpine()
 
     // Internal state
     this._unlocked  = false
@@ -236,6 +184,14 @@ export default class SoundDirector {
     // keeps its sources alive, so this stays false there and no rebuild fires.
     this._sawInterrupted = false
 
+    // True when an interruption resolved to 'suspended' instead of 'running'
+    // (the iOS route-change signature — e.g. a headphone pulled mid-session).
+    // That corrupts the context's audio unit: resume()+rebuild can't reconnect
+    // it to the new output route, so the whole graph stays silent. The only
+    // cure is a brand-new AudioContext — recreateContext() does that on the
+    // next user gesture (a fresh context needs a gesture to resume).
+    this._needsRecreate = false
+
     // ── TEMP audio-lifecycle debug log ──
     // Ring buffer of {t, event, state} for the on-screen AudioDebugOverlay so
     // we can see exactly what iOS does through a background/return. Remove
@@ -247,35 +203,61 @@ export default class SoundDirector {
     // statechange reflects the actual audio-engine state — the correct signal
     // for catching iOS audio-session interruptions (background, phone call,
     // another app grabbing audio), including ones that don't change tab
-    // visibility. We do NOT suspend on hidden ourselves: letting iOS produce
-    // its 'interrupted' state keeps the recovery signal clean, and a
-    // backgrounded desktop tab is auto-throttled by the browser anyway.
+    // visibility. The visibility handler below suspends on hidden ONLY when the
+    // context is still 'running' (tab switch) — it never touches an
+    // 'interrupted' context, so the interruption-recovery signal here stays
+    // clean.
     this._onStateChange = () => {
       const state = this.ctx.state
       this._record('state:' + state)
+      if (this._disposed) return
       if (state === 'interrupted') {
         this._sawInterrupted = true
-      } else if (state === 'running' && this._sawInterrupted && this._started && !this._disposed) {
-        // Recovered from an iOS interruption — the source nodes died. Rebuild.
+      } else if (state === 'suspended' && this._sawInterrupted && this._started) {
+        // Interruption resolved to 'suspended' instead of 'running' — the iOS
+        // route-change corruption signature (e.g. a headphone pulled mid-game).
+        // resume()+rebuild can't reconnect this context to the new output route,
+        // so flag it for full recreation on the next user gesture.
+        this._needsRecreate = true
+        this._record('->needsRecreate')
+      } else if (state === 'running' && this._sawInterrupted && this._started) {
+        // Back to running after an interruption. If the context was flagged
+        // corrupt (route change), only a brand-new context will sound — leave
+        // it for unlock()'s recreate path. Otherwise the source nodes merely
+        // died (one-shot); rebuild them on this still-good context.
         this._sawInterrupted = false
-        this._record('->rebuild')
-        this.rebuildSources()
+        if (!this._needsRecreate) {
+          this._record('->rebuild')
+          this.rebuildSources()
+        }
       }
     }
     this.ctx.addEventListener('statechange', this._onStateChange)
 
-    // ── Visibility: nudge the context back to running on foreground ──
-    // On return to foreground we resume() (iOS needs this to move out of
-    // 'interrupted' → 'running', which then triggers _onStateChange's rebuild)
+    // ── Visibility: stop background bleed, and nudge back on foreground ──
+    // On hidden: if iOS has NOT interrupted us (tab switch / navigating to
+    // another site — the context is still 'running'), it keeps the audio
+    // session alive and our sound would bleed into the background. So we
+    // suspend it ourselves. We deliberately do NOT touch an already-
+    // 'interrupted' context (app background / lock) — that's the recovery
+    // path's job, and suspending over it would muddy the signal. Because this
+    // suspend happens with _sawInterrupted=false, the statechange handler's
+    // 'suspended' branch ignores it (no false recreate).
+    //
+    // On visible: resume() (iOS needs this to move 'interrupted' → 'running',
+    // which triggers the rebuild; and it un-suspends our tab-switch suspend)
     // and replay the silent-buffer kick to re-engage the iOS AudioSession.
     this._onVisibilityChange = () => {
       this._record(document.hidden ? 'hidden' : 'visible')
-      if (!this._unlocked || document.hidden) return
+      if (!this._unlocked) return
+      if (document.hidden) {
+        if (this.ctx.state === 'running') {
+          this.ctx.suspend().catch(() => {})
+        }
+        return
+      }
       this.ctx.resume().catch(() => {})
       this._playSilentBuffer()
-      // iOS may have paused the durable bed's media element on interruption;
-      // re-assert playback on foreground return.
-      this._ambient?.resume()
     }
     document.addEventListener('visibilitychange', this._onVisibilityChange)
 
@@ -308,6 +290,68 @@ export default class SoundDirector {
     // gesture-based unlock listeners attached above then take over on
     // the first user interaction. Either way, this call is harmless.
     this._tryEagerUnlock()
+  }
+
+  // ── _buildBusSpine ─────────────────────────────────────────────────────────
+  // Creates the persistent bus graph on this.ctx: master compressor + gain into
+  // destination, plus the ambient / synergy / rumble buses feeding master.
+  // Called once at construction and again by recreateContext() on a fresh
+  // context. Does NOT create source modules — those live in _buildSources.
+  _buildBusSpine() {
+    // Master compressor — gentle safety net. Ratio 2:1, soft knee, slow attack
+    // so transients aren't squashed; release medium to recover gracefully.
+    this.compressor = this.ctx.createDynamicsCompressor()
+    this.compressor.threshold.value = -18
+    this.compressor.knee.value      = 12
+    this.compressor.ratio.value     = 2
+    this.compressor.attack.value    = 0.02
+    this.compressor.release.value   = 0.25
+
+    // Master gain — single point of control for mute and master volume.
+    // Starts at 0 so the first audible content can fade in cleanly.
+    this.masterGain = this.ctx.createGain()
+    this.masterGain.gain.value = 0
+    this.masterGain.connect(this.compressor).connect(this.ctx.destination)
+
+    // ── Ambient signal chain ──
+    // Two parallel paths into masterGain, each ducking independently:
+    //   sampled forest bed → ambientBedGain → master
+    //   synth breath + reverb → ambientBus → ambientLowpass → ambientLevel → master
+    // The split lets the bed duck to silence under dysregulation
+    // (AMBIENT_BED_FLOOR = 0) while the breath stays audible at 50%
+    // (BREATH_DUCK_FLOOR = 0.5). The breath's spectral muffling via
+    // ambientLowpass is preserved on its own path.
+    this.ambientBus = this.ctx.createGain()
+    this.ambientBus.gain.value = 1
+
+    this.ambientLowpass = this.ctx.createBiquadFilter()
+    this.ambientLowpass.type = 'lowpass'
+    this.ambientLowpass.frequency.value = LOWPASS_OPEN_HZ
+    this.ambientLowpass.Q.value = 0.7  // mild resonance — natural-sounding sweep
+
+    this.ambientLevel = this.ctx.createGain()
+    this.ambientLevel.gain.value = AMBIENT_LEVEL_FULL
+
+    // Dedicated gain for the sampled forest bed — ducks separately from the
+    // breath path so the dysregulation experience is "ambient fades to silence;
+    // breath stays present, half as loud."
+    this.ambientBedGain = this.ctx.createGain()
+    this.ambientBedGain.gain.value = 1
+    this.ambientBedGain.connect(this.masterGain)
+
+    this.ambientBus.connect(this.ambientLowpass)
+                   .connect(this.ambientLevel)
+                   .connect(this.masterGain)
+
+    // ── Synergy bus (Phase 4) ──
+    this.synergyBus = this.ctx.createGain()
+    this.synergyBus.gain.value = 1
+    this.synergyBus.connect(this.masterGain)
+
+    // ── Rumble bus ── starts silent; gaugeEffect drives the level up.
+    this.rumbleBus = this.ctx.createGain()
+    this.rumbleBus.gain.value = 0
+    this.rumbleBus.connect(this.masterGain)
   }
 
   // ── _tryEagerUnlock ──────────────────────────────────────────────────────
@@ -361,6 +405,17 @@ export default class SoundDirector {
   // it impossible to recover from that state — subsequent taps did nothing.
   unlock() {
     this._record('unlock')
+
+    // If a route-change interruption corrupted the context, this gesture is
+    // our chance to recover: a fresh AudioContext can only be resumed from
+    // within a user gesture. recreateContext() rebuilds everything and starts
+    // it here, then returns — nothing below applies to the dead old context.
+    if (this._needsRecreate && this._started && !this._disposed) {
+      this.recreateContext()
+      this._unlocked = true
+      return
+    }
+
     // Silent-buffer kick (see _playSilentBuffer). Essential on iOS.
     this._playSilentBuffer()
 
@@ -369,13 +424,6 @@ export default class SoundDirector {
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {})
     }
-
-    // The ambient bed is an HTMLMediaElement, which has its OWN autoplay gate
-    // separate from the AudioContext: el.play() must be initiated from within a
-    // user gesture on iOS. startAmbient() runs from a React effect (no gesture),
-    // so its initial play() is rejected; this gesture-driven retry is what
-    // actually starts the bed on the user's first touch.
-    this._ambient?.resume()
 
     // Marker for the visibilitychange handler — once flipped to true it
     // stays true, so background/foreground transitions can manage the
@@ -422,7 +470,6 @@ export default class SoundDirector {
     this._record('startAmbient')
 
     this._buildSources()
-    this._buildAmbient()   // durable bed — built once, survives rebuilds
 
     if (this._muted) return  // user is muted; un-mute will restore via setMuted's ramp
     const now = this.ctx.currentTime
@@ -441,14 +488,13 @@ export default class SoundDirector {
       this._noiseBufs = createNoiseBuffers(this.ctx)
     }
 
+    const gen = this._buildGen = (this._buildGen || 0) + 1
+
     //   breath  — inhale/exhale textures locked to breathPhase. Routes
     //             through ambientBus → ambientLowpass → ambientLevel → master.
     //   bowl    — synergy reward, partials fade in stage by stage.
+    //   ambient — sampled forest-meadow bed, loaded async, → ambientBedGain.
     //   (rumble is disabled; rumbleBus infrastructure remains for the future.)
-    //   (ambient — the sampled forest bed — is NOT built here. It's a durable
-    //    <audio> element built once in _buildAmbient() and deliberately kept
-    //    alive across rebuilds, because a media element survives iOS
-    //    interruptions and never needs the source-node rebuild this path does.)
     this._breath = createBreath(this.ctx, this._noiseBufs.pink)
     this._breath.output.connect(this.ambientBus)  // dry path
 
@@ -472,42 +518,41 @@ export default class SoundDirector {
 
     // synergyBus starts silent; update() ramps it from bowl progress.
     this.synergyBus.gain.value = 0
-  }
 
-  // ── _buildAmbient ─────────────────────────────────────────────────────────
-  // Creates the durable sampled forest bed (a MediaElement-backed source) and
-  // connects it to ambientBedGain. Separated from _buildSources and called
-  // ONCE from startAmbient — never from rebuildSources — because the media
-  // element survives iOS interruptions and must NOT be torn down and rebuilt
-  // with the one-shot synth sources (and createMediaElementSource can only run
-  // once per element anyway). Idempotent: a second call is a no-op.
-  _buildAmbient() {
-    if (this._disposed || this._ambient) return
-    try {
-      const ambient = createAmbient(this.ctx)
-      this._ambient = ambient
-      ambient.output.connect(this.ambientBedGain)
-    } catch (err) {
-      if (typeof window !== 'undefined' && window.Sentry) {
-        window.Sentry.captureException(err, { tags: { area: 'ambient-load' } })
-      }
-    }
+    // Ambient bed loads asynchronously (fetch + decode; cached after first
+    // load). It's a Web Audio buffer source (NOT a media element) so it has no
+    // iOS media-session entanglement — no lock-screen track, no pause on
+    // headphone removal — and it rebuilds with the other sources on
+    // interruption recovery. The `gen` guard drops the result if a dispose or a
+    // newer _buildSources (rebuild) happened while this promise was in flight.
+    createAmbient(this.ctx)
+      .then((ambient) => {
+        if (this._disposed || gen !== this._buildGen) {
+          ambient.dispose()
+          return
+        }
+        this._ambient = ambient
+        ambient.output.connect(this.ambientBedGain)
+      })
+      .catch((err) => {
+        if (typeof window !== 'undefined' && window.Sentry) {
+          window.Sentry.captureException(err, { tags: { area: 'ambient-load' } })
+        }
+      })
   }
 
   // ── _disposeSources ─────────────────────────────────────────────────────
-  // Stops + disconnects the one-shot source modules and reverb sends, leaving
-  // the persistent bus spine intact. Used by both rebuildSources and dispose.
-  // Deliberately does NOT touch the ambient bed — that's a durable media
-  // element managed separately (built in _buildAmbient, torn down only in
-  // dispose) so it survives the interruption-driven rebuild untouched.
+  // Stops + disconnects the source modules and reverb sends, leaving the
+  // persistent bus spine intact. Used by both rebuildSources and dispose.
   _disposeSources() {
     this._breath?.dispose()
     this._rumble?.dispose()
     this._bowl?.dispose()
+    this._ambient?.dispose()
     this._reverb?.dispose()
     try { this._reverbSend?.disconnect()     } catch (e) { /* already disconnected */ }
     try { this._bowlReverbSend?.disconnect() } catch (e) { /* already disconnected */ }
-    this._breath = this._rumble = this._bowl = null
+    this._breath = this._rumble = this._bowl = this._ambient = null
     this._reverb = this._reverbSend = this._bowlReverbSend = null
   }
 
@@ -527,10 +572,60 @@ export default class SoundDirector {
     this._lastBreathDuck = 1
     this._bowlProgress   = 0
     this._buildSources()
-    // The bed wasn't rebuilt (it's durable), but the same iOS interruption
-    // that killed the synth sources may have paused the media element — nudge
-    // it back to playing.
-    this._ambient?.resume()
+    if (this._muted) return
+    const now = this.ctx.currentTime
+    this.masterGain.gain.cancelScheduledValues(now)
+    this.masterGain.gain.setValueAtTime(this._mutedGain, now)
+  }
+
+  // ── recreateContext ───────────────────────────────────────────────────────
+  // Last-resort recovery for an AudioContext whose audio unit was corrupted by
+  // an iOS route change (headphone pulled mid-session). Unlike rebuildSources,
+  // resuming + rebuilding on the SAME context can't reconnect it to the new
+  // output route — it stays silent. So we close it and build an entirely fresh
+  // context + bus spine + sources. MUST be called from inside a user gesture
+  // (unlock): a new AudioContext starts 'suspended' and only a gesture can
+  // resume it. The shared singleton is replaced, so the next game reuses the
+  // new context.
+  recreateContext() {
+    if (this._disposed) return
+    this._record('recreateContext')
+
+    // Tear down the source modules on the dead context, then drop it.
+    this._disposeSources()
+    this.ctx.removeEventListener('statechange', this._onStateChange)
+    const deadCtx = this.ctx
+    try { deadCtx.close() } catch (e) { /* may already be closing */ }
+
+    // Force getSharedAudioContext to mint a brand-new context, and rebuild the
+    // bus spine on it. (The old spine nodes died with deadCtx; _buildBusSpine
+    // reassigns every this.* node reference to the new context.)
+    _sharedCtx = null
+    this.ctx = getSharedAudioContext()
+    this._buildBusSpine()
+    this.ctx.addEventListener('statechange', this._onStateChange)
+
+    // Clear interruption flags — this is a clean slate.
+    this._sawInterrupted = false
+    this._needsRecreate  = false
+
+    // Resume within the calling gesture and re-engage the iOS AudioSession.
+    this.ctx.resume().catch(() => {})
+    this._playSilentBuffer()
+
+    // Rebuild the sources on the fresh context and reset per-frame trackers so
+    // update() re-applies cleanly (mirrors rebuildSources()).
+    this._buildSources()
+    this._lastLowpass        = LOWPASS_OPEN_HZ
+    this._lastLevel          = AMBIENT_LEVEL_FULL
+    this._lastRumble         = 0
+    this._lastSynergy        = 0
+    this._lastBreathDuck     = 1
+    this._lastAmbientBedDuck = 1
+    this._bowlProgress       = 0
+    this._lastUpdateAudioTime = null
+
+    // Restore master gain so audio returns (unless muted).
     if (this._muted) return
     const now = this.ctx.currentTime
     this.masterGain.gain.cancelScheduledValues(now)
@@ -689,10 +784,6 @@ export default class SoundDirector {
       document.removeEventListener(ev, this._unlockListener)
     })
     this._disposeSources()
-    // The durable bed is kept out of _disposeSources (so rebuilds don't touch
-    // it); tear it down explicitly here at end-of-session.
-    this._ambient?.dispose()
-    this._ambient = null
     try { this.ambientBedGain.disconnect() } catch (e) { /* already disconnected */ }
     try { this.masterGain.disconnect()     } catch (e) { /* already disconnected */ }
     try { this.compressor.disconnect()     } catch (e) { /* already disconnected */ }
