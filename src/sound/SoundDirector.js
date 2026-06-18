@@ -137,8 +137,8 @@ export default class SoundDirector {
 
     // Build the persistent bus spine (compressor, master gain, ambient /
     // synergy / rumble buses) on the context. Factored into a method so
-    // recreateContext() can rebuild it on a fresh context after an
-    // unrecoverable (route-change) interruption.
+    // recoverGraph() can rebuild it in place after an interruption that left
+    // the context stuck (e.g. a route change).
     this._buildBusSpine()
 
     // Internal state
@@ -184,14 +184,6 @@ export default class SoundDirector {
     // keeps its sources alive, so this stays false there and no rebuild fires.
     this._sawInterrupted = false
 
-    // True when an interruption resolved to 'suspended' instead of 'running'
-    // (the iOS route-change signature — e.g. a headphone pulled mid-session).
-    // That corrupts the context's audio unit: resume()+rebuild can't reconnect
-    // it to the new output route, so the whole graph stays silent. The only
-    // cure is a brand-new AudioContext — recreateContext() does that on the
-    // next user gesture (a fresh context needs a gesture to resume).
-    this._needsRecreate = false
-
     // ── TEMP audio-lifecycle debug log ──
     // Ring buffer of {t, event, state} for the on-screen AudioDebugOverlay so
     // we can see exactly what iOS does through a background/return. Remove
@@ -213,23 +205,21 @@ export default class SoundDirector {
       if (this._disposed) return
       if (state === 'interrupted') {
         this._sawInterrupted = true
-      } else if (state === 'suspended' && this._sawInterrupted && this._started) {
-        // Interruption resolved to 'suspended' instead of 'running' — the iOS
-        // route-change corruption signature (e.g. a headphone pulled mid-game).
-        // resume()+rebuild can't reconnect this context to the new output route,
-        // so flag it for full recreation on the next user gesture.
-        this._needsRecreate = true
-        this._record('->needsRecreate')
       } else if (state === 'running' && this._sawInterrupted && this._started) {
-        // Back to running after an interruption. If the context was flagged
-        // corrupt (route change), only a brand-new context will sound — leave
-        // it for unlock()'s recreate path. Otherwise the source nodes merely
-        // died (one-shot); rebuild them on this still-good context.
+        // Auto-recovered to running (the common plain lock/unlock path): the
+        // one-shot source nodes died but the context itself is fine — just
+        // rebuild the sources on it.
         this._sawInterrupted = false
-        if (!this._needsRecreate) {
-          this._record('->rebuild')
-          this.rebuildSources()
-        }
+        this._record('->rebuild')
+        this.rebuildSources()
+      } else if (state === 'suspended' && this._sawInterrupted && this._started) {
+        // Interruption resolved to 'suspended' rather than auto-returning to
+        // 'running'. A suspended context can only be resumed from a user
+        // gesture, so we can't recover here — leave _sawInterrupted set and let
+        // the next unlock() do resume + a full in-place graph rebuild
+        // (recoverGraph). This covers BOTH a plain lock that stuck at suspended
+        // and route-change corruption (headphone pulled mid-session).
+        this._record('->awaitGestureRecover')
       }
     }
     this.ctx.addEventListener('statechange', this._onStateChange)
@@ -295,8 +285,8 @@ export default class SoundDirector {
   // ── _buildBusSpine ─────────────────────────────────────────────────────────
   // Creates the persistent bus graph on this.ctx: master compressor + gain into
   // destination, plus the ambient / synergy / rumble buses feeding master.
-  // Called once at construction and again by recreateContext() on a fresh
-  // context. Does NOT create source modules — those live in _buildSources.
+  // Called once at construction and again by recoverGraph() to rebuild the
+  // spine in place. Does NOT create source modules — those live in _buildSources.
   _buildBusSpine() {
     // Master compressor — gentle safety net. Ratio 2:1, soft knee, slow attack
     // so transients aren't squashed; release medium to recover gracefully.
@@ -406,12 +396,12 @@ export default class SoundDirector {
   unlock() {
     this._record('unlock')
 
-    // If a route-change interruption corrupted the context, this gesture is
-    // our chance to recover: a fresh AudioContext can only be resumed from
-    // within a user gesture. recreateContext() rebuilds everything and starts
-    // it here, then returns — nothing below applies to the dead old context.
-    if (this._needsRecreate && this._started && !this._disposed) {
-      this.recreateContext()
+    // If an interruption left the context unrecovered (it landed in 'suspended'
+    // instead of auto-returning to 'running'), THIS gesture is our chance to
+    // recover: resume + a full in-place graph rebuild. A suspended context can
+    // only be resumed from inside a user gesture.
+    if (this._sawInterrupted && this._started && !this._disposed) {
+      this.recoverGraph()
       this._unlocked = true
       return
     }
@@ -578,44 +568,46 @@ export default class SoundDirector {
     this.masterGain.gain.setValueAtTime(this._mutedGain, now)
   }
 
-  // ── recreateContext ───────────────────────────────────────────────────────
-  // Last-resort recovery for an AudioContext whose audio unit was corrupted by
-  // an iOS route change (headphone pulled mid-session). Unlike rebuildSources,
-  // resuming + rebuilding on the SAME context can't reconnect it to the new
-  // output route — it stays silent. So we close it and build an entirely fresh
-  // context + bus spine + sources. MUST be called from inside a user gesture
-  // (unlock): a new AudioContext starts 'suspended' and only a gesture can
-  // resume it. The shared singleton is replaced, so the next game reuses the
-  // new context.
-  recreateContext() {
-    if (this._disposed) return
-    this._record('recreateContext')
+  // ── recoverGraph ────────────────────────────────────────────────────────────
+  // In-place full graph rebuild on the SAME AudioContext: tears down the source
+  // modules AND the bus spine, rebuilds both, resumes, and restores master gain.
+  // This is the programmatic equivalent of exit-and-re-enter (which reuses the
+  // singleton context and rebuilds its whole graph) — the only recovery proven
+  // to work on iOS for a context stuck in 'suspended' after an interruption, and
+  // for route-change corruption (headphone pulled mid-session).
+  //
+  // We deliberately do NOT create a new AudioContext: a fresh context started
+  // mid-interruption does not reliably bind to the iOS audio session (and an
+  // un-awaited close() race was the source of the "Lock was stolen" AbortError).
+  // Rebuilding the bus spine — not just the sources — is what restores the
+  // master→destination path a route change corrupts, which a sources-only
+  // rebuild misses.
+  //
+  // MUST be called from inside a user gesture (unlock): a 'suspended' context
+  // can only be resumed by a gesture.
+  recoverGraph() {
+    if (this._disposed || !this._started) return
+    this._record('recoverGraph')
 
-    // Tear down the source modules on the dead context, then drop it.
+    // Tear down sources, then disconnect the old bus spine so the rebuilt one
+    // is the only path to destination.
     this._disposeSources()
-    this.ctx.removeEventListener('statechange', this._onStateChange)
-    const deadCtx = this.ctx
-    try { deadCtx.close() } catch (e) { /* may already be closing */ }
+    for (const node of [this.masterGain, this.compressor, this.ambientBus,
+                        this.ambientLowpass, this.ambientLevel,
+                        this.ambientBedGain, this.synergyBus, this.rumbleBus]) {
+      try { node.disconnect() } catch (e) { /* already disconnected */ }
+    }
 
-    // Force getSharedAudioContext to mint a brand-new context, and rebuild the
-    // bus spine on it. (The old spine nodes died with deadCtx; _buildBusSpine
-    // reassigns every this.* node reference to the new context.)
-    _sharedCtx = null
-    this.ctx = getSharedAudioContext()
+    // Rebuild the spine on the same context, resume within the gesture, and
+    // re-engage the iOS AudioSession with the silent-buffer kick.
     this._buildBusSpine()
-    this.ctx.addEventListener('statechange', this._onStateChange)
-
-    // Clear interruption flags — this is a clean slate.
-    this._sawInterrupted = false
-    this._needsRecreate  = false
-
-    // Resume within the calling gesture and re-engage the iOS AudioSession.
     this.ctx.resume().catch(() => {})
     this._playSilentBuffer()
 
-    // Rebuild the sources on the fresh context and reset per-frame trackers so
-    // update() re-applies cleanly (mirrors rebuildSources()).
+    // Rebuild sources, clear the interruption flag, and reset per-frame
+    // trackers so update() re-applies cleanly.
     this._buildSources()
+    this._sawInterrupted     = false
     this._lastLowpass        = LOWPASS_OPEN_HZ
     this._lastLevel          = AMBIENT_LEVEL_FULL
     this._lastRumble         = 0
