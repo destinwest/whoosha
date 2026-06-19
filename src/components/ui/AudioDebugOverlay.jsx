@@ -48,7 +48,7 @@ export default function AudioDebugOverlay({ directorRef }) {
       }}
     >
       <div style={{ color: '#fff', marginBottom: 2 }}>
-        {`state=${snap.state}  t=${snap.currentTime?.toFixed(2)}  pump=${snap.pumping}`}
+        {`ctx=${snap.ctxId}  state=${snap.state}  t=${snap.currentTime?.toFixed(2)}  pump=${snap.pumping}`}
       </div>
       <div style={{ color: '#fff', marginBottom: 2 }}>
         {`unlocked=${snap.unlocked}  started=${snap.started}  needRec=${snap.needsRecovery}  muted=${snap.muted}`}

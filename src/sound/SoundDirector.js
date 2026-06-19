@@ -136,6 +136,12 @@ function getSharedAudioContext() {
   if (!_sharedCtx) {
     const Ctx = window.AudioContext || window.webkitAudioContext  // webkit prefix for older Safari
     _sharedCtx = new Ctx()
+    // TEMP debug: tag each freshly-created context with a short id. A full page
+    // reload (new module state) makes a new context with a new id; client-side
+    // (SPA) navigation reuses this one and keeps its id. This lets us tell, from
+    // the overlay, whether the working "exit and re-enter" path is reusing this
+    // exact context or quietly getting a fresh one — which decides the fix.
+    _sharedCtx._whooshaId = Math.random().toString(36).slice(2, 6)
   }
   return _sharedCtx
 }
@@ -813,6 +819,7 @@ export default class SoundDirector {
   getDebugSnapshot() {
     return {
       state:          this.ctx.state,
+      ctxId:          this.ctx._whooshaId,    // changes only if a NEW context was made
       currentTime:    this.ctx.currentTime,   // advancing ⇒ audio clock is live
       unlocked:       this._unlocked,
       started:        this._started,
