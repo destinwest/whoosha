@@ -765,9 +765,26 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       dismissRafRef.current = requestAnimationFrame(dismissTick)
 
     } else {
-      // Re-touch after a lift. Don't move the bead — the frame loop will
-      // re-attach it if the finger is within the groove's leash of where the
-      // bead froze. Just resume touch + restart the bloom/pressure feedback.
+      // Re-touch after a lift. Snap the bead to wherever on the track the finger
+      // lands (global projection, exactly like the first touch) so the user can
+      // resume ANYWHERE on the path — no need to grab the old frozen spot and
+      // race to catch the pacing circle. A touch well off the track is a silent
+      // no-op (same acceptance window as the first touch), so a stray tap won't
+      // yank the circle.
+      const proj = projectGlobal(geo, px, py)
+      if (!proj || proj.perpDist > geo.lw * ACCEPTANCE_TRACK_WIDTHS) return  // off-track: ignore
+
+      // Reposition the bead and reset seam/lap tracking so the jump can't
+      // register a spurious lap: prevFrac starts at the new spot, and the lap
+      // checkpoint must be re-crossed forward from here.
+      beadIdxRef.current             = proj.idx
+      const frac                     = fractionAt(geo, proj.idx)
+      prevFracRef.current            = frac
+      passedLapCheckpointRef.current = false
+      childPosRef.current            = { x: proj.x, y: proj.y, clx: proj.x, cly: proj.y, fraction: frac }
+      lastTouchRef.current           = { x: proj.x, y: proj.y }  // avoids a teleport-sized velocity/particle spike
+      addStrokePoint(proj.x, proj.y, 0)  // pen was lifted on pointerUp → starts a fresh stroke at the new point
+
       touchRef.current       = true
       startPressureRamp()
       touchActiveRef.current = true

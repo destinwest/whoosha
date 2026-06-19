@@ -4,7 +4,6 @@ import StrokeSelector   from './StrokeSelector'
 import SquareCanvas     from './SquareCanvas'
 import CompletionScreen from './CompletionScreen'
 import MuteButton       from '../../ui/MuteButton'
-import AudioDebugOverlay from '../../ui/AudioDebugOverlay'  // TEMP — remove with the audio-lifecycle instrumentation once the iOS bug is fixed
 import { useSoundDirector } from '../../../hooks/useSoundDirector'
 
 // Audio fade-out duration when the game ends (seconds). Long enough to
@@ -420,11 +419,6 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
           onComplete={() => setPhase('game')}
         />
       )}
-
-      {/* TEMP — on-device audio-lifecycle readout for the iOS background/return
-          bug. Remove (with the SoundDirector _record/getDebugSnapshot
-          instrumentation) once fixed. */}
-      <AudioDebugOverlay directorRef={directorRef} />
     </div>
   )
 }

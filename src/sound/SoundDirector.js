@@ -136,12 +136,6 @@ function getSharedAudioContext() {
   if (!_sharedCtx) {
     const Ctx = window.AudioContext || window.webkitAudioContext  // webkit prefix for older Safari
     _sharedCtx = new Ctx()
-    // TEMP debug: tag each freshly-created context with a short id. A full page
-    // reload (new module state) makes a new context with a new id; client-side
-    // (SPA) navigation reuses this one and keeps its id. This lets us tell, from
-    // the overlay, whether the working "exit and re-enter" path is reusing this
-    // exact context or quietly getting a fresh one — which decides the fix.
-    _sharedCtx._whooshaId = Math.random().toString(36).slice(2, 6)
   }
   return _sharedCtx
 }
@@ -218,13 +212,6 @@ export default class SoundDirector {
     // each new background/interruption. See _advanceRecovery.
     this._spineRebuilt = false
 
-    // ── TEMP audio-lifecycle debug log ──
-    // Ring buffer of {t, event, state} for the on-screen AudioDebugOverlay so
-    // we can see exactly what iOS does through a background/return. Remove
-    // this (and the overlay) once the interruption bug is fixed.
-    this._log = []
-    this._record('construct')
-
     // ── Lifecycle: statechange-driven interruption recovery ──
     // statechange reflects the actual audio-engine state — the correct signal
     // for catching iOS audio-session interruptions (background, phone call,
@@ -235,7 +222,6 @@ export default class SoundDirector {
     // clean.
     this._onStateChange = () => {
       const state = this.ctx.state
-      this._record('state:' + state)
       if (this._disposed) return
       if (state === 'interrupted') {
         // iOS interruption: sources AND the spine's output binding are dead.
@@ -266,7 +252,6 @@ export default class SoundDirector {
     // rebuilds the spine while suspended and the sources once running. For a
     // plain non-backgrounded change, just resume + kick.
     this._onVisibilityChange = () => {
-      this._record(document.hidden ? 'hidden' : 'visible')
       if (!this._unlocked) return
       if (document.hidden) {
         // Going to background: the sources and the spine's output binding will
@@ -282,7 +267,6 @@ export default class SoundDirector {
         return
       }
       if (this._needsRecovery && this._started && !this._disposed) {
-        this._record('->visibleRecover')
         this._advanceRecovery()
         return
       }
@@ -434,8 +418,6 @@ export default class SoundDirector {
   // prior implementation gated on a one-shot _unlocked flag, which made
   // it impossible to recover from that state — subsequent taps did nothing.
   unlock() {
-    this._record('unlock')
-
     // Silent-buffer kick (see _playSilentBuffer). Essential on iOS.
     this._playSilentBuffer()
 
@@ -496,7 +478,6 @@ export default class SoundDirector {
     if (this._started) return
     this._started   = true
     this._mutedGain = targetGain
-    this._record('startAmbient')
 
     this._buildSources()
 
@@ -641,7 +622,6 @@ export default class SoundDirector {
     } else {
       // Reached running before we could rebuild the spine on a suspended context
       // (e.g. iOS auto-resumed). Bounce through suspend so the branch above runs.
-      this._record('->bounce')
       this.ctx.suspend().catch(() => {})
     }
   }
@@ -654,7 +634,6 @@ export default class SoundDirector {
   // resume() bind the graph to live output. Sources are built separately, after
   // 'running' (see _buildSourcesOnRunning).
   _rebuildSpine() {
-    this._record('rebuildSpine')
     this._disposeSources()
     for (const node of [this.masterGain, this.compressor, this.ambientBus,
                         this.ambientLowpass, this.ambientLevel,
@@ -669,7 +648,6 @@ export default class SoundDirector {
   // clock, not born-dead) and restores master gain. Runs from _advanceRecovery's
   // 'running' branch, after _rebuildSpine has re-bound the output path.
   _buildSourcesOnRunning() {
-    this._record('buildSourcesRunning')
     this._disposeSources()
     this._buildSources()
     this._lastLowpass        = LOWPASS_OPEN_HZ
@@ -700,7 +678,6 @@ export default class SoundDirector {
   _startRecoveryPump() {
     if (this._disposed || this._recoveryTimer || document.hidden) return
     if (!this._needsRecovery) return
-    this._record('pumpStart')
     this._recoveryAttempts = 0
     this._recoveryTimer = setInterval(() => this._pumpTick(), RECOVERY_INTERVAL_MS)
     this._pumpTick()  // immediate first attempt (timer already set ⇒ re-entry no-ops)
@@ -720,7 +697,6 @@ export default class SoundDirector {
     if (!this._recoveryTimer) return
     clearInterval(this._recoveryTimer)
     this._recoveryTimer = null
-    this._record('pumpStop')
   }
 
   // ── update ────────────────────────────────────────────────────────────────
@@ -839,30 +815,6 @@ export default class SoundDirector {
     }
   }
 
-  // ── TEMP debug instrumentation ──────────────────────────────────────────
-  // Records a lifecycle event with a timestamp + the current context state.
-  // Consumed by AudioDebugOverlay. Remove with the overlay once fixed.
-  _record(event) {
-    this._log.push({ t: Date.now(), event, state: this.ctx.state })
-    if (this._log.length > 40) this._log.shift()
-  }
-
-  getDebugSnapshot() {
-    return {
-      state:          this.ctx.state,
-      ctxId:          this.ctx._whooshaId,    // changes only if a NEW context was made
-      currentTime:    this.ctx.currentTime,   // advancing ⇒ audio clock is live
-      unlocked:       this._unlocked,
-      started:        this._started,
-      needsRecovery:  this._needsRecovery,
-      spineRebuilt:   this._spineRebuilt,
-      pumping:        this._recoveryTimer !== null,
-      muted:          this._muted,
-      disposed:       this._disposed,
-      log:            this._log,
-    }
-  }
-
   // ── dispose ───────────────────────────────────────────────────────────────
   // Idempotent cleanup for a game session. Stops + disconnects the sources and
   // this director's bus spine, removes lifecycle listeners, and SUSPENDS (does
@@ -870,7 +822,6 @@ export default class SoundDirector {
   // singleton reused by the next game (see getSharedAudioContext). Closing it
   // here would risk the per-page AudioContext limit on repeated entry/exit.
   dispose() {
-    this._record('dispose')
     this._disposed = true
     this._started  = false
     this._stopRecoveryPump()
