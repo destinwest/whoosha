@@ -232,17 +232,18 @@ export default class SoundDirector {
         // on 'hidden', which is the signal we actually depend on.
         this._needsRecovery = true
       } else if (state === 'running' && this._needsRecovery && this._started) {
-        // Context is live again — NOW it is safe to respawn the dead sources.
-        // This is the single recovery point: every path (auto-return, the
-        // resume pump, a user gesture) funnels the context to 'running' and
-        // lets THIS branch do the rebuild, so sources are always born on a
-        // running clock and actually produce sound. A source (re)built while
-        // the context is still suspended is silently dropped by iOS — which is
-        // why reaching 'running' without this rebuild stayed SILENT.
+        // Context is live again — NOW do the FULL rebuild: the source nodes AND
+        // the bus spine (masterGain → compressor → ctx.destination). On-device
+        // logs proved a sources-only rebuild on a running context is STILL
+        // silent — after an iOS interruption the existing spine's path to
+        // ctx.destination is dead, and only reconnecting a fresh spine restores
+        // output (the one audio-relevant thing exit-and-re-enter does that a
+        // sources-only rebuild doesn't). recoverGraph is safe here precisely
+        // because we're 'running': its sources start on a live clock.
         this._needsRecovery = false
         this._stopRecoveryPump()
-        this._record('->rebuild')
-        this.rebuildSources()
+        this._record('->recover')
+        this.recoverGraph()
       } else if (state === 'suspended' && this._needsRecovery && this._started) {
         // Backgrounded and now suspended. Drive the context back to 'running'
         // with the recovery pump (a retried resume + silent-buffer kick); the
@@ -511,7 +512,7 @@ export default class SoundDirector {
   // ── _buildSources ───────────────────────────────────────────────────────
   // Creates the source modules (breath, bowl, reverb sends, sampled bed) and
   // connects them to the persistent bus spine. Separated from startAmbient so
-  // it can be re-run by rebuildSources() after an iOS interruption kills the
+  // it can be re-run by recoverGraph() after an iOS interruption kills the
   // source nodes. Does NOT touch master gain — the caller owns that.
   _buildSources() {
     // One-time noise buffer generation (~50ms). Kept across rebuilds.
@@ -574,7 +575,7 @@ export default class SoundDirector {
 
   // ── _disposeSources ─────────────────────────────────────────────────────
   // Stops + disconnects the source modules and reverb sends, leaving the
-  // persistent bus spine intact. Used by both rebuildSources and dispose.
+  // persistent bus spine intact. Used by both recoverGraph and dispose.
   _disposeSources() {
     this._breath?.dispose()
     this._rumble?.dispose()
@@ -587,47 +588,25 @@ export default class SoundDirector {
     this._reverb = this._reverbSend = this._bowlReverbSend = null
   }
 
-  // ── rebuildSources ──────────────────────────────────────────────────────
-  // Called by the statechange handler after recovering from an iOS
-  // 'interrupted' state, which silently kills every playing source node.
-  // Tears down the dead sources and respawns them on the surviving context
-  // and buses, then restores the master gain so audio returns automatically
-  // — the in-session equivalent of the old "exit and re-enter the game" fix.
-  rebuildSources() {
-    if (this._disposed || !this._started) return
-    this._record('rebuildSources')
-    this._disposeSources()
-    // Reset per-frame throttle trackers + bowl progress so update() re-applies
-    // cleanly and the bowl re-emerges gently rather than snapping to full.
-    this._lastSynergy    = 0
-    this._lastBreathDuck = 1
-    this._bowlProgress   = 0
-    this._buildSources()
-    if (this._muted) return
-    const now = this.ctx.currentTime
-    this.masterGain.gain.cancelScheduledValues(now)
-    this.masterGain.gain.setValueAtTime(this._mutedGain, now)
-  }
-
   // ── recoverGraph ────────────────────────────────────────────────────────────
-  // In-place full graph rebuild on the SAME AudioContext: tears down the source
-  // modules AND the bus spine, rebuilds both, resumes, and restores master gain.
+  // In-place FULL graph rebuild on the SAME AudioContext: tears down the source
+  // modules AND the bus spine and rebuilds both, reconnecting masterGain →
+  // compressor → ctx.destination. This is the programmatic equivalent of
+  // exit-and-re-enter, and the ONLY in-session recovery proven to restore audio
+  // after an iOS interruption: the interruption leaves the OLD spine's path to
+  // ctx.destination dead, so a sources-only rebuild (which reuses that dead
+  // spine) stays silent even on a running context — confirmed on-device.
   //
-  // NOTE: this is NO LONGER on the lock/unlock interruption path. It rebuilds
-  // sources synchronously right after ctx.resume() — i.e. while the context is
-  // still 'suspended' — which is precisely the "born-dead sources" bug that left
-  // the context 'running' but silent. The interruption path now defers source
-  // rebuilding to the statechange 'running' branch (via the recovery pump), so
-  // sources are only ever started on a live context.
+  // MUST run while the context is 'running'. It is driven from the statechange
+  // 'running' branch, which the recovery pump (and/or a user gesture) reaches
+  // first — so _buildSources() here always starts sources on a live clock, never
+  // born-dead. The resume()/silent-buffer calls below are then no-ops/harmless.
   //
-  // Retained as a manual heavy hammer for bus-spine corruption (e.g. a route
-  // change / headphone pull that breaks the master→destination path, which a
-  // sources-only rebuild can't fix). If it's ever rewired to the interruption
-  // path, move its _buildSources() call into the 'running' branch too.
-  //
-  // We deliberately do NOT create a new AudioContext: a fresh context started
-  // mid-interruption does not reliably bind to the iOS audio session (and an
-  // un-awaited close() race was the source of the "Lock was stolen" AbortError).
+  // We deliberately do NOT create a new AudioContext: exit-and-re-enter reuses
+  // this same shared context and works, so the context isn't poisoned — only its
+  // graph needs rebuilding. (A fresh context mid-interruption doesn't reliably
+  // bind to the iOS audio session, and an un-awaited close() race was the source
+  // of the "Lock was stolen" AbortError.)
   recoverGraph() {
     if (this._disposed || !this._started) return
     this._record('recoverGraph')
