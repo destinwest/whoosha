@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import GameIntro        from '../../ui/transitions/GameIntro'
 import StrokeSelector   from './StrokeSelector'
-import SquareCanvas     from './SquareCanvas'
+import SquareCanvas, { SCALE_ACTIVE } from './SquareCanvas'
 import CompletionScreen from './CompletionScreen'
 import MuteButton       from '../../ui/MuteButton'
 import { useSoundDirector } from '../../../hooks/useSoundDirector'
@@ -355,7 +355,15 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
 
         {/* label overlay — DOM text, positioned from canvas geometry */}
         {labelGeo && (() => {
-          const fs = Math.max(13, labelGeo.sq * 0.048)
+          const fs = Math.max(13, labelGeo.sq * 0.048)   // resting on-screen size
+          // Crispness fix: render each label at its PEAK size (fs × SCALE_ACTIVE)
+          // and use transform to scale it DOWN toward rest. The glyph bitmap is
+          // rasterized at full size and only ever downscaled or shown 1:1 — never
+          // upscaled, which is what made it blurry at peak on large/low-DPR
+          // screens. The CSS var is the visual scale (1 → SCALE_ACTIVE); dividing
+          // by SCALE_ACTIVE turns it into the counter-scale (1/SCALE_ACTIVE → 1)
+          // against the enlarged font-size, so on-screen sizes are unchanged.
+          const peakFs = fs * SCALE_ACTIVE
           return (
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
               {LABEL_TEXTS.map((text, i) => (
@@ -365,11 +373,11 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
                     position:   'absolute',
                     left:       labelGeo.labelMids[i].x,
                     top:        labelGeo.labelMids[i].y,
-                    transform:  `translate(-50%, -50%) rotate(${LABEL_ANGLES[i]}rad) scale(var(--label-${i}-scale, 1))`,
+                    transform:  `translate(-50%, -50%) rotate(${LABEL_ANGLES[i]}rad) scale(calc(var(--label-${i}-scale, 1) / ${SCALE_ACTIVE}))`,
                     opacity:    `var(--label-${i}-alpha, 0.75)`,
                     fontFamily: "'Nunito', sans-serif",
                     fontWeight: 700,
-                    fontSize:   `${fs}px`,
+                    fontSize:   `${peakFs}px`,
                     color:      'rgba(44,74,62,1)',
                     whiteSpace: 'nowrap',
                     willChange: 'transform, opacity',

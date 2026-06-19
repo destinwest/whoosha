@@ -125,7 +125,7 @@ const EMBER_PARTICLE_CAP        = 30
 const EMBER_SPAWN_RATE_AT_FULL  = 14      // particles per second at Stage 4.0
 const ALPHA_ACTIVE = 0.75
 const ALPHA_FLOOR  = 0.18
-const SCALE_ACTIVE = 1.5
+export const SCALE_ACTIVE = 2.0   // peak label scale as the pacing circle arrives — base is 1.0, so +100% growth
 const BLEND_MS     = 600
 
 const smoothstep   = t => t * t * (3 - 2 * t)
