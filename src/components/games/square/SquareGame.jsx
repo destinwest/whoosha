@@ -29,7 +29,7 @@ const STROKE_SELECTOR_ENABLED = false
 // slanted shafts — into a single offscreen canvas at device-pixel resolution.
 // All composition happens in canvas-land via globalCompositeOperation; no CSS
 // blend layers needed at runtime.
-function buildMeadowBg(w, h, dpr, textureImg) {
+export function buildMeadowBg(w, h, dpr, textureImg) {
   const oc = document.createElement('canvas')
   oc.width  = w * dpr
   oc.height = h * dpr

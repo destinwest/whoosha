@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import useStore from '../../store/useStore'
 import { HOME_GAMES, GAME_GRADIENTS } from '../../data/games'
 import GameShape from './GameShape'
+import SquareCardPreview from './square/SquareCardPreview'
 
 // ── Tunable layout constants ──────────────────────────────────────────────────
 const CARD_W       = 200    // px
@@ -85,13 +86,16 @@ function cardStyle(distance) {
 // ── CarouselCard ──────────────────────────────────────────────────────────────
 // Pure visual — clicks bubble up to the carousel-level handler.
 function CarouselCard({ game, distance }) {
+  const isSquare = game.gameKey === 'square'
   return (
     <div data-card-index="" style={cardStyle(distance)}>
       {game.locked && <LockBadge />}
       <div
         className="w-full h-full rounded-3xl overflow-hidden relative"
         style={{
-          background: GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder,
+          // Square shows a real game thumbnail (its canvas paints its own teal
+          // background); the dark teal here is just a fallback behind it.
+          background: isSquare ? '#082B26' : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
           boxShadow: '0 12px 32px rgba(62, 94, 82, 0.22), 0 2px 6px rgba(62, 94, 82, 0.12)',
           filter: game.placeholder
             ? 'blur(1.5px) saturate(0.4)'
@@ -101,20 +105,36 @@ function CarouselCard({ game, distance }) {
           transition: 'filter 250ms ease',
         }}
       >
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-4 py-6 text-center">
-          <div className="w-[110px] h-[110px] grid place-items-center">
-            <GameShape kind={game.shape} className="w-full h-full" />
+        {isSquare ? (
+          // Full-bleed game thumbnail: the meadow render fills the whole card,
+          // with the title in track-cream floated near the bottom (no green bar).
+          <>
+            <SquareCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
+            <div
+              // Centered vertically between the track's bottom edge (~0.72h with
+              // CY_RATIO 0.42 / SIZE_RATIO 0.70) and the card bottom → ~0.86h.
+              className="absolute inset-x-0 px-3 text-center pointer-events-none font-display text-[18px] leading-tight font-semibold"
+              style={{ top: '86%', transform: 'translateY(-50%)', color: '#F2EAD0' }}
+            >
+              {game.name}
+            </div>
+          </>
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-4 py-6 text-center">
+            <div className="w-[110px] h-[110px] grid place-items-center">
+              <GameShape kind={game.shape} className="w-full h-full" />
+            </div>
+            <div
+              className={`font-display text-[19px] leading-tight ${game.placeholder ? 'italic text-text-sage' : 'font-semibold text-text-forest'}`}
+              style={{ fontWeight: game.placeholder ? 500 : 600 }}
+            >
+              {game.name}
+            </div>
+            {game.tagline && (
+              <div className="text-xs text-text-sage -mt-2">{game.tagline}</div>
+            )}
           </div>
-          <div
-            className={`font-display text-[19px] leading-tight ${game.placeholder ? 'italic text-text-sage' : 'font-semibold text-text-forest'}`}
-            style={{ fontWeight: game.placeholder ? 500 : 600 }}
-          >
-            {game.name}
-          </div>
-          {game.tagline && (
-            <div className="text-xs text-text-sage -mt-2">{game.tagline}</div>
-          )}
-        </div>
+        )}
       </div>
     </div>
   )
