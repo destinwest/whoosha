@@ -153,8 +153,8 @@ export default class SoundDirector {
 
     // Build the persistent bus spine (compressor, master gain, ambient /
     // synergy / rumble buses) on the context. Factored into a method so
-    // recoverGraph() can rebuild it in place after an interruption that left
-    // the context stuck (e.g. a route change).
+    // _rebuildSpine() can rebuild it in place during interruption recovery
+    // (it must be rebuilt while the context is suspended — see _advanceRecovery).
     this._buildBusSpine()
 
     // Internal state
@@ -212,6 +212,12 @@ export default class SoundDirector {
     this._recoveryTimer    = null
     this._recoveryAttempts = 0
 
+    // Recovery ordering flag: true once the bus spine has been rebuilt for the
+    // current recovery (which MUST happen while the context is suspended). The
+    // sources are then built only after the context reaches 'running'. Reset on
+    // each new background/interruption. See _advanceRecovery.
+    this._spineRebuilt = false
+
     // ── TEMP audio-lifecycle debug log ──
     // Ring buffer of {t, event, state} for the on-screen AudioDebugOverlay so
     // we can see exactly what iOS does through a background/return. Remove
@@ -232,33 +238,15 @@ export default class SoundDirector {
       this._record('state:' + state)
       if (this._disposed) return
       if (state === 'interrupted') {
-        // iOS Safari interruption (phone call, some lock/background cases).
-        // Sources are dead; mark for recovery. NOTE this event is NOT reliable
-        // on all iOS versions — the visibility handler also sets _needsRecovery
-        // on 'hidden', which is the signal we actually depend on.
+        // iOS interruption: sources AND the spine's output binding are dead.
+        // Mark for recovery and force a fresh spine rebuild on this cycle.
         this._needsRecovery = true
-      } else if (state === 'running' && this._needsRecovery && this._started) {
-        // Context is live again — NOW do the FULL rebuild: the source nodes AND
-        // the bus spine (masterGain → compressor → ctx.destination). On-device
-        // logs proved a sources-only rebuild on a running context is STILL
-        // silent — after an iOS interruption the existing spine's path to
-        // ctx.destination is dead, and only reconnecting a fresh spine restores
-        // output (the one audio-relevant thing exit-and-re-enter does that a
-        // sources-only rebuild doesn't). recoverGraph is safe here precisely
-        // because we're 'running': its sources start on a live clock.
-        this._needsRecovery = false
-        this._stopRecoveryPump()
-        this._record('->recover')
-        this.recoverGraph()
-      } else if (state === 'suspended' && this._needsRecovery && this._started) {
-        // Backgrounded and now suspended. Drive the context back to 'running'
-        // with the recovery pump (a retried resume + silent-buffer kick); the
-        // 'running' branch above then respawns the sources. We do NOT build
-        // sources here — they would be born dead. The pump no-ops while the
-        // page is hidden and is (re)started on the next 'visible' or gesture.
-        this._record('->pumpResume')
-        this._startRecoveryPump()
+        this._spineRebuilt  = false
       }
+      // Let the state machine decide what to do at the current state. It is the
+      // single recovery driver shared by statechange, visibility, the gesture,
+      // and the pump — see _advanceRecovery.
+      this._advanceRecovery()
     }
     this.ctx.addEventListener('statechange', this._onStateChange)
 
@@ -274,16 +262,19 @@ export default class SoundDirector {
     // for us). The statechange 'suspended' branch will try the pump, which
     // no-ops while we're hidden.
     //
-    // On visible: if we were backgrounded, start the recovery pump to drive the
-    // context back to 'running' (the statechange 'running' branch then respawns
-    // the sources). No user gesture required — and if iOS refuses a gesture-free
-    // resume, the next natural touch on the game carries it (unlock() pumps
-    // too). For a plain non-backgrounded change, just resume + kick.
+    // On visible: if we were backgrounded, run the recovery state machine, which
+    // rebuilds the spine while suspended and the sources once running. For a
+    // plain non-backgrounded change, just resume + kick.
     this._onVisibilityChange = () => {
       this._record(document.hidden ? 'hidden' : 'visible')
       if (!this._unlocked) return
       if (document.hidden) {
-        if (this._started) this._needsRecovery = true
+        // Going to background: the sources and the spine's output binding will
+        // die. Flag for recovery and force a fresh spine rebuild on return.
+        if (this._started) {
+          this._needsRecovery = true
+          this._spineRebuilt  = false
+        }
         this._stopRecoveryPump()
         if (this.ctx.state === 'running') {
           this.ctx.suspend().catch(() => {})
@@ -292,7 +283,7 @@ export default class SoundDirector {
       }
       if (this._needsRecovery && this._started && !this._disposed) {
         this._record('->visibleRecover')
-        this._startRecoveryPump()
+        this._advanceRecovery()
         return
       }
       this.ctx.resume().catch(() => {})
@@ -334,7 +325,7 @@ export default class SoundDirector {
   // ── _buildBusSpine ─────────────────────────────────────────────────────────
   // Creates the persistent bus graph on this.ctx: master compressor + gain into
   // destination, plus the ambient / synergy / rumble buses feeding master.
-  // Called once at construction and again by recoverGraph() to rebuild the
+  // Called once at construction and again by _rebuildSpine() to rebuild the
   // spine in place. Does NOT create source modules — those live in _buildSources.
   _buildBusSpine() {
     // Master compressor — gentle safety net. Ratio 2:1, soft knee, slow attack
@@ -455,12 +446,12 @@ export default class SoundDirector {
       this.ctx.resume().catch(() => {})
     }
 
-    // If we were backgrounded (sources presumed dead), keep nudging the context
-    // toward 'running' until the statechange handler confirms it and respawns
-    // them. We deliberately do NOT rebuild sources here: building them before
-    // the context is 'running' is what produced the silent-at-running failure.
+    // If we were backgrounded, advance the recovery state machine from inside
+    // the gesture (the strongest signal for leaving 'suspended'/'interrupted').
+    // It rebuilds the spine while suspended and the sources once running — never
+    // sources-while-suspended, which is what produced the silent failures.
     if (this._needsRecovery && this._started && !this._disposed) {
-      this._startRecoveryPump()
+      this._advanceRecovery()
     }
 
     // Marker for the visibilitychange handler — once flipped to true it
@@ -518,8 +509,8 @@ export default class SoundDirector {
   // ── _buildSources ───────────────────────────────────────────────────────
   // Creates the source modules (breath, bowl, reverb sends, sampled bed) and
   // connects them to the persistent bus spine. Separated from startAmbient so
-  // it can be re-run by recoverGraph() after an iOS interruption kills the
-  // source nodes. Does NOT touch master gain — the caller owns that.
+  // it can be re-run by _buildSourcesOnRunning() after an iOS interruption kills
+  // the source nodes. Does NOT touch master gain — the caller owns that.
   _buildSources() {
     // One-time noise buffer generation (~50ms). Kept across rebuilds.
     if (!this._noiseBufs) {
@@ -581,7 +572,8 @@ export default class SoundDirector {
 
   // ── _disposeSources ─────────────────────────────────────────────────────
   // Stops + disconnects the source modules and reverb sends, leaving the
-  // persistent bus spine intact. Used by both recoverGraph and dispose.
+  // persistent bus spine intact. Used by _rebuildSpine, _buildSourcesOnRunning,
+  // and dispose.
   _disposeSources() {
     this._breath?.dispose()
     this._rumble?.dispose()
@@ -594,48 +586,92 @@ export default class SoundDirector {
     this._reverb = this._reverbSend = this._bowlReverbSend = null
   }
 
-  // ── recoverGraph ────────────────────────────────────────────────────────────
-  // In-place FULL graph rebuild on the SAME AudioContext: tears down the source
-  // modules AND the bus spine and rebuilds both, reconnecting masterGain →
-  // compressor → ctx.destination. This is the programmatic equivalent of
-  // exit-and-re-enter, and the ONLY in-session recovery proven to restore audio
-  // after an iOS interruption: the interruption leaves the OLD spine's path to
-  // ctx.destination dead, so a sources-only rebuild (which reuses that dead
-  // spine) stays silent even on a running context — confirmed on-device.
+  // ── _advanceRecovery ────────────────────────────────────────────────────────
+  // The single interruption-recovery driver, shared by the statechange handler,
+  // the visibility 'visible' event, the unlock gesture, and the resume pump.
+  // Each of those just nudges; THIS method decides what to do based on the live
+  // context state, reproducing the exact ordering the known-good exit-and-re-enter
+  // path produces:
   //
-  // MUST run while the context is 'running'. It is driven from the statechange
-  // 'running' branch, which the recovery pump (and/or a user gesture) reaches
-  // first — so _buildSources() here always starts sources on a live clock, never
-  // born-dead. The resume()/silent-buffer calls below are then no-ops/harmless.
+  //   • rebuild the BUS SPINE while the context is SUSPENDED (not running), then
+  //   • build the SOURCE nodes once the context is RUNNING.
   //
-  // We deliberately do NOT create a new AudioContext: exit-and-re-enter reuses
-  // this same shared context and works, so the context isn't poisoned — only its
-  // graph needs rebuilding. (A fresh context mid-interruption doesn't reliably
-  // bind to the iOS audio session, and an un-awaited close() race was the source
-  // of the "Lock was stolen" AbortError.)
-  recoverGraph() {
-    if (this._disposed || !this._started) return
-    this._record('recoverGraph')
+  // On-device logs proved this ordering is the whole game (same AudioContext id
+  // throughout — the context is NOT poisoned). Of the three combinations seen:
+  //   spine@suspended + sources@suspended → silent (sources born dead)
+  //   spine@running   + sources@running   → silent (spine never re-bound to output)
+  //   spine@suspended + sources@running   → WORKS  (what exit/re-enter does)
+  // Rebuilding the master→destination spine while the audio unit is parked
+  // (suspended) is what makes the next resume() bind the graph to real output.
+  //
+  // Idempotent: _spineRebuilt gates the one-time spine rebuild, _needsRecovery
+  // gates the one-time source build. Stays a no-op while backgrounded.
+  _advanceRecovery() {
+    if (!this._needsRecovery || !this._started || this._disposed) return
+    if (document.hidden) return  // can't recover a backgrounded page; wait for 'visible'
+    const state = this.ctx.state
 
-    // Tear down sources, then disconnect the old bus spine so the rebuilt one
-    // is the only path to destination.
+    if (state === 'interrupted') {
+      // Nudge interrupted → suspended (resume() does this on iOS); we rebuild the
+      // spine on 'suspended', matching exit/re-enter — never on 'interrupted'.
+      this._playSilentBuffer()
+      this.ctx.resume().catch(() => {})
+      this._startRecoveryPump()
+      return
+    }
+
+    if (state === 'suspended') {
+      if (!this._spineRebuilt) {
+        this._rebuildSpine()        // ← the KEY step: spine rebuilt WHILE SUSPENDED
+        this._spineRebuilt = true
+      }
+      // Drive toward running; the sources are built when we get there.
+      this._playSilentBuffer()
+      this.ctx.resume().catch(() => {})
+      this._startRecoveryPump()
+      return
+    }
+
+    // state === 'running'
+    if (this._spineRebuilt) {
+      this._buildSourcesOnRunning()  // ← sources built WHILE RUNNING, on the rebuilt spine
+      this._needsRecovery = false
+      this._spineRebuilt  = false
+      this._stopRecoveryPump()
+    } else {
+      // Reached running before we could rebuild the spine on a suspended context
+      // (e.g. iOS auto-resumed). Bounce through suspend so the branch above runs.
+      this._record('->bounce')
+      this.ctx.suspend().catch(() => {})
+    }
+  }
+
+  // ── _rebuildSpine ─────────────────────────────────────────────────────────
+  // Disposes the dead sources, disconnects the old (interruption-killed) bus
+  // spine, and builds a fresh one — reconnecting masterGain → compressor →
+  // ctx.destination. MUST run while the context is NOT running: parking the
+  // audio unit (suspended) and rewiring the output path is what lets the next
+  // resume() bind the graph to live output. Sources are built separately, after
+  // 'running' (see _buildSourcesOnRunning).
+  _rebuildSpine() {
+    this._record('rebuildSpine')
     this._disposeSources()
     for (const node of [this.masterGain, this.compressor, this.ambientBus,
                         this.ambientLowpass, this.ambientLevel,
                         this.ambientBedGain, this.synergyBus, this.rumbleBus]) {
       try { node.disconnect() } catch (e) { /* already disconnected */ }
     }
-
-    // Rebuild the spine on the same context, resume within the gesture, and
-    // re-engage the iOS AudioSession with the silent-buffer kick.
     this._buildBusSpine()
-    this.ctx.resume().catch(() => {})
-    this._playSilentBuffer()
+  }
 
-    // Rebuild sources, clear the interruption flag, and reset per-frame
-    // trackers so update() re-applies cleanly.
+  // ── _buildSourcesOnRunning ──────────────────────────────────────────────────
+  // Builds the source modules on the now-running context (so they start on a live
+  // clock, not born-dead) and restores master gain. Runs from _advanceRecovery's
+  // 'running' branch, after _rebuildSpine has re-bound the output path.
+  _buildSourcesOnRunning() {
+    this._record('buildSourcesRunning')
+    this._disposeSources()
     this._buildSources()
-    this._needsRecovery      = false
     this._lastLowpass        = LOWPASS_OPEN_HZ
     this._lastLevel          = AMBIENT_LEVEL_FULL
     this._lastRumble         = 0
@@ -645,7 +681,6 @@ export default class SoundDirector {
     this._bowlProgress       = 0
     this._lastUpdateAudioTime = null
 
-    // Restore master gain so audio returns (unless muted).
     if (this._muted) return
     const now = this.ctx.currentTime
     this.masterGain.gain.cancelScheduledValues(now)
@@ -653,36 +688,32 @@ export default class SoundDirector {
   }
 
   // ── _startRecoveryPump / _stopRecoveryPump ──────────────────────────────────
-  // The automatic, gesture-free half of interruption recovery. After an iOS
-  // interruption leaves the context 'suspended', this retries resume() (plus the
-  // silent-buffer kick) on a short interval until the context reports 'running'.
-  // Reaching 'running' fires the statechange handler's 'running' branch, which
-  // respawns the interruption-killed sources on the now-live context — so audio
-  // returns WITHOUT a user gesture. If iOS refuses the gesture-free resume, the
-  // pump simply keeps trying (capped); the user's next natural touch on the game
-  // calls unlock(), whose in-gesture resume reaches 'running' and triggers the
-  // same rebuild. Either way, sources are only ever built on a running context.
+  // The automatic, gesture-free engine behind recovery. While a recovery is
+  // pending it re-runs _advanceRecovery on a short interval — nudging the context
+  // interrupted → suspended → running (rebuilding the spine and then the sources
+  // along the way) without needing a user gesture. If iOS refuses a gesture-free
+  // resume, the pump keeps trying (capped); the user's next natural touch on the
+  // game also calls _advanceRecovery via unlock(). It clears itself once
+  // _needsRecovery is satisfied. Note _advanceRecovery re-invokes
+  // _startRecoveryPump — the _recoveryTimer guard makes that a no-op, and we set
+  // the timer BEFORE the first tick so there's no re-entrant recursion.
   _startRecoveryPump() {
     if (this._disposed || this._recoveryTimer || document.hidden) return
-    if (this.ctx.state === 'running') return
+    if (!this._needsRecovery) return
     this._record('pumpStart')
     this._recoveryAttempts = 0
-    const tick = () => {
-      this._recoveryAttempts++
-      // Stop once we're disposed, backgrounded, recovered, or out of attempts.
-      // (On 'running' the statechange handler also calls _stopRecoveryPump; the
-      // guard here covers the gap before that event dispatches.)
-      if (this._disposed || document.hidden
-          || this.ctx.state === 'running'
-          || this._recoveryAttempts > RECOVERY_MAX_ATTEMPTS) {
-        this._stopRecoveryPump()
-        return
-      }
-      this.ctx.resume().catch(() => {})
-      this._playSilentBuffer()
+    this._recoveryTimer = setInterval(() => this._pumpTick(), RECOVERY_INTERVAL_MS)
+    this._pumpTick()  // immediate first attempt (timer already set ⇒ re-entry no-ops)
+  }
+
+  _pumpTick() {
+    this._recoveryAttempts++
+    if (this._disposed || document.hidden || !this._needsRecovery
+        || this._recoveryAttempts > RECOVERY_MAX_ATTEMPTS) {
+      this._stopRecoveryPump()
+      return
     }
-    tick()  // immediate first attempt — don't wait a full interval
-    this._recoveryTimer = setInterval(tick, RECOVERY_INTERVAL_MS)
+    this._advanceRecovery()
   }
 
   _stopRecoveryPump() {
@@ -824,6 +855,7 @@ export default class SoundDirector {
       unlocked:       this._unlocked,
       started:        this._started,
       needsRecovery:  this._needsRecovery,
+      spineRebuilt:   this._spineRebuilt,
       pumping:        this._recoveryTimer !== null,
       muted:          this._muted,
       disposed:       this._disposed,

@@ -51,7 +51,7 @@ export default function AudioDebugOverlay({ directorRef }) {
         {`ctx=${snap.ctxId}  state=${snap.state}  t=${snap.currentTime?.toFixed(2)}  pump=${snap.pumping}`}
       </div>
       <div style={{ color: '#fff', marginBottom: 2 }}>
-        {`unlocked=${snap.unlocked}  started=${snap.started}  needRec=${snap.needsRecovery}  muted=${snap.muted}`}
+        {`unlocked=${snap.unlocked}  started=${snap.started}  needRec=${snap.needsRecovery}  spine=${snap.spineRebuilt}  muted=${snap.muted}`}
       </div>
       {snap.log.slice().reverse().slice(0, 16).map((e, i) => (
         <div key={i}>{`${fmtTime(e.t)}  ${e.event}  [${e.state}]`}</div>
