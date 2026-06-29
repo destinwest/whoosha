@@ -26,7 +26,7 @@ import { roundedNgonPath } from '../_shared/roundedNgonPath'
 
 // ── HEXAGON-SPECIFIC: shape + timing ─────────────────────────────────────────
 const SIDES                 = 6
-const HEX_START_ANGLE       = (2 * Math.PI) / 3            // V[0] = lower-left vertex
+const HEX_START_ANGLE       = (2 * Math.PI) / 3 + Math.PI / 2  // 7π/6 — rotated +90° from the original so the two hold sides sit E/W (vertical); V[0] now upper-left, pointy top/bottom
 const HEX_INSCRIBED_FACTOR  = Math.cos(Math.PI / 6)        // apothem / circumradius for regular hexagon
 const SIDE_DURATIONS_MS     = [4000, 4000, 2000, 4000, 4000, 2000]  // breathe-in / out / hold x 2
 const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 20_000

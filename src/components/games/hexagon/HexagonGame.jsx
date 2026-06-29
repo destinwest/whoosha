@@ -142,11 +142,14 @@ function paintShaft(ctx, w, h, polygon, stops) {
   ctx.restore()
 }
 
-// 6-edge label sequence for the flat-top hexagon, traversed CW from the
-// lower-left vertex. Pattern: breathe in / breathe out / hold (twice). Angles
-// chosen so text reads right-side-up along each tilted edge.
+// 6-edge label sequence, traversed CW from the upper-left vertex of the
+// reoriented hexagon (pointy top/bottom, vertical hold sides E/W). Pattern:
+// breathe in / breathe out / hold (twice). Angles align text to each side:
+// the four in/out diagonals tilt ±π/6 (~±30°), and the two hold sides are
+// vertical so their text rotates ±π/2 — right side −π/2, left side +π/2,
+// matching the Square game's vertical 'hold' labels.
 const LABEL_TEXTS  = ['breathe in', 'breathe out', 'hold', 'breathe in', 'breathe out', 'hold']
-const LABEL_ANGLES = [Math.PI / 3, -Math.PI / 3, 0, Math.PI / 3, -Math.PI / 3, 0]
+const LABEL_ANGLES = [-Math.PI / 6, Math.PI / 6, -Math.PI / 2, -Math.PI / 6, Math.PI / 6, Math.PI / 2]
 
 // ── HexagonGame ───────────────────────────────────────────────────────────────
 // Phase manager — owns intro/game phase, stroke selection, session timing, exit.
