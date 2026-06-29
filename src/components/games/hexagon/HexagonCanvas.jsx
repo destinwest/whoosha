@@ -112,8 +112,17 @@ function buildGeo(rect) {
   // 2R·cos(π/6) ≈ 1.732R; width = 2R). Width is usually the constraint on
   // portrait screens.
   const R       = Math.min(w * 0.39, h * 0.45)
-  const r       = R * 0.18   // corner radius — slightly less than Square's 0.22 (120° interior angle)
-  const circleR = R * 0.0728
+  // Corner radius enlarged from 0.18 → 0.30 so the tight 120° corners can carry
+  // the wider (Square-matched) track below: the track's inner corner edge sits
+  // at cornerR − lw/2, and at the old 0.18 that would pinch to ~1px (and beyond
+  // lw = 2·cornerR it self-intersects). 0.30 keeps a clean ~20px inner margin.
+  // Trade-off: rounder hexagon, shorter straights (straight-fraction ~0.81 → ~0.68).
+  const r       = R * 0.30
+  // Track width matched to the Square game: same 0.0728 coefficient, but applied
+  // to the analogous size handle 2R (≡ Square's `sq` on portrait) instead of R,
+  // so lw roughly doubles (≈30px → ≈52px). The bead, pacing circle, bloom and
+  // particles all derive from lw, so they scale up to the Square's proportions too.
+  const circleR = (2 * R) * 0.0728
   const lw      = circleR * 2 + 8
 
   // Vertex angles (canvas coords, +y down). Starting at lower-left (2π/3) and
