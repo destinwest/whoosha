@@ -93,9 +93,9 @@ function CarouselCard({ game, distance }) {
       <div
         className="w-full h-full rounded-3xl overflow-hidden relative"
         style={{
-          // Square shows a real game thumbnail (its canvas paints its own teal
-          // background); the dark teal here is just a fallback behind it.
-          background: isSquare ? '#082B26' : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
+          // Square's canvas paints its own soft sage background; the sage here
+          // is just a fallback behind it.
+          background: isSquare ? '#8FAE9F' : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
           boxShadow: '0 12px 32px rgba(62, 94, 82, 0.22), 0 2px 6px rgba(62, 94, 82, 0.12)',
           filter: game.placeholder
             ? 'blur(1.5px) saturate(0.4)'
@@ -114,7 +114,7 @@ function CarouselCard({ game, distance }) {
               // Centered vertically between the track's bottom edge (~0.72h with
               // CY_RATIO 0.42 / SIZE_RATIO 0.70) and the card bottom → ~0.86h.
               className="absolute inset-x-0 px-3 text-center pointer-events-none font-display text-[18px] leading-tight font-semibold"
-              style={{ top: '86%', transform: 'translateY(-50%)', color: '#F2EAD0' }}
+              style={{ top: '86%', transform: 'translateY(-50%)', color: '#3A5A4D' }}
             >
               {game.name}
             </div>
@@ -176,6 +176,7 @@ export default function GameCarousel() {
   const navigate            = useNavigate()
   const activeIndex         = useStore((s) => s.homeActiveCardIndex)
   const setActiveIndex      = useStore((s) => s.setHomeActiveCardIndex)
+  const startCardTransition = useStore((s) => s.startCardTransition)
   const [comingSoonVisible, setComingSoonVisible] = useState(false)
   const wrapRef             = useRef(null)
   const dragStartRef        = useRef(null)
@@ -192,7 +193,7 @@ export default function GameCarousel() {
     comingSoonTimerRef.current = setTimeout(() => setComingSoonVisible(false), 1400)
   }
 
-  function handleCardClick(idx) {
+  function handleCardClick(idx, e) {
     if (idx !== activeIndex) {
       setActiveIndex(idx)
       return
@@ -200,9 +201,22 @@ export default function GameCarousel() {
     const game = HOME_GAMES[idx]
     if (game.locked || !game.route) {
       flashComingSoon()
-    } else {
-      navigate(game.route)
+      return
     }
+    // Square launches with the zoom-into-the-card transition: capture the card's
+    // on-screen rect and let the app-level overlay take over (it navigates).
+    if (game.gameKey === 'square') {
+      const cardEl = e?.currentTarget?.querySelector('[data-card-index]')
+      const rect   = cardEl?.getBoundingClientRect()
+      if (rect && rect.width) {
+        startCardTransition(
+          { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+          game.route,
+        )
+        return
+      }
+    }
+    navigate(game.route)
   }
 
   // ── Keyboard arrow navigation ──────────────────────────────────────────────
@@ -274,7 +288,7 @@ export default function GameCarousel() {
           {HOME_GAMES.map((game, i) => {
             const distance = i - activeIndex
             return (
-              <div key={game.id} onClick={() => handleCardClick(i)}>
+              <div key={game.id} onClick={(e) => handleCardClick(i, e)}>
                 <CarouselCard game={game} distance={distance} />
               </div>
             )

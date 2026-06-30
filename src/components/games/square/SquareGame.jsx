@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from 'react'
-import GameIntro        from '../../ui/transitions/GameIntro'
 import StrokeSelector   from './StrokeSelector'
 import SquareCanvas, { SCALE_ACTIVE } from './SquareCanvas'
 import CompletionScreen from './CompletionScreen'
@@ -170,10 +169,13 @@ const LABEL_ANGLES = [0, -Math.PI / 2, 0, Math.PI / 2]
 // ── SquareGame ────────────────────────────────────────────────────────────────
 // Phase manager — owns intro/game phase, stroke selection, session timing, exit.
 // All canvas drawing, game geometry, and pointer handling live in SquareCanvas.
-export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
+export default function SquareGame({ onExit }) {
 
   // ── Phase ──────────────────────────────────────────────────────────────────
-  const [phase, setPhase]           = useState('intro')   // 'intro' | 'game' | 'completion'
+  // Square mounts straight into play. The card→game zoom (CardZoomTransition)
+  // owns the launch animation, so there is no separate in-game intro; a direct
+  // URL load drops the player into the sharp, ready world immediately.
+  const [phase, setPhase]           = useState('game')    // 'game' | 'completion'
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
   const [labelGeo, setLabelGeo]     = useState(null)      // { labelMids, sq }
@@ -291,58 +293,86 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
       style={{ touchAction: 'none' }}
       onPointerDown={handleContainerPointerDown}
     >
-      {/* back button */}
-      <button
-        onClick={handleExit}
-        className="absolute top-4 left-4 z-20 w-11 h-11 flex items-center justify-center rounded-2xl bg-white/15 text-white hover:bg-white/25 active:bg-white/30 transition-colors"
-        aria-label="Exit game"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-          strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-          <path d="M19 12H5M12 5l-7 7 7 7" />
-        </svg>
-      </button>
+      {/* Top chrome — hidden while the game is still arriving from a distance, then
+          fades in as it lands (--intro-ui: 0 → 1, driven by the launch transition;
+          1 at rest so normal play is unaffected). */}
+      <div style={{ opacity: 'var(--intro-ui, 1)' }}>
+        {/* back button */}
+        <button
+          onClick={handleExit}
+          className="absolute top-4 left-4 z-20 w-11 h-11 flex items-center justify-center rounded-2xl bg-white/15 text-white hover:bg-white/25 active:bg-white/30 transition-colors"
+          aria-label="Exit game"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+            <path d="M19 12H5M12 5l-7 7 7 7" />
+          </svg>
+        </button>
 
-      {/* mute toggle — top-right, mirrors exit-button treatment */}
-      <MuteButton className="absolute top-4 right-4 z-20" />
+        {/* mute toggle — top-right, mirrors exit-button treatment */}
+        <MuteButton className="absolute top-4 right-4 z-20" />
+      </div>
 
-      {/* game canvas — always mounted; blur/scale driven by CSS custom properties.
-          During the completion phase the whole wrapper fades toward COMPLETION_CANVAS_OPACITY
-          (a soft dim that leaves the world visible behind the completion card). */}
+      {/* ── The world ──────────────────────────────────────────────────────────
+          Two depth layers so the card→game launch reads as falling INTO the world
+          rather than shrinking it: the MEADOW fills the view the whole time (drifting
+          subtly closer + clearing from soft-focus via --introbg-scale / --introbg-blur),
+          while only the breathing SQUARE starts small and far and grows into prominence
+          (--intro-scale / --intro-blur). Both rest at scale 1 / blur 0 — inert outside
+          the launch. The shared parent carries the completion-phase dim and a meadow-
+          toned backdrop (visible only if the meadow ever sits below full coverage). */}
       <div style={{
         position: 'absolute',
         inset: 0,
-        filter: 'blur(var(--intro-blur, 0px))',
-        transform: 'translateY(var(--intro-y, 0px)) scale(var(--intro-scale, 1))',
-        transformOrigin: 'center center',
-        willChange: 'transform, filter',
+        background: '#0A3F33',
         opacity: phase === 'completion' ? COMPLETION_CANVAS_OPACITY : 1,
         transition: phase === 'completion' ? 'opacity 1800ms ease' : undefined,
       }}>
-        {/* Saturation wrapper — bg canvas and game canvas share one filter so
-            the heat gauge desaturates the entire world in lockstep. */}
+        {/* Background — the meadow floor; fills the viewport, desaturates with the
+            heat gauge, and during the launch drifts gently closer + clears to focus. */}
         <div style={{
           position: 'absolute',
           inset: 0,
-          filter: 'saturate(var(--game-saturation, 1))',
-          willChange: 'filter',
+          filter: 'saturate(var(--game-saturation, 1)) blur(var(--introbg-blur, 0px))',
+          transform: 'scale(var(--introbg-scale, 1))',
+          transformOrigin: 'center center',
+          willChange: 'transform, filter',
         }}>
           {/* Meadow floor — baked at resize; all texture/lighting composited in canvas-land */}
           <canvas
             ref={bgCanvasRef}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
           />
-
-          <SquareCanvas
-            ref={squareCanvasRef}
-            strokeModeRef={strokeModeRef}
-            pacingCanvasRef={pacingCanvasRef}
-            onGameStart={() => { sessionStartRef.current = Date.now() }}
-            onGameStateTick={directorTickRef.current}
-            onResize={setLabelGeo}
-            interactive={phase === 'game'}
-          />
         </div>
+
+        {/* Foreground — the breathing square (track + pacing + labels): the thing
+            that approaches, growing from small and far into prominence. */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          filter: 'blur(var(--intro-blur, 0px))',
+          transform: 'translateY(var(--intro-y, 0px)) scale(var(--intro-scale, 1))',
+          transformOrigin: 'center center',
+          willChange: 'transform, filter',
+        }}>
+          {/* Saturation wrapper — the track desaturates in lockstep with the meadow
+              (same --game-saturation) so the heat gauge dims the whole world. */}
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            filter: 'saturate(var(--game-saturation, 1))',
+            willChange: 'filter',
+          }}>
+            <SquareCanvas
+              ref={squareCanvasRef}
+              strokeModeRef={strokeModeRef}
+              pacingCanvasRef={pacingCanvasRef}
+              onGameStart={() => { sessionStartRef.current = Date.now() }}
+              onGameStateTick={directorTickRef.current}
+              onResize={setLabelGeo}
+              interactive={phase === 'game'}
+            />
+          </div>
 
         {/* Pacing-circle layer — sits ABOVE the saturate wrapper so the circle
             (and its grown/glowing state at the heat-gauge floor) stays vivid
@@ -389,6 +419,7 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
             </div>
           )
         })()}
+        </div>
       </div>
 
       {/* Vignette — sits above all canvas and overlay layers */}
@@ -417,14 +448,6 @@ export default function SquareGame({ onExit, introVariant = 'fadeSettle' }) {
         <CompletionScreen
           durationSeconds={completionSeconds}
           onDismiss={handleCompletionDismiss}
-        />
-      )}
-
-      {/* intro overlay — intro phase only */}
-      {phase === 'intro' && (
-        <GameIntro
-          variant={introVariant}
-          onComplete={() => setPhase('game')}
         />
       )}
     </div>

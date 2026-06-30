@@ -31,6 +31,13 @@ const useStore = create((set) => ({
   // 3 = Square's position in src/data/games.js — the default centered card.
   homeActiveCardIndex: 3,
   setHomeActiveCardIndex: (i) => set({ homeActiveCardIndex: i }),
+
+  // Card→game zoom transition. Holds the tapped card's on-screen rect + target
+  // route so the app-level overlay (above the router) can zoom from the card to
+  // full screen and hand off into the game's intro. null = no transition active.
+  cardTransition: null,
+  startCardTransition: (fromRect, route) => set({ cardTransition: { fromRect, route } }),
+  endCardTransition: () => set({ cardTransition: null }),
 }))
 
 export default useStore
