@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Whoosha · Dandelion Transition Prototype</title>
+<style>
+  :root {
+    --bg: #9FBFB4;
+    --text-forest: #3E5E52;
+    --text-sage: #6D9B8A;
+    --panel: rgba(20, 40, 34, 0.78);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%; margin: 0;
+    font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+    background: #082B26; color: var(--text-forest);
+    overflow: hidden; user-select: none; -webkit-user-select: none;
+  }
+
+  /* Stage = the phone-ish viewport. Stays centered; everything is absolute inside. */
+  #stage {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+  }
+
+  /* The live "game" behind everything — a faithful-ish meadow so the reveal is honest. */
+  #meadow { position: absolute; inset: 0; display: block; }
+
+  /* The card. Its inner canvas mimics SquareCardPreview. */
+  #card {
+    position: absolute;
+    width: 200px; height: 280px;
+    border-radius: 24px; overflow: hidden;
+    box-shadow: 0 12px 32px rgba(62,94,82,.22), 0 2px 6px rgba(62,94,82,.12);
+    cursor: pointer;
+    transition: transform 130ms cubic-bezier(.22,1,.36,1);
+    will-change: transform;
+  }
+  #card.press { transform: scale(.955); }        /* the button-push beat */
+  #card.gone  { opacity: 0; transition: opacity 220ms ease; }
+  #cardCanvas { width: 100%; height: 100%; display: block; }
+  #cardLabel {
+    position: absolute; left: 0; right: 0; top: 86%;
+    transform: translateY(-50%); text-align: center;
+    font-weight: 600; font-size: 18px; color: #3A5A4D; pointer-events: none;
+  }
+
+  /* The single full-screen particle overlay — mounted only during the transition. */
+  #fx {
+    position: absolute; inset: 0; display: block;
+    pointer-events: none; opacity: 0;
+  }
+  #fx.live { opacity: 1; }
+
+  /* ── Tuning panel ─────────────────────────────────────────────── */
+  #panel {
+    position: absolute; top: 0; right: 0; z-index: 50;
+    width: 268px; max-height: 100%; overflow-y: auto;
+    background: var(--panel); color: #DCEFE8;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    padding: 14px 16px; font-size: 12px; line-height: 1.5;
+    border-bottom-left-radius: 14px;
+    transform: translateX(0); transition: transform .25s ease;
+  }
+  #panel.hidden { transform: translateX(calc(100% - 34px)); }
+  #panel h1 { font-size: 13px; margin: 0 0 8px; letter-spacing: .3px; }
+  #panel .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 5px 0; }
+  #panel .row label { flex: 1; opacity: .85; }
+  #panel input[type=range] { width: 108px; }
+  #panel .val { width: 42px; text-align: right; font-variant-numeric: tabular-nums; opacity: .95; }
+  #panel .grp { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.12); }
+  #panel .grp:first-of-type { border-top: none; padding-top: 0; }
+  #panel .grp-h { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; opacity: .55; margin-bottom: 4px; }
+  .btns { display: flex; gap: 8px; margin-top: 12px; }
+  .btns button {
+    flex: 1; padding: 9px 0; border: none; border-radius: 9px; cursor: pointer;
+    font-family: inherit; font-weight: 700; font-size: 12px;
+    background: #4A9B7F; color: #062019;
+  }
+  .btns button.alt { background: rgba(255,255,255,.14); color: #DCEFE8; }
+  #togglePanel {
+    position: absolute; top: 10px; left: -2px; width: 28px; height: 28px;
+    display: grid; place-items: center; cursor: pointer;
+    background: rgba(0,0,0,.2); border-radius: 7px; font-size: 14px;
+  }
+  #hint {
+    position: absolute; bottom: 22px; left: 0; right: 0; text-align: center;
+    color: rgba(255,255,255,.7); font-size: 13px; pointer-events: none;
+    transition: opacity .3s ease;
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="meadow"></canvas>
+
+    <div id="card">
+      <canvas id="cardCanvas"></canvas>
+      <div id="cardLabel">Square Breathing</div>
+    </div>
+
+    <canvas id="fx"></canvas>
+    <div id="hint">tap the card to take a breath</div>
+  </div>
+
+  <div id="panel">
+    <div id="togglePanel">⚙</div>
+    <h1>Dandelion Transition · tuning</h1>
+
+    <div class="grp">
+      <div class="grp-h">Bloom (seeds spread)</div>
+      <div class="row"><label>seed count</label><input id="p_count" type="range" min="120" max="1400" step="20" value="1400"><span class="val" id="v_count"></span></div>
+      <div class="row"><label>emit window (ms)</label><input id="p_emit" type="range" min="200" max="1200" step="20" value="1200"><span class="val" id="v_emit"></span></div>
+      <div class="row"><label>spread speed</label><input id="p_drift" type="range" min="20" max="220" step="5" value="75"><span class="val" id="v_drift"></span></div>
+      <div class="row"><label>updraft</label><input id="p_lift" type="range" min="0" max="120" step="5" value="120"><span class="val" id="v_lift"></span></div>
+      <div class="row"><label>swirl</label><input id="p_swirl" type="range" min="0" max="100" step="2" value="100"><span class="val" id="v_swirl"></span></div>
+      <div class="row"><label>seed size</label><input id="p_size" type="range" min="6" max="26" step="1" value="14"><span class="val" id="v_size"></span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h">Coverage (whiteout peak)</div>
+      <div class="row"><label>hold at peak (ms)</label><input id="p_hold" type="range" min="0" max="900" step="20" value="620"><span class="val" id="v_hold"></span></div>
+      <div class="row"><label>white veil</label><input id="p_veil" type="range" min="0" max="100" step="2" value="70"><span class="val" id="v_veil"></span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h">Breath blow-off</div>
+      <div class="row"><label>wind strength</label><input id="p_wind" type="range" min="200" max="2600" step="50" value="1800"><span class="val" id="v_wind"></span></div>
+      <div class="row"><label>wind angle°</label><input id="p_wangle" type="range" min="-90" max="90" step="5" value="75"><span class="val" id="v_wangle"></span></div>
+      <div class="row"><label>gust ramp (ms)</label><input id="p_gust" type="range" min="80" max="700" step="20" value="240"><span class="val" id="v_gust"></span></div>
+      <div class="row"><label>blow-off (ms)</label><input id="p_blow" type="range" min="500" max="1800" step="50" value="950"><span class="val" id="v_blow"></span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-h">Whoosh (one-shot synth)</div>
+      <div class="row"><label>volume</label><input id="p_vol" type="range" min="0" max="100" step="2" value="56"><span class="val" id="v_vol"></span></div>
+      <div class="row"><label>brightness</label><input id="p_bright" type="range" min="400" max="3200" step="50" value="1500"><span class="val" id="v_bright"></span></div>
+      <div class="row"><label>length (ms)</label><input id="p_wlen" type="range" min="400" max="1600" step="50" value="900"><span class="val" id="v_wlen"></span></div>
+      <div class="row"><label>sound on</label><input id="p_snd" type="checkbox" checked></div>
+    </div>
+
+    <div class="btns">
+      <button id="replay">▶ Replay</button>
+      <button class="alt" id="reset">Reset card</button>
+    </div>
+  </div>
+
+<script>
+// ────────────────────────────────────────────────────────────────────────────
+// Whoosha — Dandelion transition prototype
+//
+// Purpose: dial in the FEEL of the carousel-card → game transition before any
+// app code is touched. Four beats:
+//   1. press   — card depresses like a physical button (CSS, in markup)
+//   2. bloom   — card breaks into dandelion seeds that spread & fill the screen
+//   3. peak    — near-full whiteout; the "game" mounts hidden behind (here it's
+//                already painted — the meadow — we just reveal it)
+//   4. blow    — a synthesized breath WHOOSH + a wind force sweeps seeds away
+//
+// Everything particle-related lives on ONE canvas (#fx), torn down to opacity 0
+// when idle — mirroring the single-overlay perf rule in the real app.
+// Seed sprite is baked ONCE to an offscreen canvas; per-frame cost is drawImage.
+// ────────────────────────────────────────────────────────────────────────────
+
+const dpr = () => Math.min(window.devicePixelRatio || 1, 3);
+
+// ── Elements ────────────────────────────────────────────────────────────────
+const stage   = document.getElementById('stage');
+const meadow  = document.getElementById('meadow');
+const card    = document.getElementById('card');
+const cardCv  = document.getElementById('cardCanvas');
+const fx      = document.getElementById('fx');
+const hint    = document.getElementById('hint');
+
+// ── Tunables (bound to sliders) ─────────────────────────────────────────────
+const P = {};
+const bind = (id, key, fmt = v => v) => {
+  const el = document.getElementById('p_' + id);
+  const out = document.getElementById('v_' + id);
+  const read = () => (el.type === 'checkbox' ? el.checked : parseFloat(el.value));
+  const sync = () => { P[key] = read(); if (out) out.textContent = fmt(P[key]); };
+  el.addEventListener('input', sync); sync();
+};
+bind('count','count'); bind('emit','emit',v=>v+'ms'); bind('drift','drift');
+bind('lift','lift'); bind('swirl','swirl'); bind('size','size',v=>v+'px');
+bind('hold','hold',v=>v+'ms'); bind('veil','veil',v=>v+'%');
+bind('wind','wind'); bind('wangle','wangle',v=>v+'°'); bind('gust','gust',v=>v+'ms');
+bind('blow','blow',v=>v+'ms');
+bind('vol','vol',v=>v+'%'); bind('bright','bright',v=>v+'Hz'); bind('wlen','wlen',v=>v+'ms');
+bind('snd','snd');
+
+// ── Meadow background (mirrors buildMeadowBg's base wash) ────────────────────
+function drawMeadow() {
+  const w = stage.clientWidth, h = stage.clientHeight, d = dpr();
+  meadow.width = w * d; meadow.height = h * d;
+  const ctx = meadow.getContext('2d');
+  ctx.scale(d, d);
+  const bg = ctx.createLinearGradient(0, 0, w * 0.6, h);
+  bg.addColorStop(0,   '#28C5AD'); bg.addColorStop(.30,'#159986');
+  bg.addColorStop(.55, '#097969'); bg.addColorStop(.78,'#094E44');
+  bg.addColorStop(1,   '#082B26');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+  // a couple of sun pools so the reveal reads as "alive"
+  for (const [cx,cy,rf,a] of [[.22,.28,.38,.12],[.72,.20,.28,.09],[.6,.68,.34,.10]]) {
+    const px=cx*w, py=cy*h, r=rf*Math.max(w,h);
+    const g=ctx.createRadialGradient(px,py,0,px,py,r);
+    g.addColorStop(0,`rgba(218,195,128,${a})`); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.globalCompositeOperation='screen'; ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  }
+  // faint square-track ghost so the eye lands where the game's track will be
+  ctx.globalCompositeOperation='source-over';
+  const sq=Math.min(w,h)*0.62, cx=w/2, cy=h/2, r=sq*0.22;
+  ctx.beginPath(); ctx.roundRect(cx-sq/2, cy-sq/2, sq, sq, r);
+  ctx.lineWidth=sq*0.0728*2+8; ctx.strokeStyle='rgba(236,230,214,0.16)'; ctx.stroke();
+}
+
+// ── Card render (mirrors SquareCardPreview) ─────────────────────────────────
+function drawCard() {
+  const w = cardCv.clientWidth, h = cardCv.clientHeight, d = dpr();
+  cardCv.width = w * d; cardCv.height = h * d;
+  const ctx = cardCv.getContext('2d'); ctx.setTransform(d,0,0,d,0,0);
+  const bg = ctx.createLinearGradient(0,0,w*0.5,h);
+  bg.addColorStop(0,'#B8D2C6'); bg.addColorStop(1,'#8FAE9F');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,w,h);
+  const sq=Math.min(w,h)*0.70, half=sq/2, cx=w/2, cy=h*0.5;
+  const cornerR=sq*0.22, lw=sq*0.0728*2+8;
+  ctx.beginPath(); ctx.roundRect(cx-half, cy-half, sq, sq, cornerR);
+  ctx.lineWidth=lw; ctx.strokeStyle='#ECE6D6'; ctx.stroke();
+  const dotR=lw*0.62;
+  ctx.beginPath(); ctx.arc(cx-half+cornerR, cy+half, dotR, 0, Math.PI*2);
+  ctx.fillStyle='#F4F0E6'; ctx.fill();
+}
+
+// ── Baked round fluff sprite ─────────────────────────────────────────────────
+// A fully ROUND, soft puff (like a dandelion clock seen head-on): a downy halo
+// of fine filaments radiating in every direction from a soft glowing core.
+// Drawn once at high res, then scaled per-particle with drawImage — zero
+// per-frame vector cost. The softness comes from three layered passes:
+//   1. a wide diffuse glow (the airy outer fuzz)
+//   2. ~40 fine filaments at 360° with downy tips (the texture)
+//   3. a soft bright core (gives each puff a gentle center)
+let seedSprite = null;
+function bakeSeed() {
+  const S = 80;
+  const oc = document.createElement('canvas'); oc.width = oc.height = S;
+  const c = oc.getContext('2d');
+  const cx = S/2, cy = S/2;
+  const Rout = S * 0.46;                  // outer reach of the fluff
+
+  // 1 ── diffuse outer glow — a wide, dense soft halo (the airy cotton body)
+  const halo = c.createRadialGradient(cx, cy, 0, cx, cy, Rout);
+  halo.addColorStop(0,    'rgba(255,255,255,0.55)');
+  halo.addColorStop(0.45, 'rgba(255,255,255,0.34)');
+  halo.addColorStop(0.78, 'rgba(255,255,255,0.12)');
+  halo.addColorStop(1,    'rgba(255,255,255,0)');
+  c.fillStyle = halo; c.beginPath(); c.arc(cx, cy, Rout, 0, Math.PI*2); c.fill();
+
+  // 2 ── many fine, faint filaments at 360° — dense + thin so they read as
+  // soft down rather than distinct spokes. No hard barbs.
+  c.lineCap = 'round';
+  const N = 76;
+  for (let i = 0; i < N; i++) {
+    const a   = (i / N) * Math.PI * 2 + Math.random()*0.14;
+    const len = Rout * (0.80 + 0.18 * Math.random());     // rounder, even edge
+    const ex  = cx + Math.cos(a)*len, ey = cy + Math.sin(a)*len;
+    c.strokeStyle = `rgba(255,255,255,${0.18 + Math.random()*0.22})`;
+    c.lineWidth = 0.7;
+    c.beginPath(); c.moveTo(cx, cy); c.lineTo(ex, ey); c.stroke();
+  }
+
+  // 3 ── scattered downy specks — tiny soft blobs across the disc give the
+  // cotton-ball texture that makes it read as fluff, not a starburst.
+  for (let i = 0; i < 60; i++) {
+    const a = Math.random()*Math.PI*2;
+    const rr = Rout * (0.20 + 0.72*Math.sqrt(Math.random()));
+    const px = cx + Math.cos(a)*rr, py = cy + Math.sin(a)*rr;
+    const br = S * (0.018 + 0.030*Math.random());
+    const sg = c.createRadialGradient(px, py, 0, px, py, br);
+    sg.addColorStop(0, `rgba(255,255,255,${0.30 + Math.random()*0.30})`);
+    sg.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = sg; c.beginPath(); c.arc(px, py, br, 0, Math.PI*2); c.fill();
+  }
+
+  // 4 ── soft bright core — a gentle, slightly off-white center
+  const core = c.createRadialGradient(cx, cy, 0, cx, cy, Rout*0.46);
+  core.addColorStop(0,   'rgba(255,255,255,0.80)');
+  core.addColorStop(0.6, 'rgba(252,250,242,0.40)');
+  core.addColorStop(1,   'rgba(255,255,255,0)');
+  c.fillStyle = core; c.beginPath(); c.arc(cx, cy, Rout*0.46, 0, Math.PI*2); c.fill();
+
+  seedSprite = oc;
+}
+
+// ── Particle system ─────────────────────────────────────────────────────────
+let particles = [];
+let anim = { running: false, t0: 0, raf: 0, blowStart: null, veil: 0 };
+
+function rand(a, b) { return a + Math.random()*(b-a); }
+
+function emitSeed(originRect) {
+  // spawn within the card's rect, biased toward the track (where the "breath" hits)
+  const ang = rand(0, Math.PI*2), rad = Math.sqrt(Math.random());
+  const x = originRect.cx + Math.cos(ang) * rad * originRect.w * 0.5;
+  const y = originRect.cy + Math.sin(ang) * rad * originRect.h * 0.5;
+  // initial impulse: gentle outward from card center (the touch "puff")
+  const ox = x - originRect.cx, oy = y - originRect.cy;
+  const om = Math.hypot(ox, oy) || 1;
+  return {
+    x, y,
+    vx: (ox/om) * rand(10, 40),
+    vy: (oy/om) * rand(10, 40) - rand(8, 30),   // slight upward bias
+    rot: rand(0, Math.PI*2),
+    vrot: rand(-1, 1),
+    size: P.size * rand(0.6, 1.35),
+    alpha: 0,
+    targetAlpha: rand(0.55, 0.95),
+    seed: Math.random()*1000,
+    born: performance.now(),
+  };
+}
+
+function start() {
+  const r = card.getBoundingClientRect();
+  const sr = stage.getBoundingClientRect();
+  const origin = { cx: r.left - sr.left + r.width/2, cy: r.top - sr.top + r.height/2, w: r.width, h: r.height };
+
+  sizeFx();
+  particles = [];
+  anim.running = true; anim.t0 = performance.now(); anim.blowStart = null; anim.veil = 0;
+  fx.classList.add('live');
+  hint.style.opacity = '0';
+
+  // beat 1: press, then beat 2: card gone + emission
+  card.classList.add('press');
+  setTimeout(() => {
+    card.classList.remove('press');
+    card.classList.add('gone');
+
+    // emit seeds spread across the emit window
+    const total = Math.round(P.count);
+    const emitMs = P.emit;
+    let emitted = 0;
+    const emitTimer = setInterval(() => {
+      const batch = Math.ceil(total / (emitMs / 16));
+      for (let i = 0; i < batch && emitted < total; i++, emitted++) {
+        particles.push(emitSeed(origin));
+      }
+      if (emitted >= total) clearInterval(emitTimer);
+    }, 16);
+
+    // schedule the blow-off: after emit + hold, the breath sweeps them away
+    const blowAt = emitMs + P.hold;
+    setTimeout(() => triggerBlow(), blowAt);
+  }, 130);
+
+  cancelAnimationFrame(anim.raf);
+  loop();
+}
+
+function triggerBlow() {
+  anim.blowStart = performance.now();
+  if (P.snd) playWhoosh();
+}
+
+function sizeFx() {
+  const w = stage.clientWidth, h = stage.clientHeight, d = dpr();
+  fx.width = w * d; fx.height = h * d;
+  const ctx = fx.getContext('2d'); ctx.setTransform(d,0,0,d,0,0);
+  anim.w = w; anim.h = h;
+}
+
+let lastT = 0;
+function loop(now) {
+  now = now || performance.now();
+  const dt = Math.min(0.05, (now - (lastT || now)) / 1000); lastT = now;
+  const ctx = fx.getContext('2d');
+  const w = anim.w, h = anim.h;
+  ctx.clearRect(0, 0, w, h);
+
+  // ── veil: rises toward the whiteout peak, then clears during blow-off ──
+  const elapsed = now - anim.t0;
+  const peakAt = P.emit + P.hold;
+  let veilTarget;
+  if (anim.blowStart) {
+    const bt = (now - anim.blowStart) / P.blow;
+    veilTarget = (P.veil/100) * Math.max(0, 1 - bt*1.6);
+  } else {
+    veilTarget = (P.veil/100) * Math.min(1, elapsed / Math.max(1, peakAt*0.85));
+  }
+  anim.veil += (veilTarget - anim.veil) * Math.min(1, dt*6);
+
+  // ── wind force during blow-off ──
+  let wind = { x: 0, y: 0, gust: 0 };
+  if (anim.blowStart) {
+    const since = now - anim.blowStart;
+    const ramp = Math.min(1, since / P.gust);
+    const a = P.wangle * Math.PI/180;
+    // wind blows up-and-across (negative y = up the screen)
+    wind.gust = P.wind * ramp;
+    wind.x = Math.cos(a) * wind.gust;
+    wind.y = (Math.sin(a) - 1) * wind.gust;   // -1 → strong updraft component
+  }
+
+  // ── integrate + draw particles ──
+  let alive = 0;
+  for (const p of particles) {
+    // fade in
+    p.alpha += (p.targetAlpha - p.alpha) * Math.min(1, dt*5);
+
+    if (!anim.blowStart) {
+      // BLOOM: gentle buoyant drift + swirl, spreading outward to fill screen
+      const swirl = P.swirl;
+      p.vx += Math.sin(now*0.0006 + p.seed) * swirl * dt;
+      p.vy += Math.cos(now*0.0005 + p.seed*1.3) * swirl * 0.6 * dt;
+      p.vy -= P.lift * dt;                         // buoyancy / updraft
+      // mild outward push so the field expands to cover
+      p.vx *= 1 + 0.4*dt; p.vy *= 1 + 0.2*dt;
+      const speedCap = P.drift;
+      p.vx = Math.max(-speedCap, Math.min(speedCap, p.vx));
+      p.vy = Math.max(-speedCap, Math.min(speedCap, p.vy));
+    } else {
+      // BLOW-OFF: the breath. strong directional wind + turbulence.
+      const turb = Math.sin(now*0.003 + p.seed) * wind.gust * 0.12;
+      p.vx += (wind.x + turb) * dt;
+      p.vy += (wind.y) * dt;
+      p.vrot += (p.vx) * 0.0008;
+    }
+
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.rot += p.vrot * dt;
+
+    // cull off-screen during blow-off
+    const off = p.x < -80 || p.x > w+80 || p.y < -80 || p.y > h+80;
+    if (anim.blowStart && off) { p.dead = true; continue; }
+    if (p.dead) continue;
+    alive++;
+
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.alpha));
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    const s = p.size;
+    ctx.drawImage(seedSprite, -s/2, -s/2, s, s);
+    ctx.restore();
+  }
+
+  // ── white veil (fills gaps to reach near-full whiteout cheaply) ──
+  if (anim.veil > 0.001) {
+    const g = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.hypot(w,h)/2);
+    g.addColorStop(0, `rgba(255,255,255,${anim.veil})`);
+    g.addColorStop(0.7, `rgba(255,255,255,${anim.veil*0.9})`);
+    g.addColorStop(1, `rgba(255,255,255,${anim.veil*0.5})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  }
+
+  // ── end condition ──
+  const blowDone = anim.blowStart && (now - anim.blowStart) > P.blow;
+  if (blowDone && alive === 0) {
+    finishAnim();
+    return;
+  }
+  if (blowDone && (now - anim.blowStart) > P.blow + 600) {
+    finishAnim(); return;   // safety stop
+  }
+  anim.raf = requestAnimationFrame(loop);
+}
+
+function finishAnim() {
+  anim.running = false;
+  fx.classList.remove('live');
+  const ctx = fx.getContext('2d');
+  ctx.clearRect(0, 0, anim.w, anim.h);
+  particles = [];
+  // reveal complete — the meadow is fully visible
+}
+
+// ── Whoosh: one-shot synthesized breath (pink-ish noise → highpass → swept ──
+// bandpass → bell envelope). Same primitive vocabulary as src/sound/synthBreath.
+let audioCtx = null, noiseBuf = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const len = audioCtx.sampleRate * 2;
+    noiseBuf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    let b0=0,b1=0,b2=0;
+    for (let i=0;i<len;i++){           // cheap pink-ish noise
+      const w = Math.random()*2-1;
+      b0 = 0.99*b0 + w*0.05; b1 = 0.96*b1 + w*0.08; b2 = 0.57*b2 + w*0.30;
+      d[i] = (b0+b1+b2+w*0.1) * 0.4;
+    }
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+function playWhoosh() {
+  ensureAudio();
+  const t = audioCtx.currentTime;
+  const dur = P.wlen / 1000;
+  const src = audioCtx.createBufferSource();
+  src.buffer = noiseBuf; src.loop = true;
+  const hp = audioCtx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=180; hp.Q.value=0.7;
+  const bp = audioCtx.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=0.8;
+  // brightness sweep: rise then fall (an exhaled breath)
+  const peak = P.bright;
+  bp.frequency.setValueAtTime(peak*0.45, t);
+  bp.frequency.linearRampToValueAtTime(peak, t + dur*0.4);
+  bp.frequency.linearRampToValueAtTime(peak*0.4, t + dur);
+  const g = audioCtx.createGain();
+  const vol = P.vol/100;
+  // asymmetric bell: fast rise, long soft tail
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(vol, t + dur*0.22);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(hp).connect(bp).connect(g).connect(audioCtx.destination);
+  src.start(t); src.stop(t + dur + 0.05);
+}
+
+// ── Wiring ──────────────────────────────────────────────────────────────────
+function resetCard() {
+  card.classList.remove('gone', 'press');
+  fx.classList.remove('live');
+  hint.style.opacity = '1';
+  cancelAnimationFrame(anim.raf);
+  particles = []; anim.running = false;
+  const ctx = fx.getContext('2d'); if (anim.w) ctx.clearRect(0,0,anim.w,anim.h);
+}
+
+card.addEventListener('pointerdown', () => { ensureAudio(); if (!anim.running) start(); });
+document.getElementById('replay').addEventListener('click', () => { resetCard(); requestAnimationFrame(() => requestAnimationFrame(start)); });
+document.getElementById('reset').addEventListener('click', resetCard);
+document.getElementById('togglePanel').addEventListener('click', () => document.getElementById('panel').classList.toggle('hidden'));
+
+function layout() {
+  // center the card in the stage
+  const sr = stage.getBoundingClientRect();
+  card.style.left = (sr.width/2 - 100) + 'px';
+  card.style.top  = (sr.height/2 - 140) + 'px';
+  drawMeadow(); drawCard(); sizeFx();
+}
+bakeSeed();
+layout();
+window.addEventListener('resize', layout);
+</script>
+</body>
+</html>
