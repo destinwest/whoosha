@@ -14,7 +14,7 @@ import HomePage from './pages/HomePage'
 import DashboardPage from './pages/DashboardPage'
 import AccountPage from './pages/AccountPage'
 import SquarePage from './pages/games/SquarePage'
-import GameLaunch from './components/transitions/GameLaunch'
+import DandelionLaunch from './components/transitions/DandelionLaunch'
 import DragonPage from './pages/games/DragonPage'
 import HexagonPage from './pages/games/HexagonPage'
 
@@ -179,7 +179,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AppRoutes />
-      <GameLaunch />
+      <DandelionLaunch />
     </BrowserRouter>
   )
 }
