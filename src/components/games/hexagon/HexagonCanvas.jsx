@@ -22,12 +22,11 @@
 import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
 import * as stampStroke   from '../square/strokes/stampStroke'
 import * as layeredWash   from '../square/strokes/layeredWash'
-import { roundedNgonPath } from '../_shared/roundedNgonPath'
+import { roundedPolyPath, offsetPolygon } from '../_shared/roundedPolyPath'
 
 // ── HEXAGON-SPECIFIC: shape + timing ─────────────────────────────────────────
 const SIDES                 = 6
-const HEX_START_ANGLE       = (2 * Math.PI) / 3 + Math.PI / 2  // 7π/6 — rotated +90° from the original so the two hold sides sit E/W (vertical); V[0] now upper-left, pointy top/bottom
-const HEX_INSCRIBED_FACTOR  = Math.cos(Math.PI / 6)        // apothem / circumradius for regular hexagon
+const HEX_INSCRIBED_FACTOR  = Math.cos(Math.PI / 6)        // apothem / circumradius; also the half-width of a unit-R breathe side
 const SIDE_DURATIONS_MS     = [4000, 4000, 2000, 4000, 4000, 2000]  // breathe-in / out / hold x 2
 const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 20_000
 
@@ -125,33 +124,76 @@ function buildGeo(rect) {
   const circleR = (2 * R) * 0.0728
   const lw      = circleR * 2 + 8
 
-  // Vertex angles (canvas coords, +y down). Starting at lower-left (2π/3) and
-  // incrementing CW (each next vertex at +π/3). Order:
-  //   V0 lower-left, V1 left, V2 upper-left, V3 upper-right, V4 right, V5 lower-right
-  const verts = []
-  for (let i = 0; i < SIDES; i++) {
-    const a = HEX_START_ANGLE + i * (Math.PI * 2 / SIDES)
-    verts.push({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) })
-  }
-
   // Corner-arc geometry. For an inscribed arc of radius r tangent to both edges
   // of a corner with interior angle θ, the tangent points sit at distance
   // r/tan(θ/2) from the vertex along each edge (NOT distance r — that's only
   // correct for a 90° square corner, where tan(45°)=1). Using the full r here
   // was the bug that made the traceable centerline diverge from the visible
-  // track — which is drawn correctly by roundedNgonPath/arcTo — at every
+  // track — which is drawn correctly by roundedPolyPath/arcTo — at every
   // hexagon corner, so the path couldn't be traced through the corners.
+  //
+  // Every interior angle stays 120° (see the vertex construction below), so
+  // cornerTangent and the corner-arc length LA are uniform across all six
+  // corners even though two sides are shorter.
   const interiorAngle = (SIDES - 2) * Math.PI / SIDES   // 120° for a hexagon
   const exteriorAngle = Math.PI - interiorAngle          // 60° — the corner-arc sweep
   const cornerTangent = r / Math.tan(interiorAngle / 2)  // vertex→tangent-point distance
+  const LA            = r * exteriorAngle                // corner arc length (per corner)
 
-  // Side length = circumradius R for a regular hexagon. The straight portion of
-  // each side is shorter by 2·cornerTangent (one tangent inset at each end); the
-  // corner arc (length r·exterior) replaces the sharp vertex.
-  const sideLen = R
-  const LS      = sideLen - 2 * cornerTangent  // straight-segment length per side
-  const LA      = r * exteriorAngle            // corner arc length
-  const sf      = LS / (LS + LA)               // straight-fraction within each side
+  // ── Shortened "hold" sides ──────────────────────────────────────────────────
+  // The two vertical hold sides (2 & 5) are traced in half the time of the four
+  // breathe sides (2000ms vs 4000ms). To keep the pacing circle's LINEAR speed
+  // constant, each hold side's *total traced length* (straight + its corner arc)
+  // must scale by that duration ratio. Every side carries one identical corner
+  // arc (LA), so we solve for the shortened straight part:
+  //   total_breathe = LS_breathe + LA        (LS = side length − 2·cornerTangent)
+  //   total_hold    = total_breathe · (holdDur / breatheDur)
+  //   LS_hold       = total_hold − LA   →   holdLen = LS_hold + 2·cornerTangent
+  // Breathe sides keep length R (fixed), and central symmetry lets the polygon
+  // close for any hold length while every interior angle stays 120°.
+  const breatheLen    = R
+  const LS_breathe    = breatheLen - 2 * cornerTangent
+  const totalBreathe  = LS_breathe + LA
+  const holdRatio     = SIDE_DURATIONS_MS[2] / SIDE_DURATIONS_MS[0]  // 2000/4000 = 0.5
+  const LS_hold       = totalBreathe * holdRatio - LA
+  if (LS_hold <= 0) {
+    // The corner arcs alone already exceed the hold side's time budget — the
+    // hold side can't fit its two corner insets. Would need a smaller corner
+    // radius r; surfaced here rather than silently self-intersecting.
+    console.warn('[hexagon] hold side too short for corner radius — reduce r')
+  }
+  const holdLen       = Math.max(2 * cornerTangent, LS_hold + 2 * cornerTangent)
+
+  // Explicit vertices for the symmetric, irregular hexagon. Breathe sides keep
+  // length R with their original ±30° directions; only the vertical hold sides
+  // shrink (holdLen), pulling the pointy top/bottom vertices inward. Width and
+  // interior angles are unchanged; overall height shrinks from 2R to R+holdLen.
+  //   V0 upper-left · V1 top · V2 upper-right · V3 lower-right · V4 bottom · V5 lower-left
+  //   holds: side 2 = V2→V3 (right vertical), side 5 = V5→V0 (left vertical)
+  const a  = R * HEX_INSCRIBED_FACTOR   // half-width  (= R·cos30, breathe side's x-run)
+  const by = R * 0.5                    // breathe side's y-run (= R·sin30)
+  const hh = holdLen / 2                // hold side half-height
+  const verts = [
+    { x: cx - a, y: cy - hh      },     // V0 upper-left
+    { x: cx,     y: cy - hh - by  },    // V1 top
+    { x: cx + a, y: cy - hh      },     // V2 upper-right
+    { x: cx + a, y: cy + hh      },     // V3 lower-right
+    { x: cx,     y: cy + hh + by  },    // V4 bottom
+    { x: cx - a, y: cy + hh      },     // V5 lower-left
+  ]
+
+  // Per-side straight-fraction. Each side spends `sfArr[i]` of its 0..1 progress
+  // on the straight segment and the rest on its corner arc. Computed from each
+  // side's actual length so the pacing circle moves at constant speed across the
+  // shorter hold sides (getPacing and the point sampling both use sfArr).
+  const sfArr = []
+  for (let i = 0; i < SIDES; i++) {
+    const p  = verts[i]
+    const q  = verts[(i + 1) % SIDES]
+    const LSi = Math.hypot(q.x - p.x, q.y - p.y) - 2 * cornerTangent
+    sfArr.push(LSi / (LSi + LA))
+  }
+  const sf = sfArr[0]   // representative breathe-side value (used by the label overlay)
 
   // Per-side: straightFrom[i] is the start of the straight segment of side i;
   // straightTo[i] is the end. Both lie on the line between vertex i and i+1,
@@ -214,13 +256,14 @@ function buildGeo(rect) {
     const frac = (i / N) * SIDES
     const si   = Math.min(Math.floor(frac), SIDES - 1)
     const s    = frac - si
-    if (s < sf) {
-      const lt = s / sf
+    const sfi  = sfArr[si]
+    if (s < sfi) {
+      const lt = s / sfi
       const a  = straightFrom[si]
       const b  = straightTo[si]
       points.push({ x: a.x + (b.x - a.x) * lt, y: a.y + (b.y - a.y) * lt })
     } else {
-      const arcT  = (s - sf) / (1 - sf)                     // 0 → 1 across the arc
+      const arcT  = (s - sfi) / (1 - sfi)                  // 0 → 1 across the arc
       const ac    = arcCenters[si]
       // Arc sweeps by the exterior angle (π/3 for a hexagon). In canvas coords
       // (y down), "CW visually" = increasing angle.
@@ -244,7 +287,7 @@ function buildGeo(rect) {
   const sq = 2 * R
 
   return {
-    cx, cy, sq, R, r, lw, sf,
+    cx, cy, sq, R, r, lw, sf, sfArr,
     arcCenters, arcStartAngles,
     straightFrom, straightTo, verts,
     points, labelMids,
@@ -255,16 +298,15 @@ function buildGeo(rect) {
 
 
 // ── Racetrack draw passes (hexagon) ──────────────────────────────────────────
-// trackGeo: { cx, cy, R, cornerR, lw, startAngle } — all in CSS px.
-// Each pass uses the same path geometry, stroking the rounded N-gon path with
-// different widths/styles to build the layered "raised channel" effect.
+// trackGeo: { cx, cy, R, cornerR, lw, verts } — all in CSS px. `verts` is the
+// centerline polygon (irregular: two shortened hold sides); each pass strokes
+// the rounded path through those vertices with different widths/styles to build
+// the layered "raised channel" effect. cx/cy/R remain for the radial gradient.
 //
-// Inner-wall offset math: to inset the path so its stroke aligns with the
-// inner edge of the track, the circumradius must shrink by lw/2 / cos(π/6)
-// (because reducing R by Δ reduces the apothem by Δ·cos(30°) = Δ·0.866;
-// we want the apothem to shrink by lw/2). The corner-radius reduction is
-// the simple lw/2 because corner radius scales linearly with the path.
-const HEX_INSET_FACTOR = 1 / Math.cos(Math.PI / 6)  // ≈ 1.1547 — multiply lw by this to get R-inset
+// Inner-wall inset: offsetPolygon moves every edge perpendicular-inward by the
+// desired distance directly (no cos(30°) circumradius conversion needed, since
+// we offset the actual edges rather than a single radius). The corner radius
+// shrinks by the same inset distance.
 
 // Called once per resize — returns a radial gradient for Pass B.
 function buildTrackGradient(ctx, { cx, cy, R, lw }) {
@@ -280,10 +322,10 @@ function buildTrackGradient(ctx, { cx, cy, R, lw }) {
 }
 
 // Pass A — outer shadow: bleeds outside track footprint, soft drop shadow.
-function drawTrackShadow(ctx, { cx, cy, R, cornerR, lw, startAngle }) {
+function drawTrackShadow(ctx, { verts, cornerR, lw }) {
   ctx.save()
   ctx.beginPath()
-  roundedNgonPath(ctx, cx, cy, R, SIDES, cornerR, startAngle)
+  roundedPolyPath(ctx, verts, cornerR)
   ctx.lineWidth   = lw + 7
   ctx.strokeStyle = 'rgba(78,68,40,0.22)'
   ctx.stroke()
@@ -291,10 +333,10 @@ function drawTrackShadow(ctx, { cx, cy, R, cornerR, lw, startAngle }) {
 }
 
 // Pass B — gradient body: main cream surface.
-function drawTrackBody(ctx, { cx, cy, R, cornerR, lw, startAngle }, trackGradient) {
+function drawTrackBody(ctx, { verts, cornerR, lw }, trackGradient) {
   ctx.save()
   ctx.beginPath()
-  roundedNgonPath(ctx, cx, cy, R, SIDES, cornerR, startAngle)
+  roundedPolyPath(ctx, verts, cornerR)
   ctx.lineWidth   = lw
   ctx.strokeStyle = trackGradient ?? '#F2EAD0'
   ctx.stroke()
@@ -302,12 +344,12 @@ function drawTrackBody(ctx, { cx, cy, R, cornerR, lw, startAngle }, trackGradien
 }
 
 // Pass C — highlight rim: thin bright sheen on the inner lip (unused/inset).
-function drawTrackHighlight(ctx, { cx, cy, R, cornerR, lw, startAngle }) {
-  const innerR = R - (lw * 0.5) * HEX_INSET_FACTOR
-  const innerCR = Math.max(0, cornerR - lw * 0.5)
+function drawTrackHighlight(ctx, { verts, cornerR, lw }) {
+  const innerVerts = offsetPolygon(verts, -(lw * 0.5))
+  const innerCR    = Math.max(0, cornerR - lw * 0.5)
   ctx.save()
   ctx.beginPath()
-  roundedNgonPath(ctx, cx, cy, innerR, SIDES, innerCR, startAngle)
+  roundedPolyPath(ctx, innerVerts, innerCR)
   ctx.lineWidth   = lw * 0.15
   ctx.strokeStyle = 'rgba(255,252,245,0.55)'
   ctx.stroke()
@@ -315,12 +357,12 @@ function drawTrackHighlight(ctx, { cx, cy, R, cornerR, lw, startAngle }) {
 }
 
 // Pass D — inner wall shadow: faint dark stroke at the inner edge of track.
-function drawTrackInnerWall(ctx, { cx, cy, R, cornerR, lw, startAngle }) {
-  const innerR = R - (lw * 0.5) * HEX_INSET_FACTOR
-  const innerCR = Math.max(0, cornerR - lw * 0.5)
+function drawTrackInnerWall(ctx, { verts, cornerR, lw }) {
+  const innerVerts = offsetPolygon(verts, -(lw * 0.5))
+  const innerCR    = Math.max(0, cornerR - lw * 0.5)
   ctx.save()
   ctx.beginPath()
-  roundedNgonPath(ctx, cx, cy, innerR, SIDES, innerCR, startAngle)
+  roundedPolyPath(ctx, innerVerts, innerCR)
   ctx.lineWidth   = lw * 0.18
   ctx.strokeStyle = 'rgba(78,68,40,0.14)'
   ctx.stroke()
@@ -329,17 +371,19 @@ function drawTrackInnerWall(ctx, { cx, cy, R, cornerR, lw, startAngle }) {
 
 // ── applyPaintClip ────────────────────────────────────────────────────────────
 // Applies a permanent annular clip — outer hexagon minus inner hexagon — so
-// painted strokes can never bleed outside the track channel.
-// save() is intentionally never restored — the clip must persist.
-function applyPaintClip(ctx, { cx, cy, R, cornerR, lw, startAngle }) {
-  const outerR    = R + lw / 2 + 0.5
-  const outerCR   = cornerR + lw / 2 + 0.5
-  const innerR    = R - lw * HEX_INSET_FACTOR - 0.5
-  const innerCR   = Math.max(0, cornerR - lw - 0.5)
+// painted strokes can never bleed outside the track channel. clipArgs carries
+// the centerline `verts` (device px); outer/inner boundaries are perpendicular
+// offsets of it — outward by lw/2, inward by lw — matching the prior regular-
+// hexagon offsets. save() is intentionally never restored — the clip persists.
+function applyPaintClip(ctx, { verts, cornerR, lw }) {
+  const outerVerts = offsetPolygon(verts, lw / 2 + 0.5)
+  const innerVerts = offsetPolygon(verts, -(lw + 0.5))
+  const outerCR    = cornerR + lw / 2 + 0.5
+  const innerCR    = Math.max(0, cornerR - lw - 0.5)
   ctx.save()
   ctx.beginPath()
-  roundedNgonPath(ctx, cx, cy, outerR, SIDES, outerCR, startAngle)
-  roundedNgonPath(ctx, cx, cy, innerR, SIDES, innerCR, startAngle)
+  roundedPolyPath(ctx, outerVerts, outerCR)
+  roundedPolyPath(ctx, innerVerts, innerCR)
   ctx.clip('evenodd')
 }
 
@@ -496,7 +540,7 @@ const HexagonCanvas = forwardRef(function HexagonCanvas(
   function getPacing(elapsed) {
     const geo = geoRef.current
     if (!geo) return null
-    const { sf, straightFrom, straightTo, arcCenters, arcStartAngles, r } = geo
+    const { sfArr, straightFrom, straightTo, arcCenters, arcStartAngles, r } = geo
 
     const t = elapsed % CYCLE_MS
     let sideIdx = SIDES - 1
@@ -506,6 +550,7 @@ const HexagonCanvas = forwardRef(function HexagonCanvas(
     const sideProgress = (t - SIDE_START_MS[sideIdx]) / SIDE_DURATIONS_MS[sideIdx]
     const fraction     = sideIdx + sideProgress
     const s            = sideProgress
+    const sf           = sfArr[sideIdx]   // per-side straight-fraction (holds differ)
 
     if (s < sf) {
       const lt = s / sf
@@ -929,30 +974,29 @@ const HexagonCanvas = forwardRef(function HexagonCanvas(
       geoRef.current     = buildGeo(rect)
       onResize?.({ labelMids: geoRef.current.labelMids, sq: geoRef.current.sq })
 
-      const { cx, cy, R, r, lw } = geoRef.current
+      const { cx, cy, R, r, lw, verts } = geoRef.current
       const paintCtx = paintCanvas.getContext('2d')
       paintCtxRef.current = paintCtx
 
       // Hexagon paint clip — annular region between outer & inner hexagons.
-      // Coordinates are in device pixels (the paint canvas matches main DPR).
+      // Coordinates are in device pixels (the paint canvas matches main DPR),
+      // so the centerline verts are scaled by dpr.
       const clipArgs = {
-        cx:          cx * dpr,
-        cy:          cy * dpr,
-        R:           R * dpr,
+        verts:       verts.map(v => ({ x: v.x * dpr, y: v.y * dpr })),
         cornerR:     r * dpr,
         lw:          lw * dpr,
-        startAngle:  HEX_START_ANGLE,
       }
       clipArgsRef.current = clipArgs
 
       applyPaintClip(paintCtx, clipArgs)
 
       // Track geometry for the racetrack draw passes (CSS px, centerline).
+      // cx/cy/R stay for the radial track gradient; verts drive the path.
       const trackGeo = {
         cx, cy, R,
         cornerR:    r,
         lw,
-        startAngle: HEX_START_ANGLE,
+        verts,
       }
       trackGeoRef.current      = trackGeo
       trackGradientRef.current = buildTrackGradient(ctx, trackGeo)
@@ -1030,8 +1074,7 @@ const HexagonCanvas = forwardRef(function HexagonCanvas(
         ctx.strokeStyle = trackPattern
         ctx.lineWidth   = trackGeo.lw
         ctx.beginPath()
-        roundedNgonPath(ctx, trackGeo.cx, trackGeo.cy, trackGeo.R, SIDES,
-                        trackGeo.cornerR, trackGeo.startAngle)
+        roundedPolyPath(ctx, trackGeo.verts, trackGeo.cornerR)
         ctx.stroke()
         ctx.restore()
       }
