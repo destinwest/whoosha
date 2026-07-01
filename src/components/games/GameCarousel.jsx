@@ -85,35 +85,10 @@ function cardStyle(distance) {
 
 // ── CarouselCard ──────────────────────────────────────────────────────────────
 // Pure visual — clicks bubble up to the carousel-level handler.
-//   pressed    — momentary "physical button" depress on touch
-//   dissolving — the launch has begun; the card fades out as the dandelion
-//                field blooms from it (the card "turns into" the seeds)
-function CarouselCard({ game, distance, dissolving }) {
+function CarouselCard({ game, distance }) {
   const isSquare = game.gameKey === 'square'
-  const [pressed, setPressed] = useState(false)
-  const canPress = isSquare && !game.locked && !!game.route
-
-  const base = cardStyle(distance)
-  const style = {
-    ...base,
-    transform: `${base.transform} scale(${pressed ? 0.955 : 1})`,
-    opacity: dissolving ? 0 : base.opacity,
-    transition: dissolving
-      ? 'opacity 260ms ease'
-      : pressed
-        ? 'transform 120ms cubic-bezier(0.22, 1, 0.36, 1)'
-        : base.transition,
-  }
-
   return (
-    <div
-      data-card-index=""
-      style={style}
-      onPointerDown={canPress ? () => setPressed(true) : undefined}
-      onPointerUp={canPress ? () => setPressed(false) : undefined}
-      onPointerLeave={canPress ? () => setPressed(false) : undefined}
-      onPointerCancel={canPress ? () => setPressed(false) : undefined}
-    >
+    <div data-card-index="" style={cardStyle(distance)}>
       {game.locked && <LockBadge />}
       <div
         className="w-full h-full rounded-3xl overflow-hidden relative"
@@ -202,7 +177,6 @@ export default function GameCarousel() {
   const activeIndex         = useStore((s) => s.homeActiveCardIndex)
   const setActiveIndex      = useStore((s) => s.setHomeActiveCardIndex)
   const startCardTransition = useStore((s) => s.startCardTransition)
-  const cardTransition      = useStore((s) => s.cardTransition)
   const [comingSoonVisible, setComingSoonVisible] = useState(false)
   const wrapRef             = useRef(null)
   const dragStartRef        = useRef(null)
@@ -313,11 +287,9 @@ export default function GameCarousel() {
         <div className="relative h-full">
           {HOME_GAMES.map((game, i) => {
             const distance = i - activeIndex
-            // The launching card fades out as the dandelion field blooms from it.
-            const dissolving = !!cardTransition && i === activeIndex && game.gameKey === 'square'
             return (
               <div key={game.id} onClick={(e) => handleCardClick(i, e)}>
-                <CarouselCard game={game} distance={distance} dissolving={dissolving} />
+                <CarouselCard game={game} distance={distance} />
               </div>
             )
           })}
