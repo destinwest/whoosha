@@ -81,7 +81,9 @@ export default function DandelionLaunch() {
 
     // Safety: end the transition even if onDone never fires (e.g. backgrounded
     // tab pauses rAF). Sized to the full timeline + a generous buffer.
-    const safetyMs = DANDELION_PARAMS.emit + DANDELION_PARAMS.hold + DANDELION_PARAMS.blow + 1200
+    const safetyMs =
+      DANDELION_PARAMS.emit + DANDELION_PARAMS.bloom + DANDELION_PARAMS.white +
+      DANDELION_PARAMS.settle + DANDELION_PARAMS.blow + 1200
     const safety = setTimeout(() => endCardTransition(), safetyMs)
 
     return () => {
