@@ -193,7 +193,6 @@ function buildGeo(rect) {
     const LSi = Math.hypot(q.x - p.x, q.y - p.y) - 2 * cornerTangent
     sfArr.push(LSi / (LSi + LA))
   }
-  const sf = sfArr[0]   // representative breathe-side value (used by the label overlay)
 
   // Per-side: straightFrom[i] is the start of the straight segment of side i;
   // straightTo[i] is the end. Both lie on the line between vertex i and i+1,
@@ -287,7 +286,7 @@ function buildGeo(rect) {
   const sq = 2 * R
 
   return {
-    cx, cy, sq, R, r, lw, sf, sfArr,
+    cx, cy, sq, R, r, lw, sfArr,
     arcCenters, arcStartAngles,
     straightFrom, straightTo, verts,
     points, labelMids,
@@ -1443,22 +1442,36 @@ const HexagonCanvas = forwardRef(function HexagonCanvas(
       ctx.restore()
 
       // ── Label proximity — write CSS vars for DOM overlay ──────────────────
-      {
-        const { sf } = geo
-        const lpFrac  = (((now - pacingStartRef.current) % CYCLE_MS) / CYCLE_MS) * 4
+      // Driven by the pacing circle's ACTUAL fraction (from getPacing), not a
+      // linear time→fraction estimate. The 4-4-2 timing and the shortened hold
+      // sides make real time non-linear in fraction, so the old linear guess
+      // grew the later labels at the wrong moment — and it only walked 4 of the
+      // 6 sides (Square-copied `*4` / `i < 4`), leaving labels 4 & 5 dead.
+      //
+      // Each label grows as the dot rounds the corner arc into its side, holds
+      // full while the dot crosses the label, then fades. Straight-fractions are
+      // per-side: sfi is the label's own side; sfp is the previous side, whose
+      // corner arc carries the approach. Because the corner arcs are identical
+      // and the pacing speed is now uniform, the grow-in takes the same ~1.3s on
+      // every side regardless of the 4s/2s split.
+      if (pacingPos) {
+        const { sfArr } = geo
         const lpBlend = smoothstep(startedRef.current
           ? Math.min(1, (now - gameStartRef.current) / BLEND_MS)
           : 0)
 
-        for (let i = 0; i < 4; i++) {
-          const localFrac = ((lpFrac - i) % 4 + 4) % 4
+        for (let i = 0; i < SIDES; i++) {
+          const sfi = sfArr[i]
+          const sfp = sfArr[(i - 1 + SIDES) % SIDES]
+          const localFrac = ((pacingPos.fraction - i) % SIDES + SIDES) % SIDES
           let proximity
-          if (localFrac >= 3 + sf) {
-            proximity = smoothstep((localFrac - (3 + sf)) / (1 - sf))
-          } else if (localFrac <= sf / 1.5) {
+          if (localFrac >= (SIDES - 1) + sfp) {
+            // Approaching on the previous side's corner arc — grow in.
+            proximity = smoothstep((localFrac - ((SIDES - 1) + sfp)) / (1 - sfp))
+          } else if (localFrac <= sfi / 1.5) {
             proximity = 1
-          } else if (localFrac <= sf) {
-            proximity = smoothstep(1 - (localFrac - sf / 1.5) / (sf - sf / 1.5))
+          } else if (localFrac <= sfi) {
+            proximity = smoothstep(1 - (localFrac - sfi / 1.5) / (sfi - sfi / 1.5))
           } else {
             proximity = 0
           }
