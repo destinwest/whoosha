@@ -5,6 +5,7 @@ import { HOME_GAMES, GAME_GRADIENTS } from '../../data/games'
 import GameShape from './GameShape'
 import SquareCardPreview from './square/SquareCardPreview'
 import HexagonCardPreview from './hexagon/HexagonCardPreview'
+import InfinityCardPreview from './infinity/InfinityCardPreview'
 
 // ── Tunable layout constants ──────────────────────────────────────────────────
 const CARD_W       = 200    // px
@@ -210,19 +211,20 @@ export default function GameCarousel() {
       flashComingSoon()
       return
     }
-    // Square and Hexagon launch with the cross-dissolve transition: capture the
-    // card's on-screen rect and let the app-level overlay (FadeLaunch) take over
-    // (it navigates). Both use the exact same route-driven veil.
-    if (game.gameKey === 'square' || game.gameKey === 'hexagon') {
-      const cardEl = e?.currentTarget?.querySelector('[data-card-index]')
-      const rect   = cardEl?.getBoundingClientRect()
-      if (rect && rect.width) {
-        startCardTransition(
-          { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
-          game.route,
-        )
-        return
-      }
+    // Every unlocked game launches with the cross-dissolve transition: capture
+    // the card's on-screen rect and let the app-level overlay (FadeLaunch) take
+    // over (it navigates). FadeLaunch is route-driven and game-agnostic, so any
+    // game reaching here (locked / route-less cards already returned above)
+    // uses the exact same veil. Direct navigate is the fallback if we can't
+    // read the card rect.
+    const cardEl = e?.currentTarget?.querySelector('[data-card-index]')
+    const rect   = cardEl?.getBoundingClientRect()
+    if (rect && rect.width) {
+      startCardTransition(
+        { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+        game.route,
+      )
+      return
     }
     navigate(game.route)
   }
