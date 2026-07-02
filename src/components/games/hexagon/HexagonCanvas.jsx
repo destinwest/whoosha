@@ -388,7 +388,7 @@ function applyPaintClip(ctx, { verts, cornerR, lw }) {
 
 // ── HexagonCanvas ─────────────────────────────────────────────────────────────
 const HexagonCanvas = forwardRef(function HexagonCanvas(
-  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onResize, interactive },
+  { strokeModeRef, pacingCanvasRef, onTick, onBreath, onGameStart, onResize, interactive },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -1081,7 +1081,11 @@ const HexagonCanvas = forwardRef(function HexagonCanvas(
       // ── Pacing position (computed once, shared by fingerprint + pacing circle) ─
       // Pacing starts at mount — independent of first touch.
       const pacingPos = getPacing(now - pacingStartRef.current)
-      if (pacingPos) pacingPosRef.current = pacingPos
+      if (pacingPos) {
+        pacingPosRef.current = pacingPos
+        // Drive the breath-audio audition with the pacing fraction [0,6).
+        onBreath?.(pacingPos.fraction)
+      }
 
       // ── Color drift ───────────────────────────────────────────────────────
       // Advance timer only while finger is on track; compute color every frame

@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import GameIntro     from '../../ui/transitions/GameIntro'
 import StrokeSelector from '../square/StrokeSelector'   // shared until refactor (game #3)
 import HexagonCanvas  from './HexagonCanvas'
+import MuteButton     from '../../ui/MuteButton'
+import { useHexBreath } from '../../../hooks/useHexBreath'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The two games
 // share the StrokeSelector component, but each toggles its visibility
@@ -151,10 +152,13 @@ const LABEL_ANGLES = [-Math.PI / 6, Math.PI / 6, -Math.PI / 2, -Math.PI / 6, Mat
 // ── HexagonGame ───────────────────────────────────────────────────────────────
 // Phase manager — owns intro/game phase, stroke selection, session timing, exit.
 // All canvas drawing, game geometry, and pointer handling live in HexagonCanvas.
-export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
+export default function HexagonGame({ onExit }) {
 
   // ── Phase ──────────────────────────────────────────────────────────────────
-  const [phase, setPhase]           = useState('intro')   // 'intro' | 'game'
+  // Mount straight into play — no in-game intro. The card→game launch is owned
+  // by the FadeLaunch cross-dissolve (same as Square); a direct URL load drops
+  // the player into the ready world immediately.
+  const [phase]                     = useState('game')    // 'game'
   const [activeStroke, setActiveStroke] = useState('classic')
   const [labelGeo, setLabelGeo]     = useState(null)      // { labelMids, sq }
 
@@ -164,6 +168,13 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
   const hexagonCanvasRef = useRef(null)
   const bgCanvasRef     = useRef(null)
   const pacingCanvasRef = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
+
+  // ── Breath audio (audition) ─────────────────────────────────────────────────
+  // Minimal breath-only audio path for synthHexBreath. Stable callbacks so the
+  // canvas frame loop (captured once at mount) always reaches the live graph.
+  const breathRef   = useHexBreath()
+  const emitBreath  = useRef((fraction) => breathRef.current.update(fraction)).current
+  const unlockAudio = useRef(() => breathRef.current.unlock()).current
 
   // ── Desert background — baked once per resize ──────────────────────────────
   useEffect(() => {
@@ -205,6 +216,7 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
     <div
       className="absolute inset-0 bg-bg-cream overflow-hidden select-none"
       style={{ touchAction: 'none' }}
+      onPointerDown={unlockAudio}   // resume the AudioContext on the first gesture (iOS)
     >
       {/* back button */}
       <button
@@ -217,6 +229,9 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
           <path d="M19 12H5M12 5l-7 7 7 7" />
         </svg>
       </button>
+
+      {/* mute toggle — top-right, mirrors exit-button treatment (same as Square) */}
+      <MuteButton className="absolute top-4 right-4 z-20" />
 
       {/* game canvas — always mounted; blur/scale driven by CSS custom properties */}
       <div style={{
@@ -247,6 +262,7 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
             pacingCanvasRef={pacingCanvasRef}
             onGameStart={() => { sessionStartRef.current = Date.now() }}
             onResize={setLabelGeo}
+            onBreath={emitBreath}
             interactive={phase === 'game'}
           />
         </div>
@@ -305,14 +321,6 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
         <StrokeSelector
           activeStroke={activeStroke}
           onSelect={handleStrokeSelect}
-        />
-      )}
-
-      {/* intro overlay — intro phase only */}
-      {phase === 'intro' && (
-        <GameIntro
-          variant={introVariant}
-          onComplete={() => setPhase('game')}
         />
       )}
     </div>

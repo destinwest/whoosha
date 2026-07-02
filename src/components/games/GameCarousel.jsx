@@ -4,6 +4,7 @@ import useStore from '../../store/useStore'
 import { HOME_GAMES, GAME_GRADIENTS } from '../../data/games'
 import GameShape from './GameShape'
 import SquareCardPreview from './square/SquareCardPreview'
+import HexagonCardPreview from './hexagon/HexagonCardPreview'
 
 // ── Tunable layout constants ──────────────────────────────────────────────────
 const CARD_W       = 200    // px
@@ -86,16 +87,22 @@ function cardStyle(distance) {
 // ── CarouselCard ──────────────────────────────────────────────────────────────
 // Pure visual — clicks bubble up to the carousel-level handler.
 function CarouselCard({ game, distance }) {
-  const isSquare = game.gameKey === 'square'
+  const isSquare  = game.gameKey === 'square'
+  const isHexagon = game.gameKey === 'hexagon'
+  const hasPreview = isSquare || isHexagon   // full-bleed track render + bottom title
   return (
     <div data-card-index="" style={cardStyle(distance)}>
       {game.locked && <LockBadge />}
       <div
         className="w-full h-full rounded-3xl overflow-hidden relative"
         style={{
-          // Square's canvas paints its own soft sage background; the sage here
-          // is just a fallback behind it.
-          background: isSquare ? '#8FAE9F' : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
+          // Preview canvases paint their own soft background; the solid here is
+          // just a fallback behind them. Others use the flat gradient.
+          background: isSquare
+            ? '#8FAE9F'
+            : isHexagon
+              ? '#D99E6A'
+              : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
           boxShadow: '0 12px 32px rgba(62, 94, 82, 0.22), 0 2px 6px rgba(62, 94, 82, 0.12)',
           filter: game.placeholder
             ? 'blur(1.5px) saturate(0.4)'
@@ -105,16 +112,16 @@ function CarouselCard({ game, distance }) {
           transition: 'filter 250ms ease',
         }}
       >
-        {isSquare ? (
-          // Full-bleed game thumbnail: the meadow render fills the whole card,
-          // with the title in track-cream floated near the bottom (no green bar).
+        {hasPreview ? (
+          // Full-bleed game thumbnail: the track render fills the whole card,
+          // with the title floated near the bottom (no label bar).
           <>
-            <SquareCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
+            {isSquare
+              ? <SquareCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
+              : <HexagonCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />}
             <div
-              // Centered vertically between the track's bottom edge (~0.72h with
-              // CY_RATIO 0.42 / SIZE_RATIO 0.70) and the card bottom → ~0.86h.
               className="absolute inset-x-0 px-3 text-center pointer-events-none font-display text-[18px] leading-tight font-semibold"
-              style={{ top: '86%', transform: 'translateY(-50%)', color: '#3A5A4D' }}
+              style={{ top: '86%', transform: 'translateY(-50%)', color: isSquare ? '#3A5A4D' : '#5C2E1C' }}
             >
               {game.name}
             </div>
@@ -203,9 +210,10 @@ export default function GameCarousel() {
       flashComingSoon()
       return
     }
-    // Square launches with the zoom-into-the-card transition: capture the card's
-    // on-screen rect and let the app-level overlay take over (it navigates).
-    if (game.gameKey === 'square') {
+    // Square and Hexagon launch with the cross-dissolve transition: capture the
+    // card's on-screen rect and let the app-level overlay (FadeLaunch) take over
+    // (it navigates). Both use the exact same route-driven veil.
+    if (game.gameKey === 'square' || game.gameKey === 'hexagon') {
       const cardEl = e?.currentTarget?.querySelector('[data-card-index]')
       const rect   = cardEl?.getBoundingClientRect()
       if (rect && rect.width) {
