@@ -8,14 +8,17 @@ import HexagonCanvas  from './HexagonCanvas'
 // independently. Flip together when restoring the feature.
 const STROKE_SELECTOR_ENABLED = false
 
-// ── buildDesertBg ─────────────────────────────────────────────────────────────
-// Bakes the entire static background — base gradient, warm sun pools, sage-scrub
-// dapples, top-edge depth, and four slanted shafts (two canyon-wall shadows, two
-// desert sunbeams) — into a single offscreen canvas at device-pixel resolution.
-// Southern-Utah desert palette: warm red-rock and sandstone with sage accents,
-// counterpart to the Square game's cool forest-bathing scene. All composition
-// happens in canvas-land via globalCompositeOperation; no CSS blend layers.
-function buildDesertBg(w, h, dpr) {
+// ── buildWaveBg ───────────────────────────────────────────────────────────────
+// Bakes the entire static background into a single offscreen canvas at
+// device-pixel resolution. Inspired by "The Wave" sandstone formation in
+// southern Utah: a warm red-rock base overlaid with soft, undulating strata
+// bands (the signature sandstone layering) and a single low raking-sun glow.
+// Deliberately subtle so the pacing circle, track, and labels stay the focus.
+// All composition happens in canvas-land via globalCompositeOperation — no CSS
+// blend layers and no runtime SVG filters. The tactile stone grain is a
+// separately-baked static texture (see HexagonCanvas), never a live filter.
+// Baked once per resize; per-frame cost is zero.
+function buildWaveBg(w, h, dpr) {
   const oc = document.createElement('canvas')
   oc.width  = w * dpr
   oc.height = h * dpr
@@ -33,42 +36,22 @@ function buildDesertBg(w, h, dpr) {
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
 
-  // Screen-blend phase — all subsequent fills brighten what's below
+  // Sandstone strata — soft undulating bands, the Wave's signature layering.
+  paintStrata(ctx, w, h)
+
+  // Raking sun — a single low warm glow from the upper-left (screen-blended),
+  // giving one directional light source like the prototype's 22° sun.
   ctx.globalCompositeOperation = 'screen'
-
-  // Warm desert sun pools — intense golden light
-  for (const { cx, cy, rf, a } of [
-    { cx: 0.22, cy: 0.28, rf: 0.38, a: 0.13 },
-    { cx: 0.72, cy: 0.20, rf: 0.28, a: 0.10 },
-    { cx: 0.60, cy: 0.68, rf: 0.34, a: 0.11 },
-    { cx: 0.18, cy: 0.72, rf: 0.24, a: 0.09 },
-  ]) {
-    const px = cx * w, py = cy * h, r = rf * Math.max(w, h)
-    const g = ctx.createRadialGradient(px, py, 0, px, py, r)
-    g.addColorStop(0, `rgba(238,200,138,${a})`)
-    g.addColorStop(1, 'rgba(0,0,0,0)')
-    ctx.fillStyle = g
-    ctx.fillRect(0, 0, w, h)
-  }
-
-  // Sage-scrub dapples — muted desert-sage pools, the cool accent against the
-  // warm rock (desert sagebrush catching light).
-  for (const { cx, cy, rf, color } of [
-    { cx: 0.21, cy: 0.26, rf: 0.33, color: 'rgba(150,162,120,0.11)' },
-    { cx: 0.71, cy: 0.19, rf: 0.26, color: 'rgba(142,156,116,0.08)' },
-    { cx: 0.80, cy: 0.60, rf: 0.29, color: 'rgba(148,160,118,0.10)' },
-    { cx: 0.33, cy: 0.72, rf: 0.31, color: 'rgba(138,152,112,0.09)' },
-    { cx: 0.54, cy: 0.44, rf: 0.23, color: 'rgba(145,158,116,0.07)' },
-  ]) {
-    const px = cx * w, py = cy * h, r = rf * Math.max(w, h)
-    const g = ctx.createRadialGradient(px, py, 0, px, py, r)
-    g.addColorStop(0, color)
-    g.addColorStop(1, 'rgba(0,0,0,0)')
-    ctx.fillStyle = g
-    ctx.fillRect(0, 0, w, h)
-  }
+  const sunX = w * 0.24, sunY = h * 0.20
+  const sun = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, Math.max(w, h) * 0.55)
+  sun.addColorStop(0,   'rgba(238,200,138,0.14)')
+  sun.addColorStop(0.5, 'rgba(230,185,120,0.05)')
+  sun.addColorStop(1,   'rgba(0,0,0,0)')
+  ctx.fillStyle = sun
+  ctx.fillRect(0, 0, w, h)
 
   // Top-edge depth — warm red-brown wash on upper 22% (canyon-rim shadow)
+  ctx.globalCompositeOperation = 'source-over'
   const topShadow = ctx.createLinearGradient(0, 0, 0, h * 0.22)
   topShadow.addColorStop(0,     'rgba(85,45,30,0.15)')
   topShadow.addColorStop(0.636, 'rgba(64,34,22,0.06)')
@@ -76,69 +59,83 @@ function buildDesertBg(w, h, dpr) {
   ctx.fillStyle = topShadow
   ctx.fillRect(0, 0, w, h * 0.22)
 
-  // Slanted shafts — two dark (canyon-wall shadows), two bright (desert sunbeams)
-  paintShaft(ctx, w, h,
-    [[0.02, 0], [0.31, 0], [0.44, 1], [0.15, 1]],
-    [
-      [0,    'rgba(92,46,28,0)'],
-      [0.30, 'rgba(92,46,28,0.22)'],
-      [0.55, 'rgba(74,36,20,0.28)'],
-      [0.78, 'rgba(56,28,16,0.18)'],
-      [1.00, 'rgba(36,18,10,0.05)'],
-    ])
-  paintShaft(ctx, w, h,
-    [[0.62, 0], [0.80, 0], [0.91, 1], [0.74, 1]],
-    [
-      [0,    'rgba(90,44,26,0)'],
-      [0.28, 'rgba(90,44,26,0.18)'],
-      [0.58, 'rgba(70,34,18,0.24)'],
-      [0.80, 'rgba(52,26,14,0.14)'],
-      [1.00, 'rgba(32,16,9,0.04)'],
-    ])
-  paintShaft(ctx, w, h,
-    [[0.05, 0], [0.15, 0], [0.36, 1], [0.18, 1]],
-    [
-      [0,    'rgba(255,226,160,0)'],
-      [0.18, 'rgba(255,226,160,0.28)'],
-      [0.50, 'rgba(250,212,148,0.24)'],
-      [0.80, 'rgba(240,200,135,0.12)'],
-      [1.00, 'rgba(255,226,160,0)'],
-    ])
-  paintShaft(ctx, w, h,
-    [[0.60, 0], [0.70, 0], [0.84, 1], [0.70, 1]],
-    [
-      [0,    'rgba(255,226,160,0)'],
-      [0.22, 'rgba(255,226,160,0.22)'],
-      [0.55, 'rgba(250,212,148,0.18)'],
-      [0.82, 'rgba(240,200,135,0.10)'],
-      [1.00, 'rgba(255,226,160,0)'],
-    ])
-
-  ctx.globalCompositeOperation = 'source-over'
   return oc
 }
 
-// ── paintShaft ────────────────────────────────────────────────────────────────
-// Fills a 4-point polygon (CSS-style fractional coords) with a gradient running
-// along the polygon's diagonal — used for sunbeams and tree-shadow shafts.
-function paintShaft(ctx, w, h, polygon, stops) {
-  const pts = polygon.map(([fx, fy]) => [fx * w, fy * h])
+// ── paintStrata ───────────────────────────────────────────────────────────────
+// Soft, wide, undulating sandstone bands drawn with `multiply` so they read as
+// tonal strata bleeding into the base — no hard edges. Each band is a gently
+// waving horizontal ribbon filled with a vertical gradient that fades to
+// transparent at both edges. Adapted from the "The Wave" prototype, dialled
+// down for a calm backdrop. Band geometry is fraction-of-height so it scales
+// with the canvas; two sine harmonics give the lazy undulation.
+const STRATA_STEPS = 40
+const STRATA_BANDS = [
+  { tone: [128,  61, 40],  opacity: 0.16, width: 0.14 },  // deep red rock
+  { tone: [217, 158, 106], opacity: 0.12, width: 0.20 },  // light sandstone
+  { tone: [128,  61, 40],  opacity: 0.13, width: 0.12 },
+  { tone: [217, 158, 106], opacity: 0.11, width: 0.18 },
+  { tone: [168,  86, 54],  opacity: 0.14, width: 0.13 },  // terracotta
+  { tone: [217, 158, 106], opacity: 0.10, width: 0.19 },
+]
+
+function paintStrata(ctx, w, h) {
+  const N = STRATA_BANDS.length
+  // Gently flowing centerline y for band i (0..N-1), spread across the canvas.
+  const bandY = (x, i) => {
+    const base = ((i + 1) / (N + 1)) * (h * 1.14) - h * 0.07
+    const xn   = x / w
+    const ph   = (i + 1) * 1.1
+    const w1   = Math.sin(xn * Math.PI * 1.4 + ph)       * h * 0.05
+    const w2   = Math.sin(xn * Math.PI * 2.8 + ph * 1.6) * h * 0.02
+    return base + w1 + w2
+  }
+
   ctx.save()
-  ctx.beginPath()
-  ctx.moveTo(pts[0][0], pts[0][1])
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1])
-  ctx.closePath()
-  ctx.clip()
+  ctx.globalCompositeOperation = 'multiply'
+  STRATA_BANDS.forEach((band, bi) => {
+    const [r, g, b] = band.tone
+    const halfW = (band.width * h) / 2
 
-  const xs = pts.map(p => p[0])
-  const ys = pts.map(p => p[1])
-  const minX = Math.min(...xs), maxX = Math.max(...xs)
-  const minY = Math.min(...ys), maxY = Math.max(...ys)
+    // Wavy top and bottom edges of the band.
+    const top = [], bot = []
+    for (let i = 0; i <= STRATA_STEPS; i++) {
+      const x  = (i / STRATA_STEPS) * w
+      const cy = bandY(x, bi)
+      top.push({ x, y: cy - halfW })
+      bot.push({ x, y: cy + halfW })
+    }
 
-  const grad = ctx.createLinearGradient(minX, minY, maxX, maxY)
-  for (const [offset, color] of stops) grad.addColorStop(offset, color)
-  ctx.fillStyle = grad
-  ctx.fillRect(minX, minY, maxX - minX, maxY - minY)
+    ctx.save()
+    ctx.beginPath()
+    ctx.moveTo(-4, top[0].y)
+    for (let i = 1; i <= STRATA_STEPS; i++) {
+      const p = top[i - 1], q = top[i]
+      ctx.quadraticCurveTo(p.x, p.y, (p.x + q.x) / 2, (p.y + q.y) / 2)
+    }
+    ctx.lineTo(w + 4, top[STRATA_STEPS].y)
+    ctx.lineTo(w + 4, bot[STRATA_STEPS].y)
+    for (let i = STRATA_STEPS; i >= 1; i--) {
+      const p = bot[i], q = bot[i - 1]
+      ctx.quadraticCurveTo(p.x, p.y, (p.x + q.x) / 2, (p.y + q.y) / 2)
+    }
+    ctx.lineTo(-4, bot[0].y)
+    ctx.closePath()
+    ctx.clip()
+
+    // Vertical gradient inside the clip — fades at both band edges so there is
+    // never a hard horizontal line.
+    const midY = (bandY(0, bi) + bandY(w, bi)) / 2
+    const grd  = ctx.createLinearGradient(0, midY - halfW, 0, midY + halfW)
+    grd.addColorStop(0,    `rgba(${r},${g},${b},0)`)
+    grd.addColorStop(0.22, `rgba(${r},${g},${b},${band.opacity * 0.7})`)
+    grd.addColorStop(0.50, `rgba(${r},${g},${b},${band.opacity})`)
+    grd.addColorStop(0.78, `rgba(${r},${g},${b},${band.opacity * 0.7})`)
+    grd.addColorStop(1,    `rgba(${r},${g},${b},0)`)
+    ctx.fillStyle = grd
+    ctx.fillRect(0, 0, w, h)
+    ctx.restore()
+  })
   ctx.restore()
 }
 
@@ -180,7 +177,7 @@ export default function HexagonGame({ onExit, introVariant = 'fadeSettle' }) {
       const dpr = window.devicePixelRatio || 1
       el.width  = w * dpr
       el.height = h * dpr
-      el.getContext('2d').drawImage(buildDesertBg(w, h, dpr), 0, 0)
+      el.getContext('2d').drawImage(buildWaveBg(w, h, dpr), 0, 0)
     }
 
     draw()
