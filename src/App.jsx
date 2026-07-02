@@ -17,6 +17,7 @@ import SquarePage from './pages/games/SquarePage'
 import FadeLaunch from './components/transitions/FadeLaunch'
 import DragonPage from './pages/games/DragonPage'
 import HexagonPage from './pages/games/HexagonPage'
+import InfinityPage from './pages/games/InfinityPage'
 
 // ── TEMP: auth bypass ───────────────────────────────────────────────────────
 // Supabase auth is unavailable (account disabled), so the normal login flow
@@ -149,6 +150,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <HexagonPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/games/infinity"
+        element={
+          <ProtectedRoute>
+            <InfinityPage />
           </ProtectedRoute>
         }
       />
