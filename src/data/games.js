@@ -1,15 +1,16 @@
 // ── Home carousel game roster ─────────────────────────────────────────────────
 // Single source of truth for the 8 cards on /home. Order matters: array index
-// determines fan position. Square (the only free-tier game) is at index 3 so
-// it's the default center card on first load.
+// determines fan position. Square is at index 3 so it's the default center
+// card on first load.
 //
-// Locked is currently hardcoded — Square free, everything else paid/coming-soon.
-// When the paid tier is wired up, derive `locked` from the user's profiles.tier.
+// Locked is currently hardcoded — Square and Infinity are free, everything
+// else paid/coming-soon. When the paid tier is wired up, derive `locked` from
+// the user's profiles.tier.
 
 export const HOME_GAMES = [
   { id: 'p1',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
   { id: 'p2',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
-  { id: 'infinity', name: 'Infinity Breathing', tagline: 'Trace the infinity', route: '/games/infinity', gameKey: 'infinity',    shape: 'infinity', locked: true,  placeholder: false },
+  { id: 'infinity', name: 'Infinity Breathing', tagline: 'Trace the infinity', route: '/games/infinity', gameKey: 'infinity',    shape: 'infinity', locked: false, placeholder: false },
   { id: 'square',   name: 'Square Breathing',   tagline: 'Trace the square',   route: '/games/square',   gameKey: 'square',      shape: 'square',   locked: false, placeholder: false },
   { id: 'hexagon',  name: 'Hexagon Breathing',  tagline: '',                   route: '/games/hexagon',  gameKey: 'hexagon',     shape: 'hexagon',  locked: false, placeholder: false },
   { id: 'flower',   name: 'Flower Breathing',   tagline: 'Trace the flower',   route: '/games/flower',   gameKey: 'flower',      shape: 'flower',   locked: true,  placeholder: false },
