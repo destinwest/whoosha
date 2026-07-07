@@ -88,9 +88,13 @@ function cardStyle(distance) {
 // ── CarouselCard ──────────────────────────────────────────────────────────────
 // Pure visual — clicks bubble up to the carousel-level handler.
 function CarouselCard({ game, distance }) {
-  const isSquare  = game.gameKey === 'square'
-  const isHexagon = game.gameKey === 'hexagon'
-  const hasPreview = isSquare || isHexagon   // full-bleed track render + bottom title
+  const isSquare   = game.gameKey === 'square'
+  const isHexagon  = game.gameKey === 'hexagon'
+  const isInfinity = game.gameKey === 'infinity'
+  const hasPreview = isSquare || isHexagon || isInfinity   // full-bleed track render + bottom title
+  // Title colour matched to each preview's palette (dark on the light square/hex
+  // cards, light on the infinity night card).
+  const titleColor = isSquare ? '#3A5A4D' : isHexagon ? '#5C2E1C' : '#E8E3F8'
   return (
     <div data-card-index="" style={cardStyle(distance)}>
       {game.locked && <LockBadge />}
@@ -103,7 +107,9 @@ function CarouselCard({ game, distance }) {
             ? '#8FAE9F'
             : isHexagon
               ? '#D99E6A'
-              : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
+              : isInfinity
+                ? '#1B1F4D'
+                : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
           boxShadow: '0 12px 32px rgba(62, 94, 82, 0.22), 0 2px 6px rgba(62, 94, 82, 0.12)',
           filter: game.placeholder
             ? 'blur(1.5px) saturate(0.4)'
@@ -119,10 +125,12 @@ function CarouselCard({ game, distance }) {
           <>
             {isSquare
               ? <SquareCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
-              : <HexagonCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />}
+              : isHexagon
+                ? <HexagonCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
+                : <InfinityCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />}
             <div
               className="absolute inset-x-0 px-3 text-center pointer-events-none font-display text-[18px] leading-tight font-semibold"
-              style={{ top: '86%', transform: 'translateY(-50%)', color: isSquare ? '#3A5A4D' : '#5C2E1C' }}
+              style={{ top: '86%', transform: 'translateY(-50%)', color: titleColor }}
             >
               {game.name}
             </div>
