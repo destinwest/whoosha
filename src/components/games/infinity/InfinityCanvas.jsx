@@ -17,6 +17,7 @@
 import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
 import { createHeatGauge } from '../_shared/heatGauge'
 import { createSynergy }   from '../_shared/synergy'
+import { buildNightSkyBg, mulberry32 } from './nightSky'
 
 // ── Breath timing ─────────────────────────────────────────────────────────────
 // Lazy-8: one full cycle = inhale (trace the TOP loop) + exhale (trace the
@@ -77,33 +78,49 @@ const SHOW_TRACK   = false
 const TRACK_BODY   = '#CBBEE8'
 const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 
-// ── Water trace (ripple stroke) ───────────────────────────────────────────────
-// The finger leaves a lavender "finger through water" mark: a soft glowing WAKE
-// deposited along the fingertip's path, plus expanding RIPPLE RINGS shed from it.
-// Both are pooled + capped, drawn on the game canvas (above the invisible track,
-// below the pacing circle). Distances are expressed in track-widths (lw) so the
-// effect scales with screen size. All emission is distance- or time-gated, so
-// per-frame work stays a small, bounded set of arc/gradient fills.
+// ── Water disturbance (finger through water) ──────────────────────────────────
+// The finger disturbs a water surface stretched over the star field. Three cues,
+// all drawn on the game canvas (above the invisible track, below the pacing
+// circle), all bounded per-frame — no additive glow, no per-pixel work, no
+// filters, just arc/gradient fills + drawImage blits of the already-baked sky:
 //
-// Colours — lavender, matched to the game/card family.
-const WATER_CORE = '235,229,250'   // bright pale-lavender core (rgb, alpha added per-draw)
-const WATER_BODY = '203,190,232'   // #CBBEE8 — the track lavender, for glow mid + rings
+//   1. LENS  — a refractive dimple at the fingertip: a displaced blit of the
+//      baked sky (stars visibly magnify/shift) with a dark depression + bright
+//      meniscus rim, so the surface reads as pressed and pulled.
+//   2. RIDGES — lit ripple wavefronts (bright moonlit crest + dark trough) shed
+//      along the drag; their overlapping fronts read as a wake, not sonar rings.
+//   3. REACTIVE STARS — a dynamic sparkle layer that brightens + bobs as a ridge
+//      front sweeps past, so the touch visibly travels through the world.
+//
+// Distances are in track-widths (lw) so everything scales with screen size.
 
-const WAKE_SPACING_LW = 0.16   // deposit a wake blob every this many track-widths of travel
-const WAKE_IDLE_MS    = 55     // …and at least this often while the finger rests (keeps it alive)
-const WAKE_LIFE_MS    = 850    // wake blob lifetime
-const WAKE_MAX        = 48     // pool cap
-const WAKE_R0_LW      = 0.34   // wake blob base radius (track-widths); grows as it fades
-const WAKE_ALPHA      = 0.42   // peak per-blob alpha
+// Lens / meniscus dimple (fingertip)
+const LENS_R_LW      = 1.30   // lens radius, track-widths
+const LENS_MAG       = 0.45   // peak magnification at centre (sky sampled from a smaller area)
+const LENS_RIM_A     = 0.5    // meniscus rim (Fresnel) highlight alpha
+const LENS_SHADE_A   = 0.12   // faint depression — a thin inner-rim trough, not a dark disc
+const LENS_RINGS     = 8      // concentric magnify steps (bounded drawImage blits/frame)
+const LENS_CREST     = '228,234,255'  // cool moonlight for the rim
 
-const RING_SPACING_LW = 1.15   // shed a ripple ring every this many track-widths of travel
-const RING_IDLE_MS    = 620    // …and at least this often while the finger rests
-const RING_LIFE_MS    = 1500   // ring lifetime
-const RING_MAX        = 16     // pool cap
-const RING_R0_LW      = 0.30   // ring start radius (track-widths)
-const RING_R1_LW      = 1.75   // ring end radius (track-widths)
-const RING_ALPHA      = 0.34   // peak stroke alpha
-const RING_PLOP_R1_LW = 2.2    // the larger initial ring on touch-down
+// Ripple ridges (lit wavefronts)
+const RIDGE_SPACING_LW = 0.45   // shed a ridge every this many track-widths of travel
+const RIDGE_IDLE_MS    = 180    // …and at least this often while the finger rests
+const RIDGE_LIFE_MS    = 1600   // ridge lifetime
+const RIDGE_MAX        = 22     // pool cap
+const RIDGE_R0_LW      = 0.22   // start radius
+const RIDGE_R1_LW      = 2.70   // end radius
+const RIDGE_PLOP_R1_LW = 3.20   // larger reach for the touch-down ring
+const RIDGE_CREST      = '224,231,252'  // cool moonlit crest highlight
+const RIDGE_TROUGH     = '6,9,30'       // dark trough shadow (below the bg)
+const RIDGE_CREST_A    = 0.55
+const RIDGE_TROUGH_A   = 0.40
+
+// Reactive stars (surface reacts to the disturbance)
+const RSTAR_AREA_DIV = 9000   // one reactive star per this many px² of viewport
+const RSTAR_BAND_LW  = 0.55   // ridge-front thickness that excites a star
+const RSTAR_DECAY_MS = 650    // excitation decay
+const RSTAR_BOOST    = 0.95   // added brightness at full excitation
+const RSTAR_BOB_LW   = 0.05   // positional bob at full excitation
 
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
@@ -281,13 +298,13 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
   const prevFracRef    = useRef(null)
   const childPathRateRef = useRef(0)    // fraction-units/ms, smoothed
 
-  // Water trace (ripple stroke) — pooled wake blobs + expanding rings
-  const wakeRef         = useRef([])    // { x, y, life, maxLife }
-  const ripplesRef      = useRef([])    // { x, y, life, maxLife, r0, r1 }
-  const lastWakePosRef  = useRef(null)  // finger pos where the last wake blob was laid
-  const lastWakeTimeRef = useRef(0)     // ts of last wake deposit (idle gate)
-  const ringDistAccumRef = useRef(0)    // px of finger travel accrued toward the next ring
-  const lastRingTimeRef = useRef(0)     // ts of last ring shed (idle gate)
+  // Water disturbance — refraction source, ridge pool, reactive stars
+  const skyBitmapRef     = useRef(null)  // offscreen copy of the baked sky, for the lens blit
+  const ridgesRef        = useRef([])    // { x, y, life, maxLife, r0, r1 } — lit wavefronts
+  const reactiveStarsRef = useRef([])    // { x, y, r, base, col, exc, phase } — surface reacts
+  const lastFingerPosRef = useRef(null)  // finger pos last frame (travel accrual)
+  const ridgeDistAccumRef = useRef(0)    // px of finger travel accrued toward the next ridge
+  const lastRidgeTimeRef = useRef(0)     // ts of last ridge shed (idle gate)
 
   // Fingerprint affordance
   const fpImgRef             = useRef(null)
@@ -330,12 +347,11 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
       pacingStartRef.current   = performance.now()
       childPathRateRef.current = 0
 
-      wakeRef.current          = []
-      ripplesRef.current       = []
-      lastWakePosRef.current   = null
-      lastWakeTimeRef.current  = 0
-      ringDistAccumRef.current = 0
-      lastRingTimeRef.current  = 0
+      ridgesRef.current        = []
+      lastFingerPosRef.current = null
+      ridgeDistAccumRef.current = 0
+      lastRidgeTimeRef.current = 0
+      for (const s of reactiveStarsRef.current) s.exc = 0
 
       fingerprintActiveRef.current = true
       fpDismissTRef.current        = 0
@@ -407,11 +423,12 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
     childPosRef.current = { x: proj.x, y: proj.y, clx: proj.x, cly: proj.y, fraction: frac }
     touchRef.current    = true
 
-    // Water: a larger ring "plops" from the touch point, and the wake starts here.
+    // Water: a larger ridge "plops" outward from the touch point; the drag-trail
+    // accrual starts here.
     const now = performance.now()
-    spawnRipple(px, py, geo.lw * RING_R0_LW, geo.lw * RING_PLOP_R1_LW, now)
-    spawnWake(px, py, now)
-    ringDistAccumRef.current = 0
+    spawnRidge(px, py, geo.lw * RIDGE_R0_LW, geo.lw * RIDGE_PLOP_R1_LW, now)
+    lastFingerPosRef.current  = { x: px, y: py }
+    ridgeDistAccumRef.current = 0
   }
 
   function onPointerMove(px, py) {
@@ -423,30 +440,20 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
     touchRef.current         = false
     tracingRef.current       = false
     childPathRateRef.current = 0
-    // Stop emitting; existing wake + rings finish fading (the water settles).
-    lastWakePosRef.current   = null
-    ringDistAccumRef.current = 0
+    // Stop emitting; existing ridges finish expanding + fading (the water settles).
+    lastFingerPosRef.current  = null
+    ridgeDistAccumRef.current = 0
   }
 
-  // ── Water-trace spawners (pooled, capped) ─────────────────────────────────────
-  function spawnWake(x, y, now) {
-    const arr = wakeRef.current
-    const blob = arr.length < WAKE_MAX
+  // ── Ridge spawner (pooled, capped) ────────────────────────────────────────────
+  function spawnRidge(x, y, r0, r1, now) {
+    const arr = ridgesRef.current
+    const ring = arr.length < RIDGE_MAX
       ? (arr.push({}), arr[arr.length - 1])
       : arr.reduce((a, b) => (b.life < a.life ? b : a))   // recycle the most-faded
-    blob.x = x; blob.y = y; blob.life = WAKE_LIFE_MS; blob.maxLife = WAKE_LIFE_MS
-    lastWakePosRef.current  = { x, y }
-    lastWakeTimeRef.current = now
-  }
-
-  function spawnRipple(x, y, r0, r1, now) {
-    const arr = ripplesRef.current
-    const ring = arr.length < RING_MAX
-      ? (arr.push({}), arr[arr.length - 1])
-      : arr.reduce((a, b) => (b.life < a.life ? b : a))
     ring.x = x; ring.y = y; ring.r0 = r0; ring.r1 = r1
-    ring.life = RING_LIFE_MS; ring.maxLife = RING_LIFE_MS
-    lastRingTimeRef.current = now
+    ring.life = RIDGE_LIFE_MS; ring.maxLife = RIDGE_LIFE_MS
+    lastRidgeTimeRef.current = now
   }
 
   function handleMouseDown(e)  { const p = getRawPos(e); onPointerDown(p.x, p.y) }
@@ -489,6 +496,29 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
       path.moveTo(geo.points[0].x, geo.points[0].y)
       for (let i = 1; i <= geo.points.length - 1; i++) path.lineTo(geo.points[i].x, geo.points[i].y)
       trackPathRef.current = path
+
+      // Refraction source — an offscreen copy of the baked sky, pixel-identical to
+      // the background canvas (same fn + fixed seed). The lens samples this.
+      skyBitmapRef.current = buildNightSkyBg(rect.width, rect.height, dpr)
+
+      // Reactive stars — a dynamic sparkle layer (CSS px) seeded for stability.
+      const rand = mulberry32(0x9A73C)
+      const count = Math.round((rect.width * rect.height) / RSTAR_AREA_DIV)
+      const stars = []
+      for (let i = 0; i < count; i++) {
+        const pick = rand()
+        const col = pick < 0.18 ? '255,238,205' : pick < 0.34 ? '205,220,255' : '255,255,255'
+        stars.push({
+          x: rand() * rect.width,
+          y: rand() * rect.height,
+          r: 0.5 + rand() * rand() * 1.3,
+          base: 0.12 + rand() * 0.28,   // dim at rest; pops when a ridge passes
+          col,
+          exc: 0,
+          phase: rand() * Math.PI * 2,
+        })
+      }
+      reactiveStarsRef.current = stars
 
       onResize?.({ labelMids: geo.labelMids, size: geo.sizeHandle })
     }
@@ -534,88 +564,136 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
         ctx.stroke(path)
       }
 
-      // ── 1b. Water trace — emit, age, and draw the wake + ripple rings ─────
-      // Emission (while the finger is down): lay wake blobs along the fingertip's
-      // path (distance-gated, with an idle tick so a resting finger still glows)
-      // and shed expanding rings every RING_SPACING of travel (plus an idle ring).
+      // ── 1b. Water disturbance — ridges, reactive stars, and the fingertip lens
+      // Emission: shed lit ridges along the drag path (distance-gated + a slow
+      // idle ring). Dense emission along motion is what makes the overlapping
+      // fronts read as a wake.
       if (touchRef.current && fingerPosRef.current) {
         const fp   = fingerPosRef.current
-        const last = lastWakePosRef.current
-        const wakeStep = lw * WAKE_SPACING_LW
-        if (!last) {
-          spawnWake(fp.x, fp.y, now)
-        } else {
-          const dx = fp.x - last.x, dy = fp.y - last.y
-          const moved = Math.hypot(dx, dy)
-          if (moved >= wakeStep) {
-            // Walk from the last deposit to the finger, laying evenly-spaced blobs
-            // so a fast drag leaves a continuous trail (not gaps).
-            const steps = Math.min(WAKE_MAX, Math.floor(moved / wakeStep))
-            for (let s = 1; s <= steps; s++) {
-              const t = (s * wakeStep) / moved
-              spawnWake(last.x + dx * t, last.y + dy * t, now)
-            }
-            ringDistAccumRef.current += moved
-          } else if (now - lastWakeTimeRef.current >= WAKE_IDLE_MS) {
-            spawnWake(fp.x, fp.y, now)   // resting finger — keep the pool alive
-          }
+        const last = lastFingerPosRef.current
+        if (last) {
+          ridgeDistAccumRef.current += Math.hypot(fp.x - last.x, fp.y - last.y)
         }
-
-        // Rings: one per RING_SPACING of travel, plus a slow idle ring.
-        const ringStep = lw * RING_SPACING_LW
-        while (ringDistAccumRef.current >= ringStep) {
-          ringDistAccumRef.current -= ringStep
-          spawnRipple(fp.x, fp.y, lw * RING_R0_LW, lw * RING_R1_LW, now)
+        lastFingerPosRef.current = { x: fp.x, y: fp.y }
+        const step = lw * RIDGE_SPACING_LW
+        while (ridgeDistAccumRef.current >= step) {
+          ridgeDistAccumRef.current -= step
+          spawnRidge(fp.x, fp.y, lw * RIDGE_R0_LW, lw * RIDGE_R1_LW, now)
         }
-        if (now - lastRingTimeRef.current >= RING_IDLE_MS) {
-          spawnRipple(fp.x, fp.y, lw * RING_R0_LW, lw * RING_R1_LW, now)
+        if (now - lastRidgeTimeRef.current >= RIDGE_IDLE_MS) {
+          spawnRidge(fp.x, fp.y, lw * RIDGE_R0_LW, lw * RIDGE_R1_LW, now)
         }
       }
 
-      // Draw — wake first (soft additive glow), then rings on top.
-      const wake = wakeRef.current
-      if (wake.length) {
-        ctx.save()
-        ctx.globalCompositeOperation = 'lighter'
-        for (let i = wake.length - 1; i >= 0; i--) {
-          const b = wake[i]
-          b.life -= dt
-          if (b.life <= 0) { wake.splice(i, 1); continue }
-          const t     = b.life / b.maxLife          // 1 → 0
-          const grow  = 1 + (1 - t) * 0.9
-          const r     = lw * WAKE_R0_LW * grow
-          const a     = smoothstep(Math.min(1, t * 1.6)) * WAKE_ALPHA   // quick in, slow out
-          const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r)
-          g.addColorStop(0,    `rgba(${WATER_CORE},${(a).toFixed(3)})`)
-          g.addColorStop(0.45, `rgba(${WATER_BODY},${(a * 0.5).toFixed(3)})`)
-          g.addColorStop(1,    `rgba(${WATER_BODY},0)`)
-          ctx.fillStyle = g
+      // Pass 1 — age ridges, compute current radius/envelope, drop the dead.
+      const ridges = ridgesRef.current
+      for (let i = ridges.length - 1; i >= 0; i--) {
+        const rg = ridges[i]
+        rg.life -= dt
+        if (rg.life <= 0) { ridges.splice(i, 1); continue }
+        const t = rg.life / rg.maxLife                 // 1 → 0
+        rg._t   = t
+        rg._r   = rg.r0 + (rg.r1 - rg.r0) * easeOutSoft(1 - t)
+        rg._env = smoothstep(Math.min(1, t * 2.2)) * t // fade in at birth, out with age
+      }
+
+      // Reactive stars — always updated/drawn (so they settle after a lift). A
+      // ridge front sweeping past a star excites it; excitation decays.
+      {
+        const stars = reactiveStarsRef.current
+        const band  = lw * RSTAR_BAND_LW
+        const decay = Math.max(0, 1 - dt / RSTAR_DECAY_MS)
+        for (const s of stars) {
+          s.exc *= decay
+          for (let j = 0; j < ridges.length; j++) {
+            const rg = ridges[j]
+            const df = Math.abs(Math.hypot(s.x - rg.x, s.y - rg.y) - rg._r)
+            if (df < band) {
+              const e = (1 - df / band) * rg._env
+              if (e > s.exc) s.exc = e
+            }
+          }
+          const bright = Math.min(1, s.base + s.exc * RSTAR_BOOST)
+          if (bright < 0.02) continue
+          const rr = s.r * (1 + s.exc * 0.6)
+          const by = s.y - s.exc * lw * RSTAR_BOB_LW * (0.6 + 0.4 * Math.sin(now / 900 + s.phase))
+          ctx.fillStyle = `rgba(${s.col},${bright.toFixed(3)})`
           ctx.beginPath()
-          ctx.arc(b.x, b.y, r, 0, Math.PI * 2)
+          ctx.arc(s.x, by, rr, 0, Math.PI * 2)
           ctx.fill()
         }
-        ctx.restore()
       }
 
-      const rings = ripplesRef.current
-      if (rings.length) {
+      // Pass 2 — draw ridges as lit wavefronts: a dark trough just inside a bright
+      // moonlit crest, so each reads as a raised ridge catching light (not a glow).
+      if (ridges.length) {
         ctx.save()
-        for (let i = rings.length - 1; i >= 0; i--) {
-          const ring = rings[i]
-          ring.life -= dt
-          if (ring.life <= 0) { rings.splice(i, 1); continue }
-          const t    = ring.life / ring.maxLife     // 1 → 0
-          const prog = easeOutSoft(1 - t)           // 0 → 1, fast then slow expansion
-          const r    = ring.r0 + (ring.r1 - ring.r0) * prog
-          const a    = smoothstep(Math.min(1, t * 2.2)) * RING_ALPHA * t   // fade in at birth, out with age
-          if (a < 0.005) continue
-          ctx.strokeStyle = `rgba(${WATER_BODY},${a.toFixed(3)})`
-          ctx.lineWidth   = lw * 0.11 * (0.5 + t * 0.7)
+        for (const rg of ridges) {
+          const env = rg._env
+          if (env < 0.01) continue
+          const wCrest = lw * 0.09 * (0.5 + rg._t * 0.6)
+          // Trough sits just inside the crest — but only once the ring is big
+          // enough that the inner stroke won't collapse into a filled dark disc.
+          const troughR = rg._r - wCrest
+          if (troughR > wCrest * 1.6) {
+            ctx.strokeStyle = `rgba(${RIDGE_TROUGH},${(RIDGE_TROUGH_A * env).toFixed(3)})`
+            ctx.lineWidth   = wCrest * 1.5
+            ctx.beginPath()
+            ctx.arc(rg.x, rg.y, troughR, 0, Math.PI * 2)
+            ctx.stroke()
+          }
+          ctx.strokeStyle = `rgba(${RIDGE_CREST},${(RIDGE_CREST_A * env).toFixed(3)})`
+          ctx.lineWidth   = wCrest
           ctx.beginPath()
-          ctx.arc(ring.x, ring.y, r, 0, Math.PI * 2)
+          ctx.arc(rg.x, rg.y, rg._r, 0, Math.PI * 2)
           ctx.stroke()
         }
         ctx.restore()
+      }
+
+      // Fingertip LENS — a refractive dimple that magnifies the baked stars behind
+      // the finger, with a soft depression and a bright meniscus rim. Concentric
+      // magnify rings (bounded drawImage blits of the sky sub-rect), strongest at
+      // the centre and easing to ~1× at the rim so it blends seamlessly.
+      const sky = skyBitmapRef.current
+      if (touchRef.current && fingerPosRef.current && sky) {
+        const fp = fingerPosRef.current
+        const R  = lw * LENS_R_LW
+        for (let k = LENS_RINGS - 1; k >= 0; k--) {
+          const r1  = (R * (k + 1)) / LENS_RINGS
+          const r0  = (R * k) / LENS_RINGS
+          const e   = 1 - (r0 + r1) / (2 * R)      // 1 at centre → 0 at rim
+          const mag = 1 + LENS_MAG * e * e         // magnify, easing to 1× at the rim
+          ctx.save()
+          ctx.beginPath()
+          ctx.arc(fp.x, fp.y, r1, 0, Math.PI * 2)
+          ctx.arc(fp.x, fp.y, r0, 0, Math.PI * 2, true)
+          ctx.clip('evenodd')
+          ctx.translate(fp.x, fp.y); ctx.scale(mag, mag); ctx.translate(-fp.x, -fp.y)
+          ctx.drawImage(
+            sky,
+            (fp.x - R) * dpr, (fp.y - R) * dpr, 2 * R * dpr, 2 * R * dpr,
+            fp.x - R, fp.y - R, 2 * R, 2 * R,
+          )
+          ctx.restore()
+        }
+        // Depression trough — a soft dark ring hugging the inside of the rim (the
+        // meniscus shadow), leaving the centre clear so the refracted stars show.
+        const shade = ctx.createRadialGradient(fp.x, fp.y, 0, fp.x, fp.y, R)
+        shade.addColorStop(0,    'rgba(6,9,30,0)')
+        shade.addColorStop(0.6,  'rgba(6,9,30,0)')
+        shade.addColorStop(0.85, `rgba(6,9,30,${LENS_SHADE_A.toFixed(3)})`)
+        shade.addColorStop(1,    'rgba(6,9,30,0)')
+        ctx.fillStyle = shade
+        ctx.beginPath()
+        ctx.arc(fp.x, fp.y, R, 0, Math.PI * 2)
+        ctx.fill()
+        // Meniscus rim — bright Fresnel highlight at the lens edge.
+        ctx.strokeStyle = `rgba(${LENS_CREST},${LENS_RIM_A})`
+        ctx.lineWidth   = lw * 0.08
+        ctx.beginPath()
+        ctx.arc(fp.x, fp.y, R - lw * 0.04, 0, Math.PI * 2)
+        ctx.stroke()
       }
 
       // ── Pacing position ───────────────────────────────────────────────────
