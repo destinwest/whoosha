@@ -78,21 +78,25 @@ const TRACK_BODY   = '#CBBEE8'
 const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 
 // ── Wake (finger through water) ───────────────────────────────────────────────
-// Deliberately the ONLY finger effect: a soft, low-contrast wake that trails the
-// fingertip and gently heals (fades) behind it, the way calm water closes back
-// up after a finger is drawn through it. No lens, no ripple rings, no sparkle —
-// this game calms the nervous system, so the mark is a whisper, not a flourish.
+// Deliberately the ONLY finger effect: a soft, low-contrast BOAT-WAKE that trails
+// the fingertip — narrow at the "bow" (the finger), spreading out behind it, then
+// tapering + fading to nothing. This game calms the nervous system, so the mark
+// is a whisper, not a flourish: no rings, no glow, source-over, very low alpha.
 //
-// The trail is a buffer of recent finger positions; each frame we age + prune it
-// and draw it in a few age-bands as a soft cool ribbon, brightest + narrowest at
-// the fingertip, spreading + dissolving toward the tail. Source-over (never
-// additive), very low alpha. Bounded per-frame: ~2 strokes per band.
-const WAKE_LIFE_MS     = 1400   // how long a point lingers before the water "heals"
-const WAKE_SPACING_LW  = 0.08   // trail-point spacing along the drag (track-widths)
-const WAKE_MAX         = 120    // trail-buffer cap
-const WAKE_WIDTH_LW    = 0.42   // base ribbon width (track-widths)
-const WAKE_ALPHA       = 0.15   // peak alpha at the fingertip — intentionally faint
-const WAKE_COLOR       = '205,210,236'  // soft cool moonlight-lavender
+// The trail is a buffer of recent finger positions. Each frame we age + prune it,
+// then paint a soft DAB (a baked radial-falloff sprite) at each point, its radius
+// set by the point's POSITION along the trail — narrow at the bow (finger),
+// widening to ~WAKE_MAX_WIDTH, then tapering to 0 at the tail. Overlapping
+// low-alpha source-over dabs form a soft, feathered, varying-width ribbon that
+// dissipates to nothing — no hard edges, no glow, graceful on the path's curves.
+const WAKE_LIFE_MS       = 1600   // how long a point lingers before the water "heals"
+const WAKE_SPACING_LW    = 0.07   // trail-point / dab spacing along the drag (track-widths)
+const WAKE_MAX           = 150    // trail-buffer cap
+const WAKE_MAX_WIDTH_LW  = 1.20   // peak wake width ≈ the pacing-circle diameter (2·0.62 lw)
+const WAKE_HEAD_W        = 0.16   // width at the fingertip, as a fraction of peak (narrow bow)
+const WAKE_PEAK_POS      = 0.55   // trail-position (0=bow → 1=tail) where the wake peaks in width
+const WAKE_ALPHA         = 0.055  // per-dab alpha — they overlap into a soft, faint ribbon
+const WAKE_COLOR         = '205,210,236'  // soft cool moonlight-lavender
 
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
@@ -273,6 +277,7 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
   // Wake — a buffer of recent finger positions that trails + heals
   const wakeTrailRef   = useRef([])    // [{ x, y, age }] oldest → newest
   const lastWakePtRef  = useRef(null)  // last finger pos a trail point was laid at
+  const dabSpriteRef   = useRef(null)  // baked soft radial-falloff dab (tinted WAKE_COLOR)
 
   // Fingerprint affordance
   const fpImgRef             = useRef(null)
@@ -299,6 +304,31 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
     const img = new Image()
     img.onload = () => { fpImgRef.current = img; fpImgReadyRef.current = true }
     img.src = '/assets/fingerprint.png'
+  }, [])
+
+  // ── Wake dab sprite — baked once ─────────────────────────────────────────────
+  // A soft radial-falloff disc tinted WAKE_COLOR. Drawn (blitted, scaled) at each
+  // trail point so the wake is a train of feathered dabs — cheap, no per-frame
+  // gradient creation. Falloff is eased (alpha ~ smoothstep) for very soft edges.
+  useEffect(() => {
+    const S = 64
+    const oc = document.createElement('canvas')
+    oc.width = S; oc.height = S
+    const c = oc.getContext('2d')
+    const img = c.createImageData(S, S)
+    const cx = (S - 1) / 2, cy = (S - 1) / 2, R = S / 2
+    const [cr, cg, cb] = WAKE_COLOR.split(',').map(Number)
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const d = Math.hypot(x - cx, y - cy) / R          // 0 centre → 1 edge
+        const t = Math.max(0, 1 - d)
+        const a = Math.round(255 * (t * t * (3 - 2 * t)))  // smoothstep falloff
+        const o = (y * S + x) * 4
+        img.data[o] = cr; img.data[o + 1] = cg; img.data[o + 2] = cb; img.data[o + 3] = a
+      }
+    }
+    c.putImageData(img, 0, 0)
+    dabSpriteRef.current = oc
   }, [])
 
   // ── Imperative API ─────────────────────────────────────────────────────────
@@ -523,39 +553,30 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
       }
       if (trail.length > WAKE_MAX) trail.splice(0, trail.length - WAKE_MAX)
 
-      // Draw the wake as a single smooth ribbon (quadratic through the points, so
-      // no beading), in a few overlapping head-biased passes: the whole trail gets
-      // one faint wide pass, and progressively shorter head-portions add narrower,
-      // slightly firmer passes on top. The overlap sums to a soft head→tail
-      // gradient — brightest + tightest at the fingertip, spreading + dissolving
-      // behind. A global fade keyed to the newest point lets the whole thing heal
-      // after the finger lifts. Source-over, very low alpha.
-      if (trail.length >= 2) {
+      // Draw the wake as a train of soft dabs (baked sprite), each scaled to the
+      // boat-wake half-width for its POSITION along the trail — narrow at the bow
+      // (finger), widening to ~WAKE_MAX_WIDTH, tapering to 0 at the tail so it
+      // dissipates to nothing. Overlapping low-alpha source-over dabs form a soft
+      // feathered ribbon; globalFade heals the whole wake after a lift.
+      const dab = dabSpriteRef.current
+      if (dab && trail.length >= 3) {
         const n = trail.length
         const globalFade = Math.max(0, 1 - trail[n - 1].age / WAKE_LIFE_MS)
         if (globalFade > 0.01) {
+          const wMax = lw * WAKE_MAX_WIDTH_LW
           ctx.save()
-          ctx.lineCap  = 'round'
-          ctx.lineJoin = 'round'
-          const a = WAKE_ALPHA * globalFade
-          const strokeSmooth = (startIdx, width, alpha) => {
-            if (alpha < 0.004 || startIdx >= n - 1) return
-            ctx.strokeStyle = `rgba(${WAKE_COLOR},${alpha.toFixed(3)})`
-            ctx.lineWidth   = width
-            ctx.beginPath()
-            ctx.moveTo(trail[startIdx].x, trail[startIdx].y)
-            for (let i = startIdx + 1; i < n - 1; i++) {
-              const mx = (trail[i].x + trail[i + 1].x) / 2
-              const my = (trail[i].y + trail[i + 1].y) / 2
-              ctx.quadraticCurveTo(trail[i].x, trail[i].y, mx, my)
-            }
-            ctx.lineTo(trail[n - 1].x, trail[n - 1].y)
-            ctx.stroke()
+          for (let i = 0; i < n; i++) {
+            const p      = (n - 1 - i) / (n - 1)               // 0 bow → 1 tail
+            const spread = WAKE_HEAD_W + (1 - WAKE_HEAD_W) * Math.min(1, p / WAKE_PEAK_POS)
+            const taper  = p <= WAKE_PEAK_POS
+              ? 1
+              : smoothstep(Math.max(0, 1 - (p - WAKE_PEAK_POS) / (1 - WAKE_PEAK_POS)))
+            const rad = 0.5 * wMax * spread * taper
+            if (rad < 0.6) continue
+            ctx.globalAlpha = WAKE_ALPHA * globalFade
+            ctx.drawImage(dab, trail[i].x - rad, trail[i].y - rad, rad * 2, rad * 2)
           }
-          const bw = lw * WAKE_WIDTH_LW
-          strokeSmooth(0,                    bw * 1.7,  a * 0.30)  // full length — spreading tail
-          strokeSmooth(Math.floor(n * 0.45), bw * 1.15, a * 0.45)  // recent — the body
-          strokeSmooth(Math.floor(n * 0.75), bw * 0.75, a * 0.60)  // head — tightest at the finger
+          ctx.globalAlpha = 1
           ctx.restore()
         }
       }
