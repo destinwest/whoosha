@@ -64,9 +64,16 @@ const SYNERGY_CONFIG = {
   returnMs:     3000,
 }
 
-// ── Track colours (setup) ─────────────────────────────────────────────────────
-// Lavender matched to the Infinity card gradient (#D2C9E5 → #B0A3D0). The track
-// is a visible placeholder for setup; it will fade to invisible later.
+// ── Track rendering ───────────────────────────────────────────────────────────
+// The track is now INVISIBLE by design: it still exists as geometry (points +
+// cumLen) so it guides the pacing circle and constrains the groove-traced bead,
+// but it is no longer drawn. The player follows the pacing circle through the
+// "water" and their own trace (ripple stroke — WIP) is the only mark they leave.
+//
+// SHOW_TRACK is a dev toggle: flip to true to render the lavender placeholder
+// band again when debugging geometry (shape, fit, crossover). Colours below are
+// only used when SHOW_TRACK is on.
+const SHOW_TRACK   = false
 const TRACK_BODY   = '#CBBEE8'
 const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 
@@ -439,9 +446,11 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, W, H)
 
-      // ── 1. Track (lavender placeholder) ───────────────────────────────────
+      // ── 1. Track — invisible by design (see SHOW_TRACK) ───────────────────
+      // Geometry still guides the pacing circle + bead; the band is only drawn
+      // when the dev toggle is on.
       const path = trackPathRef.current
-      if (path) {
+      if (SHOW_TRACK && path) {
         ctx.lineJoin = 'round'
         ctx.lineCap  = 'round'
         ctx.strokeStyle = TRACK_SHADOW
