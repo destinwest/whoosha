@@ -77,6 +77,34 @@ const SHOW_TRACK   = false
 const TRACK_BODY   = '#CBBEE8'
 const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 
+// ── Water trace (ripple stroke) ───────────────────────────────────────────────
+// The finger leaves a lavender "finger through water" mark: a soft glowing WAKE
+// deposited along the fingertip's path, plus expanding RIPPLE RINGS shed from it.
+// Both are pooled + capped, drawn on the game canvas (above the invisible track,
+// below the pacing circle). Distances are expressed in track-widths (lw) so the
+// effect scales with screen size. All emission is distance- or time-gated, so
+// per-frame work stays a small, bounded set of arc/gradient fills.
+//
+// Colours — lavender, matched to the game/card family.
+const WATER_CORE = '235,229,250'   // bright pale-lavender core (rgb, alpha added per-draw)
+const WATER_BODY = '203,190,232'   // #CBBEE8 — the track lavender, for glow mid + rings
+
+const WAKE_SPACING_LW = 0.16   // deposit a wake blob every this many track-widths of travel
+const WAKE_IDLE_MS    = 55     // …and at least this often while the finger rests (keeps it alive)
+const WAKE_LIFE_MS    = 850    // wake blob lifetime
+const WAKE_MAX        = 48     // pool cap
+const WAKE_R0_LW      = 0.34   // wake blob base radius (track-widths); grows as it fades
+const WAKE_ALPHA      = 0.42   // peak per-blob alpha
+
+const RING_SPACING_LW = 1.15   // shed a ripple ring every this many track-widths of travel
+const RING_IDLE_MS    = 620    // …and at least this often while the finger rests
+const RING_LIFE_MS    = 1500   // ring lifetime
+const RING_MAX        = 16     // pool cap
+const RING_R0_LW      = 0.30   // ring start radius (track-widths)
+const RING_R1_LW      = 1.75   // ring end radius (track-widths)
+const RING_ALPHA      = 0.34   // peak stroke alpha
+const RING_PLOP_R1_LW = 2.2    // the larger initial ring on touch-down
+
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
 const easeOutSoft = t => 1 - Math.pow(1 - t, 2)
@@ -253,6 +281,14 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
   const prevFracRef    = useRef(null)
   const childPathRateRef = useRef(0)    // fraction-units/ms, smoothed
 
+  // Water trace (ripple stroke) — pooled wake blobs + expanding rings
+  const wakeRef         = useRef([])    // { x, y, life, maxLife }
+  const ripplesRef      = useRef([])    // { x, y, life, maxLife, r0, r1 }
+  const lastWakePosRef  = useRef(null)  // finger pos where the last wake blob was laid
+  const lastWakeTimeRef = useRef(0)     // ts of last wake deposit (idle gate)
+  const ringDistAccumRef = useRef(0)    // px of finger travel accrued toward the next ring
+  const lastRingTimeRef = useRef(0)     // ts of last ring shed (idle gate)
+
   // Fingerprint affordance
   const fpImgRef             = useRef(null)
   const fpImgReadyRef        = useRef(false)
@@ -293,6 +329,13 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
       gameStartRef.current     = null
       pacingStartRef.current   = performance.now()
       childPathRateRef.current = 0
+
+      wakeRef.current          = []
+      ripplesRef.current       = []
+      lastWakePosRef.current   = null
+      lastWakeTimeRef.current  = 0
+      ringDistAccumRef.current = 0
+      lastRingTimeRef.current  = 0
 
       fingerprintActiveRef.current = true
       fpDismissTRef.current        = 0
@@ -363,6 +406,12 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
     prevFracRef.current = frac
     childPosRef.current = { x: proj.x, y: proj.y, clx: proj.x, cly: proj.y, fraction: frac }
     touchRef.current    = true
+
+    // Water: a larger ring "plops" from the touch point, and the wake starts here.
+    const now = performance.now()
+    spawnRipple(px, py, geo.lw * RING_R0_LW, geo.lw * RING_PLOP_R1_LW, now)
+    spawnWake(px, py, now)
+    ringDistAccumRef.current = 0
   }
 
   function onPointerMove(px, py) {
@@ -374,6 +423,30 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
     touchRef.current         = false
     tracingRef.current       = false
     childPathRateRef.current = 0
+    // Stop emitting; existing wake + rings finish fading (the water settles).
+    lastWakePosRef.current   = null
+    ringDistAccumRef.current = 0
+  }
+
+  // ── Water-trace spawners (pooled, capped) ─────────────────────────────────────
+  function spawnWake(x, y, now) {
+    const arr = wakeRef.current
+    const blob = arr.length < WAKE_MAX
+      ? (arr.push({}), arr[arr.length - 1])
+      : arr.reduce((a, b) => (b.life < a.life ? b : a))   // recycle the most-faded
+    blob.x = x; blob.y = y; blob.life = WAKE_LIFE_MS; blob.maxLife = WAKE_LIFE_MS
+    lastWakePosRef.current  = { x, y }
+    lastWakeTimeRef.current = now
+  }
+
+  function spawnRipple(x, y, r0, r1, now) {
+    const arr = ripplesRef.current
+    const ring = arr.length < RING_MAX
+      ? (arr.push({}), arr[arr.length - 1])
+      : arr.reduce((a, b) => (b.life < a.life ? b : a))
+    ring.x = x; ring.y = y; ring.r0 = r0; ring.r1 = r1
+    ring.life = RING_LIFE_MS; ring.maxLife = RING_LIFE_MS
+    lastRingTimeRef.current = now
   }
 
   function handleMouseDown(e)  { const p = getRawPos(e); onPointerDown(p.x, p.y) }
@@ -459,6 +532,90 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
         ctx.strokeStyle = TRACK_BODY
         ctx.lineWidth   = lw
         ctx.stroke(path)
+      }
+
+      // ── 1b. Water trace — emit, age, and draw the wake + ripple rings ─────
+      // Emission (while the finger is down): lay wake blobs along the fingertip's
+      // path (distance-gated, with an idle tick so a resting finger still glows)
+      // and shed expanding rings every RING_SPACING of travel (plus an idle ring).
+      if (touchRef.current && fingerPosRef.current) {
+        const fp   = fingerPosRef.current
+        const last = lastWakePosRef.current
+        const wakeStep = lw * WAKE_SPACING_LW
+        if (!last) {
+          spawnWake(fp.x, fp.y, now)
+        } else {
+          const dx = fp.x - last.x, dy = fp.y - last.y
+          const moved = Math.hypot(dx, dy)
+          if (moved >= wakeStep) {
+            // Walk from the last deposit to the finger, laying evenly-spaced blobs
+            // so a fast drag leaves a continuous trail (not gaps).
+            const steps = Math.min(WAKE_MAX, Math.floor(moved / wakeStep))
+            for (let s = 1; s <= steps; s++) {
+              const t = (s * wakeStep) / moved
+              spawnWake(last.x + dx * t, last.y + dy * t, now)
+            }
+            ringDistAccumRef.current += moved
+          } else if (now - lastWakeTimeRef.current >= WAKE_IDLE_MS) {
+            spawnWake(fp.x, fp.y, now)   // resting finger — keep the pool alive
+          }
+        }
+
+        // Rings: one per RING_SPACING of travel, plus a slow idle ring.
+        const ringStep = lw * RING_SPACING_LW
+        while (ringDistAccumRef.current >= ringStep) {
+          ringDistAccumRef.current -= ringStep
+          spawnRipple(fp.x, fp.y, lw * RING_R0_LW, lw * RING_R1_LW, now)
+        }
+        if (now - lastRingTimeRef.current >= RING_IDLE_MS) {
+          spawnRipple(fp.x, fp.y, lw * RING_R0_LW, lw * RING_R1_LW, now)
+        }
+      }
+
+      // Draw — wake first (soft additive glow), then rings on top.
+      const wake = wakeRef.current
+      if (wake.length) {
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+        for (let i = wake.length - 1; i >= 0; i--) {
+          const b = wake[i]
+          b.life -= dt
+          if (b.life <= 0) { wake.splice(i, 1); continue }
+          const t     = b.life / b.maxLife          // 1 → 0
+          const grow  = 1 + (1 - t) * 0.9
+          const r     = lw * WAKE_R0_LW * grow
+          const a     = smoothstep(Math.min(1, t * 1.6)) * WAKE_ALPHA   // quick in, slow out
+          const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r)
+          g.addColorStop(0,    `rgba(${WATER_CORE},${(a).toFixed(3)})`)
+          g.addColorStop(0.45, `rgba(${WATER_BODY},${(a * 0.5).toFixed(3)})`)
+          g.addColorStop(1,    `rgba(${WATER_BODY},0)`)
+          ctx.fillStyle = g
+          ctx.beginPath()
+          ctx.arc(b.x, b.y, r, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        ctx.restore()
+      }
+
+      const rings = ripplesRef.current
+      if (rings.length) {
+        ctx.save()
+        for (let i = rings.length - 1; i >= 0; i--) {
+          const ring = rings[i]
+          ring.life -= dt
+          if (ring.life <= 0) { rings.splice(i, 1); continue }
+          const t    = ring.life / ring.maxLife     // 1 → 0
+          const prog = easeOutSoft(1 - t)           // 0 → 1, fast then slow expansion
+          const r    = ring.r0 + (ring.r1 - ring.r0) * prog
+          const a    = smoothstep(Math.min(1, t * 2.2)) * RING_ALPHA * t   // fade in at birth, out with age
+          if (a < 0.005) continue
+          ctx.strokeStyle = `rgba(${WATER_BODY},${a.toFixed(3)})`
+          ctx.lineWidth   = lw * 0.11 * (0.5 + t * 0.7)
+          ctx.beginPath()
+          ctx.arc(ring.x, ring.y, r, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+        ctx.restore()
       }
 
       // ── Pacing position ───────────────────────────────────────────────────
