@@ -78,24 +78,27 @@ const TRACK_BODY   = '#CBBEE8'
 const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 
 // ── Wake (finger through water) ───────────────────────────────────────────────
-// The ONLY finger effect: a soft canoe/boat WAKE — two gentle diverging arms that
-// form a V behind the fingertip (converging at the "bow", spreading + fading
-// behind), like the reference photos. Short and close to the finger (~1 inch),
+// The ONLY finger effect: a soft canoe WAKE. Like the reference photos, the V is
+// the ENVELOPE and the substance is a repetition of small curved WAVELETS — soft
+// little crescents shed behind the fingertip, growing wider + fading toward the
+// tail so the wake dissipates to nothing. Short + close to the finger (~1 inch),
 // calm and low-contrast: no rings, no glow, source-over, very low alpha.
 //
-// The trail is a buffer of recent finger positions, kept to a short arc-length
-// behind the finger. Each arm is drawn as a line of soft DABS (a baked radial
-// sprite) offset ±perpendicular from the path — the offset grows from 0 at the
-// bow to a peak at the tail (the V), and the arms fade toward the tail so the
-// wake dissipates to nothing. A global fade heals the whole thing after a lift.
-const WAKE_LIFE_MS       = 1600   // how long a point lingers before the water "heals"
-const WAKE_SPACING_LW    = 0.06   // trail-point / dab spacing along the drag (track-widths)
-const WAKE_MAX           = 90     // trail-buffer cap
-const WAKE_LENGTH_LW     = 2.0    // wake length behind the finger (short — roughly an inch)
-const WAKE_WIDTH_LW      = 1.10   // total V width at the tail (≈ the pacing-circle diameter)
-const WAKE_ARM_R_LW      = 0.16   // arm thickness (soft dab radius)
-const WAKE_ALPHA         = 0.075  // per-dab alpha — dabs overlap into soft, faint arms
-const WAKE_COLOR         = '205,210,236'  // soft cool moonlight-lavender
+// The trail is a buffer of recent finger positions, kept to a short arc-length.
+// Walking back from the finger, every WAVELET_SPACING we shed one crescent: a
+// short arc of soft DABS spanning ±(V half-width at that distance), bowed toward
+// the finger. A global fade heals the whole thing after a lift.
+const WAKE_LIFE_MS        = 1600   // how long a point lingers before the water "heals"
+const WAKE_SPACING_LW     = 0.05   // trail-point spacing (fine — for smooth arc-length + crescents)
+const WAKE_MAX            = 90      // trail-buffer cap
+const WAKE_LENGTH_LW      = 2.0     // wake length behind the finger (short — roughly an inch)
+const WAKE_WIDTH_LW       = 1.10    // total V width at the tail (≈ the pacing-circle diameter)
+const WAKE_ALPHA          = 0.10    // per-dab alpha — dabs overlap into a soft, faint crescent
+const WAKE_COLOR          = '205,210,236'  // soft cool moonlight-lavender
+const WAVELET_SPACING_LW  = 0.30    // gap between successive wavelets (the "repeat")
+const WAVELET_DAB_R_LW    = 0.12    // dab radius within a crescent (finer = more wave-like)
+const WAVELET_SAMPLES     = 6       // dabs per crescent
+const WAVELET_BOW         = 0.40    // how much each crescent bows toward the finger (× its half-width)
 
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
@@ -562,32 +565,46 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
         if (cut > 0) trail.splice(0, cut)
       }
 
-      // Draw the wake as TWO diverging arms (a V), each a line of soft dabs offset
-      // ±perpendicular from the path. The offset grows from 0 at the bow (finger)
-      // to WAKE_WIDTH/2 at the tail, and the arms fade toward the tail so the wake
-      // dissipates to nothing. globalFade heals the whole thing after a lift.
+      // Draw the wake as a repetition of small curved WAVELETS shed behind the
+      // finger. Walking back from the bow, every WAVELET_SPACING we place one
+      // crescent: a short arc of soft dabs spanning ±(V half-width here), bowed
+      // toward the finger. The crescents grow wider + fade toward the tail (the V
+      // envelope, dissipating). globalFade heals the whole wake after a lift.
       const dab = dabSpriteRef.current
       if (dab && trail.length >= 3) {
         const n = trail.length
         const globalFade = Math.max(0, 1 - trail[n - 1].age / WAKE_LIFE_MS)
         if (globalFade > 0.01) {
           const maxHalf = 0.5 * lw * WAKE_WIDTH_LW
-          const armR    = lw * WAKE_ARM_R_LW
+          const dabR    = lw * WAVELET_DAB_R_LW
+          const step    = lw * WAVELET_SPACING_LW
+          const S       = WAVELET_SAMPLES
           ctx.save()
-          for (let i = 0; i < n; i++) {
-            const p = (n - 1 - i) / (n - 1)          // 0 bow (finger) → 1 tail
-            // arm alpha: strongest just behind the bow, fading to nothing at the tail
+          let acc = step   // shed the first crescent a little way back from the bow
+          for (let i = n - 1; i >= 1; i--) {
+            acc += Math.hypot(trail[i].x - trail[i - 1].x, trail[i].y - trail[i - 1].y)
+            if (acc < step) continue
+            acc = 0
+            const p = (n - 1 - i) / (n - 1)          // 0 bow → 1 tail
+            const half = maxHalf * p                 // this crescent's half-span (V envelope)
+            if (half < 1.5) continue                 // skip the tiny ones right at the bow
             const a = WAKE_ALPHA * globalFade * (1 - p) * (1 - p)
             if (a < 0.004) continue
-            const off = maxHalf * p                  // the V spreads with distance behind
-            // unit normal to the local path direction
+            // local frame: unit tangent (toward finger), normal, forward=tangent
             const A = trail[Math.max(0, i - 1)], B = trail[Math.min(n - 1, i + 1)]
             const tx = B.x - A.x, ty = B.y - A.y
             const L = Math.hypot(tx, ty) || 1
-            const nx = -ty / L, ny = tx / L
+            const ux = tx / L, uy = ty / L           // toward the finger
+            const nx = -uy, ny = ux                  // across the arm
+            const bow = WAVELET_BOW * half
             ctx.globalAlpha = a
-            ctx.drawImage(dab, trail[i].x + nx * off - armR, trail[i].y + ny * off - armR, armR * 2, armR * 2)
-            ctx.drawImage(dab, trail[i].x - nx * off - armR, trail[i].y - ny * off - armR, armR * 2, armR * 2)
+            for (let k = 0; k < S; k++) {
+              const u = (k / (S - 1)) * 2 - 1        // -1 … 1 across the crescent
+              const b = bow * (1 - u * u)            // parabolic bow toward the finger
+              const px = trail[i].x + nx * (half * u) + ux * b
+              const py = trail[i].y + ny * (half * u) + uy * b
+              ctx.drawImage(dab, px - dabR, py - dabR, dabR * 2, dabR * 2)
+            }
           }
           ctx.globalAlpha = 1
           ctx.restore()
