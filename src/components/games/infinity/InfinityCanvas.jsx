@@ -78,24 +78,23 @@ const TRACK_BODY   = '#CBBEE8'
 const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 
 // ── Wake (finger through water) ───────────────────────────────────────────────
-// Deliberately the ONLY finger effect: a soft, low-contrast BOAT-WAKE that trails
-// the fingertip — narrow at the "bow" (the finger), spreading out behind it, then
-// tapering + fading to nothing. This game calms the nervous system, so the mark
-// is a whisper, not a flourish: no rings, no glow, source-over, very low alpha.
+// The ONLY finger effect: a soft canoe/boat WAKE — two gentle diverging arms that
+// form a V behind the fingertip (converging at the "bow", spreading + fading
+// behind), like the reference photos. Short and close to the finger (~1 inch),
+// calm and low-contrast: no rings, no glow, source-over, very low alpha.
 //
-// The trail is a buffer of recent finger positions. Each frame we age + prune it,
-// then paint a soft DAB (a baked radial-falloff sprite) at each point, its radius
-// set by the point's POSITION along the trail — narrow at the bow (finger),
-// widening to ~WAKE_MAX_WIDTH, then tapering to 0 at the tail. Overlapping
-// low-alpha source-over dabs form a soft, feathered, varying-width ribbon that
-// dissipates to nothing — no hard edges, no glow, graceful on the path's curves.
+// The trail is a buffer of recent finger positions, kept to a short arc-length
+// behind the finger. Each arm is drawn as a line of soft DABS (a baked radial
+// sprite) offset ±perpendicular from the path — the offset grows from 0 at the
+// bow to a peak at the tail (the V), and the arms fade toward the tail so the
+// wake dissipates to nothing. A global fade heals the whole thing after a lift.
 const WAKE_LIFE_MS       = 1600   // how long a point lingers before the water "heals"
-const WAKE_SPACING_LW    = 0.07   // trail-point / dab spacing along the drag (track-widths)
-const WAKE_MAX           = 150    // trail-buffer cap
-const WAKE_MAX_WIDTH_LW  = 1.20   // peak wake width ≈ the pacing-circle diameter (2·0.62 lw)
-const WAKE_HEAD_W        = 0.16   // width at the fingertip, as a fraction of peak (narrow bow)
-const WAKE_PEAK_POS      = 0.55   // trail-position (0=bow → 1=tail) where the wake peaks in width
-const WAKE_ALPHA         = 0.055  // per-dab alpha — they overlap into a soft, faint ribbon
+const WAKE_SPACING_LW    = 0.06   // trail-point / dab spacing along the drag (track-widths)
+const WAKE_MAX           = 90     // trail-buffer cap
+const WAKE_LENGTH_LW     = 2.0    // wake length behind the finger (short — roughly an inch)
+const WAKE_WIDTH_LW      = 1.10   // total V width at the tail (≈ the pacing-circle diameter)
+const WAKE_ARM_R_LW      = 0.16   // arm thickness (soft dab radius)
+const WAKE_ALPHA         = 0.075  // per-dab alpha — dabs overlap into soft, faint arms
 const WAKE_COLOR         = '205,210,236'  // soft cool moonlight-lavender
 
 const smoothstep  = t => t * t * (3 - 2 * t)
@@ -545,36 +544,50 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
         }
       }
 
-      // Age + prune the trail (the water heals), then cap its length.
+      // Age + prune the trail (the water heals) and cap the buffer, then trim it
+      // to a short arc-length behind the finger so the wake stays close and small.
       const trail = wakeTrailRef.current
       for (let i = trail.length - 1; i >= 0; i--) {
         trail[i].age += dt
         if (trail[i].age >= WAKE_LIFE_MS) trail.splice(i, 1)
       }
       if (trail.length > WAKE_MAX) trail.splice(0, trail.length - WAKE_MAX)
+      {
+        const maxLen = lw * WAKE_LENGTH_LW
+        let acc = 0, cut = 0
+        for (let i = trail.length - 1; i > 0; i--) {
+          acc += Math.hypot(trail[i].x - trail[i - 1].x, trail[i].y - trail[i - 1].y)
+          if (acc > maxLen) { cut = i; break }
+        }
+        if (cut > 0) trail.splice(0, cut)
+      }
 
-      // Draw the wake as a train of soft dabs (baked sprite), each scaled to the
-      // boat-wake half-width for its POSITION along the trail — narrow at the bow
-      // (finger), widening to ~WAKE_MAX_WIDTH, tapering to 0 at the tail so it
-      // dissipates to nothing. Overlapping low-alpha source-over dabs form a soft
-      // feathered ribbon; globalFade heals the whole wake after a lift.
+      // Draw the wake as TWO diverging arms (a V), each a line of soft dabs offset
+      // ±perpendicular from the path. The offset grows from 0 at the bow (finger)
+      // to WAKE_WIDTH/2 at the tail, and the arms fade toward the tail so the wake
+      // dissipates to nothing. globalFade heals the whole thing after a lift.
       const dab = dabSpriteRef.current
       if (dab && trail.length >= 3) {
         const n = trail.length
         const globalFade = Math.max(0, 1 - trail[n - 1].age / WAKE_LIFE_MS)
         if (globalFade > 0.01) {
-          const wMax = lw * WAKE_MAX_WIDTH_LW
+          const maxHalf = 0.5 * lw * WAKE_WIDTH_LW
+          const armR    = lw * WAKE_ARM_R_LW
           ctx.save()
           for (let i = 0; i < n; i++) {
-            const p      = (n - 1 - i) / (n - 1)               // 0 bow → 1 tail
-            const spread = WAKE_HEAD_W + (1 - WAKE_HEAD_W) * Math.min(1, p / WAKE_PEAK_POS)
-            const taper  = p <= WAKE_PEAK_POS
-              ? 1
-              : smoothstep(Math.max(0, 1 - (p - WAKE_PEAK_POS) / (1 - WAKE_PEAK_POS)))
-            const rad = 0.5 * wMax * spread * taper
-            if (rad < 0.6) continue
-            ctx.globalAlpha = WAKE_ALPHA * globalFade
-            ctx.drawImage(dab, trail[i].x - rad, trail[i].y - rad, rad * 2, rad * 2)
+            const p = (n - 1 - i) / (n - 1)          // 0 bow (finger) → 1 tail
+            // arm alpha: strongest just behind the bow, fading to nothing at the tail
+            const a = WAKE_ALPHA * globalFade * (1 - p) * (1 - p)
+            if (a < 0.004) continue
+            const off = maxHalf * p                  // the V spreads with distance behind
+            // unit normal to the local path direction
+            const A = trail[Math.max(0, i - 1)], B = trail[Math.min(n - 1, i + 1)]
+            const tx = B.x - A.x, ty = B.y - A.y
+            const L = Math.hypot(tx, ty) || 1
+            const nx = -ty / L, ny = tx / L
+            ctx.globalAlpha = a
+            ctx.drawImage(dab, trail[i].x + nx * off - armR, trail[i].y + ny * off - armR, armR * 2, armR * 2)
+            ctx.drawImage(dab, trail[i].x - nx * off - armR, trail[i].y - ny * off - armR, armR * 2, armR * 2)
           }
           ctx.globalAlpha = 1
           ctx.restore()
