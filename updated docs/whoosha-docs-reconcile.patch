@@ -1,0 +1,323 @@
+From d8001ff4b4684d16a42765e2ea2c6f0cff98fbd7 Mon Sep 17 00:00:00 2001
+From: doc-reconcile <reconcile@local>
+Date: Mon, 6 Jul 2026 19:41:52 +0000
+Subject: [PATCH] docs: reconcile BRIEFING/CLAUDE/POLISH with repo state at
+ HEAD
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- BRIEFING (kept as pure intent): remove Stripe as MVP dependency (deferred
+  pre-launch); drop deleted files (stripe.js, taperedStroke.js) from §9 and add
+  real subsystems (sound/, data/, _shared/, hexagon/, infinity/, transitions/);
+  fix audio 'todo'; reword 'no completion state' vs CompletionScreen.
+- CLAUDE: remove Stripe; frame hard rules as tripwire summary (POLISH
+  authoritative); add audio-samples rule; delete stale dated current-state
+  snapshot -> point to Decision log.
+- POLISH: add pacing-canvas layer to reference architecture; delete stale
+  current-state snapshot; remove the stale 'Staged plan forward' section
+  entirely (Steps 1-3 shipped, 4-5 optional/unneeded) and fold its still-useful
+  animated-overlay detail into the Ambient lighting technique note.
+---
+ BRIEFING.md        | 69 +++++++++++++++++++++++++++++++++++-----------
+ CLAUDE.md          | 11 +++++---
+ POLISH-STRATEGY.md | 58 ++++----------------------------------
+ 3 files changed, 66 insertions(+), 72 deletions(-)
+
+diff --git a/BRIEFING.md b/BRIEFING.md
+index 6b7b83b..276c296 100644
+--- a/BRIEFING.md
++++ b/BRIEFING.md
+@@ -37,7 +37,7 @@
+ 
+ **Whoosha** is a web application that helps elementary-aged children (ages 5–12) regulate their nervous systems through interactive, multisensory breathing games. The name evokes the sound and feeling of a calming breath.
+ 
+-Children trace illustrated shapes on the screen with their finger, following a guided breathing pattern. Visual feedback, audio cues (todo), and gentle on-screen encouragement guide the user. The experience is tactile, calming, and designed to work even when a child is dysregulated or distressed.
++Children trace illustrated shapes on the screen with their finger, following a guided breathing pattern. Visual feedback, adaptive audio, and gentle on-screen encouragement guide the user. The experience is tactile, calming, and designed to work even when a child is dysregulated or distressed.
+ 
+ **The core insight driving the design:** Research shows that combining tactile interaction, geometric tracing, and paced breathwork is one of the most effective nervous system regulation techniques for children. The app makes this accessible and engaging without requiring adult instruction during use.
+ 
+@@ -88,12 +88,13 @@ Every screen must answer the question **"what do I do next?"** within two second
+ |---------|------|-------|
+ | **Supabase Auth** | Authentication | Email/password + Google OAuth. Local dev uses Supabase local or cloud free tier |
+ | **Supabase DB** | PostgreSQL database | Parent profiles, child profiles (first name only), session history |
+-| **Stripe (Test Mode)** | Simulated payments | Use test card 4242 4242 4242 4242. No real money. Simulate free + paid tier access |
++
++Tier access for MVP is a client-side check against `profiles.tier` (see Section 11). No payment processor is wired in the MVP.
+ 
+ ### Pre-Launch (Do Not Build Yet — but write forward-compatible code)
+ - Vercel (hosting, replaces local dev server)
+ - Cloudflare (domain + DNS + WAF)
+-- Stripe Live Mode (real payments)
++- Stripe (payments — both test and live mode deferred to pre-launch)
+ - Resend (transactional email)
+ - Staging environment
+ - PostHog (analytics)
+@@ -383,7 +384,7 @@ The child places their finger on the amber circle and begins dragging to trigger
+   - Triggers only once per qualifying lap, with a minimum 30-second cooldown between triggers
+   - Lateral drift is ignored — this is a path-distance check only
+ 
+-- **No completion state.** The game runs indefinitely. The child exits via the exit button when ready.
++- **No win/lose state.** The game loop runs indefinitely — there is no scoring, failure, or forced end. The child exits via the exit button when ready; on exit, a gentle session-end card summarizes the session before returning home.
+ 
+ - **Session save:** When the child taps the exit button, write to Supabase `sessions` table: `child_id`, `game_slug: 'square-breathing'`, `duration_seconds`, `completed: true`.
+ 
+@@ -589,6 +590,9 @@ whoosha/
+ │   │   ├── dragon-spike.riv      # Rive animation for the Dragon Breath spike
+ │   │   ├── fingerprint.png       # Pre-touch fingerprint hint glyph
+ │   │   └── fingerprintDark.png   # Dark variant of the fingerprint glyph
++│   ├── sounds/                   # Sampled atmospheric beds (see POLISH-STRATEGY audio rules)
++│   │   ├── squareGameAmbience.mp3
++│   │   └── hexGameAmbience.mp3
+ │   └── textures/                 # Static SVG textures baked into game canvases
+ │       ├── track-dirt.svg        # Dirt-path texture stroked on the racetrack
+ │       └── meadow-ground.svg     # Meadow ground texture (grass clumps, leaf specks)
+@@ -597,13 +601,26 @@ whoosha/
+     ├── App.jsx                   # Router setup + auth/onboarding gating
+     ├── index.css                 # Tailwind base + global styles
+     ├── lib/
+-    │   ├── supabaseClient.js     # Supabase initialization
+-    │   └── stripe.js             # Stripe initialization (test mode)
++    │   └── supabaseClient.js     # Supabase initialization
+     ├── store/
+     │   └── useStore.js           # Zustand store — auth, active child, game state
++    ├── data/
++    │   └── games.js              # Carousel roster + per-game metadata
+     ├── hooks/
+     │   ├── useAuth.js            # Auth state hook — keeps store in sync with Supabase
+-    │   └── useSession.js         # Game session tracking hook
++    │   ├── useSession.js         # Game session tracking hook
++    │   ├── useHexBreath.js       # Hexagon breath-phase timing hook
++    │   ├── useMutePref.js        # Persisted mute preference
++    │   └── useSoundDirector.js   # Wires a game canvas to the SoundDirector
++    ├── sound/                    # Adaptive audio system (synthesis + sampled beds)
++    │   ├── SoundDirector.js      # Owns AudioContext + bus spine; consumes per-frame game-state ticks
++    │   ├── noiseBuffer.js        # Pink/brown noise buffer generation
++    │   ├── reverb.js
++    │   ├── synthAmbient.js       # Procedural ambient elements
++    │   ├── synthBowl.js          # Singing-bowl partials (synergistic state)
++    │   ├── synthBreath.js        # Breath-coupled cues
++    │   ├── synthHexBreath.js     # Hexagon breath cues
++    │   └── synthRumble.js        # Dysregulated-state rumble bus
+     ├── components/
+     │   ├── auth/
+     │   │   └── AuthForm.jsx       # Shared auth card used by LoginPage and SignupPage
+@@ -615,21 +632,40 @@ whoosha/
+     │   │   ├── Button.jsx        # Reusable button component
+     │   │   ├── Card.jsx          # Reusable card component
+     │   │   ├── LoadingSpinner.jsx
+-    │   │   └── transitions/
++    │   │   ├── MuteButton.jsx
++    │   │   └── transitions/                  # Intro / threshold transitions (Section 6.0)
+     │   │       ├── GameIntro.jsx             # Shared intro wrapper — accepts introVariant prop, calls onComplete
+     │   │       ├── ZoomOverlay.jsx           # Home-card → game route tile-zoom transition
+     │   │       └── variants/
+     │   │           └── FadeSettleIntro.jsx   # 'fadeSettle' variant — color fade + blur resolve + scale settle
++    │   ├── transitions/                      # Route-launch transitions (distinct from ui/transitions)
++    │   │   ├── FadeLaunch.jsx
++    │   │   └── GameLaunch.jsx
+     │   └── games/
+     │       ├── GameCard.jsx       # Shared card used for game tiles on /home
++    │       ├── GameCarousel.jsx   # Fanned game-card carousel on /home
++    │       ├── GameShape.jsx      # Shared shape glyph used by cards/previews
++    │       ├── _shared/           # Cross-game geometry + mechanics helpers
++    │       │   ├── roundedPolyPath.js  # Rounded-polygon path + offset (track passes, paint clip)
++    │       │   ├── heatGauge.js        # Heat-gauge accumulation logic
++    │       │   └── synergy.js          # Synergistic-state progression
+     │       ├── square/
+     │       │   ├── SquareGame.jsx         # Phase manager — 'intro' | 'game', stroke state, session timing
+     │       │   ├── SquareCanvas.jsx       # Everything canvas — geometry, drawing, input, lap logic
+     │       │   ├── StrokeSelector.jsx     # Top-right stroke style picker UI
++    │       │   ├── CompletionScreen.jsx   # Session-end summary card
++    │       │   ├── SquareCardPreview.jsx  # Carousel preview render
+     │       │   └── strokes/
+     │       │       ├── stampStroke.js     # 'Classic' stroke (default): radial-gradient stamps along centerline
+-    │       │       ├── layeredWash.js     # 'Watercolor' stroke: multi-layer wash with organic depth
+-    │       │       └── taperedStroke.js   # Prior default — retained for reference, pending retirement
++    │       │       └── layeredWash.js     # 'Watercolor' stroke: multi-layer wash with organic depth
++    │       ├── hexagon/
++    │       │   ├── HexagonGame.jsx
++    │       │   ├── HexagonCanvas.jsx
++    │       │   └── HexagonCardPreview.jsx
++    │       ├── infinity/
++    │       │   ├── InfinityGame.jsx
++    │       │   ├── InfinityCanvas.jsx
++    │       │   └── InfinityCardPreview.jsx
+     │       └── dragon/
+     │           └── DragonGame.jsx         # Rive-based Dragon Breath spike
+     └── pages/
+@@ -641,8 +677,12 @@ whoosha/
+         ├── HomePage.jsx           # Game selection
+         ├── DashboardPage.jsx      # Stub
+         ├── AccountPage.jsx        # Stub
++        ├── PrivacyPage.jsx
++        ├── TermsPage.jsx
+         └── games/
+             ├── SquarePage.jsx     # Square Breathing page wrapper
++            ├── HexagonPage.jsx    # Hexagon Breathing page wrapper
++            ├── InfinityPage.jsx   # Infinity Breathing page wrapper
+             └── DragonPage.jsx     # Dragon Breath page wrapper (Rive spike)
+ ```
+ 
+@@ -657,9 +697,6 @@ Create a `.env` file in the project root with these values. Never commit `.env`
+ VITE_SUPABASE_URL=your_supabase_project_url
+ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+ 
+-# Stripe (Test Mode only for MVP)
+-VITE_STRIPE_PUBLISHABLE_KEY=pk_test_your_key_here
+-
+ # Sentry
+ VITE_SENTRY_DSN=your_sentry_dsn
+ ```
+@@ -668,7 +705,7 @@ VITE_SENTRY_DSN=your_sentry_dsn
+ 
+ ## 11. Tier Definitions (Free vs Paid)
+ 
+-Used by Stripe test mode access checks and the pricing section on the landing page.
++Defines the client-side tier gating (reads `profiles.tier`) and the pricing section on the landing page. Payment processing is deferred to pre-launch.
+ 
+ | Feature | Free Tier | Paid Tier |
+ |---------|-----------|-----------|
+@@ -743,14 +780,14 @@ All text in the app should feel soft. Use `font-weight: 600` (semibold) rather t
+ - [ ] Greeting with child's first name on home screen
+ - [ ] Parent dashboard stub page
+ - [ ] Account settings stub page
+-- [ ] Stripe test mode integration (simulated free vs paid tier access check)
++- [ ] Client-side free/paid tier gating from `profiles.tier` (no payment processor)
+ - [ ] Zustand store for auth state and active child
+ - [ ] Sentry error monitoring initialized
+ - [ ] GitHub repository with clean commit history
+ - [ ] `.env` configuration for all secrets
+ 
+ ### Explicitly Out of Scope for MVP
+-- Real payments (Stripe test mode only)
++- Payments (Stripe / any processor) — deferred to pre-launch
+ - Email verification (can be disabled in Supabase for local testing)
+ - Transactional email (Resend not needed yet)
+ - Progress charts or detailed analytics on dashboard
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 20c62e7..535764c 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -4,7 +4,7 @@ Operating instructions for Claude Code in the Whoosha repo. Read this first ever
+ 
+ ## Project orientation
+ 
+-Whoosha is a React + Vite + Canvas 2D web app — breathing games for children. The flagship is the Square Breathing game (`src/components/games/square/`). Auth via Supabase, payments via Stripe (test mode), Sentry for errors.
++Whoosha is a React + Vite + Canvas 2D web app — breathing games for children. The flagship is the Square Breathing game (`src/components/games/square/`). Auth via Supabase, Sentry for errors. Tier gating is a client-side check against `profiles.tier`; no payment processor is wired (deferred post-MVP).
+ 
+ **Read these before touching game/visual code:**
+ - `BRIEFING.md` — product spec, design system, game mechanics (the WHAT and WHY)
+@@ -20,6 +20,8 @@ Two prior sessions broke iOS perf trying to add visual polish. The lessons are i
+ 
+ ### Hard rules — do not violate without explicit user approval
+ 
++> Tripwire summary only. `POLISH-STRATEGY.md` (Layering rules + Anti-patterns) is authoritative — if this list and that doc disagree, that doc wins.
++
+ 1. **Layer budget: one bg canvas, one game canvas, at most ONE CSS overlay div above them.** Vignette is the allowed overlay.
+ 2. **No `mixBlendMode` chains.** A single overlay using `mixBlendMode` may be acceptable; stacks of them are not.
+ 3. **No `filter: url(#...)` referencing SVG `<filter>` elements applied to animating or transforming content.** Static SVG used as a `<img>`, `background-image`, or pattern source is fine.
+@@ -44,9 +46,10 @@ Static SVG assets → baked into an offscreen canvas at resize → composited as
+ 
+ - React 18 + Vite 6, Tailwind 3, Zustand 5
+ - Canvas 2D for game rendering — no WebGL, no Three.js, no external drawing libs
+-- Supabase (auth + Postgres), Stripe (test mode), Sentry, Rive (Dragon game only)
++- Supabase (auth + Postgres), Sentry, Rive (Dragon game only)
++- Adaptive audio: synthesis (`src/sound/`) + sampled beds. Samples allowed for atmospheric beds only; breath-coupled / cued elements stay synthesized (POLISH log 2026-06-02)
+ - Node 18+
+ 
+-## Current state (2026-05-19, post Step 1)
++## Current state
+ 
+-Main is clean. Step 1 of the polish refactor landed: 6 CSS overlays baked into the bg canvas, DPR fixed, `bgCanvas` moved inside the saturate wrapper, `SquareCanvas` made `position: absolute`. Compositing layer count down from ~11 to ~4. Next up: Step 2 (SVG track texture). See `POLISH-STRATEGY.md` § "Staged plan forward."
++Status is not tracked here — it drifts. For the live state of `main` and what's next, read the tail of the **Decision log** in `POLISH-STRATEGY.md`.
+diff --git a/POLISH-STRATEGY.md b/POLISH-STRATEGY.md
+index 9ce502a..1fb4a2d 100644
+--- a/POLISH-STRATEGY.md
++++ b/POLISH-STRATEGY.md
+@@ -60,11 +60,12 @@ Three strategies were considered:
+ ```
+ [saturate(var(--game-saturation)) wrapper]   ← one GPU filter, gauge-driven
+   ├─ [bg canvas, baked]                       ← SVG textures + lighting + gradients
+-  └─ [game canvas]                            ← dynamic paint/fingerprint/pacing
++  ├─ [game canvas]                            ← dynamic paint / fingerprint / trace
++  └─ [pacing canvas]                          ← pacing circle, isolated from paint compositing
+ [vignette div]                                ← outside the filter, anchors the frame
+ ```
+ 
+-Three GPU layers total. iPhone 12 has plenty of headroom.
++Four GPU layers total (Square/Hexagon use bg + game; Infinity splits the pacing circle onto its own canvas — see the 2026-07-02 Decision log entry). The layer budget (≤5 concurrent full-screen layers) still holds with headroom on iPhone 12. The pacing canvas counts against the budget — do not add further persistent canvases without baking something else down first.
+ 
+ ---
+ 
+@@ -122,7 +123,7 @@ Do **not** desaturate via `ctx.filter` per-frame, `getImageData` pixel ops, or r
+ - **Authoring:** static `.svg` light-pool assets (radial blooms, shafts)
+ - **Runtime:** baked into the bg canvas at resize using `globalCompositeOperation = 'screen'` (or `'overlay'`) — all composition happens in canvas-land, not CSS
+ - **Per-frame cost:** zero
+-- **Animated variant (optional):** if static feels flat, see Step 5 of the staged plan — uses the single CSS overlay slot, which means the vignette must first be baked into the bg canvas.
++- **Animated variant (optional, not currently used):** if static lighting feels flat, an animated lighting overlay is possible but requires freeing the single CSS overlay slot first — the vignette would have to be baked into the bg canvas (as a darkening pass in `buildMeadowBg`) before adding one animated div (SVG-as-`background-image`, slow opacity/transform, no `mixBlendMode` stack).
+ 
+ ### Vignette
+ - Current implementation is a CSS `radial-gradient` div — keep. Cheap, single layer, no SVG needed.
+@@ -147,56 +148,9 @@ Do **not** desaturate via `ctx.filter` per-frame, `getImageData` pixel ops, or r
+ 
+ ---
+ 
+-## Current state of `main` (as of 2026-05-19, post Step 1)
++## Current state
+ 
+-Working tree clean. Step 1 landed. Conforms to all layering rules.
+-
+-- **6 CSS overlays removed.** Their visual intent (canopy dapples, top-edge shadow, dark/bright shafts) is now baked into `buildMeadowBg` via Canvas 2D `globalCompositeOperation`.
+-- **DPR fixed.** `buildMeadowBg` and the display canvas both size at `w * dpr × h * dpr`; drawing scaled accordingly.
+-- **`bgCanvas` lives inside the saturate wrapper.** Desaturates with the heat gauge in lockstep.
+-- **`SquareCanvas` is `position: absolute`** so it paints above the opaque baked bg canvas. Both siblings now use the same positioning mode per rule #7.
+-- **`stampStroke.js`** in place as the Classic default.
+-- Compositing layer count: ~4 full-screen layers (was ~11 pre-refactor).
+-
+-Next: Step 2 — SVG track texture.
+-
+----
+-
+-## Staged plan forward
+-
+-Each step is a separate commit. Each is independently verifiable on iOS. Stop after any step if the result is good enough.
+-
+-### Step 1 — Refactor baseline (no visual goal; mechanical)
+-- Delete the 6 `mixBlendMode` overlay divs from `SquareGame.jsx`
+-- Migrate their visual intent into `buildMeadowBg` using Canvas 2D `globalCompositeOperation` (`screen`, `overlay`)
+-- Fix DPR in `buildMeadowBg` — size offscreen canvas at `w * dpr × h * dpr`, scale ctx accordingly
+-- Move `bgCanvas` inside the saturate wrapper
+-- Verify on iOS: same/better perf, visual is close to current (lighting may shift; polish in later steps)
+-- Commit
+-
+-### Step 2 — SVG track texture
+-- Author or import one `.svg` for track surface texture
+-- Bake into racetrack passes via `ctx.createPattern()` at resize in `SquareCanvas`
+-- Verify on iOS. Commit.
+-
+-### Step 3 — SVG background texture
+-- One `.svg` for paper/meadow grain
+-- `drawImage` into `buildMeadowBg` during bake
+-- Verify on iOS. Commit.
+-
+-### Step 4 — Refine baked lighting with SVG
+-- If canvas-composed lighting from Step 1 isn't rich enough, replace with SVG light-pool assets baked in
+-- Verify on iOS. Commit.
+-
+-### Step 5 (optional) — One animated overlay
+-- Only if static lighting feels too flat after Steps 1–4
+-- The layer budget allows **one** CSS overlay above the game canvas, currently held by the vignette. To add an animated lighting overlay, the vignette must first be baked into the bg canvas (as a darkening pass during `buildMeadowBg`), freeing the overlay slot.
+-- The new overlay: one div, SVG-as-`background-image`, slow opacity or transform animation. No `mixBlendMode` stack.
+-- Verify on iOS. Commit.
+-
+-### Queued cleanups (not on the critical path)
+-
+-_(All previously queued items completed in the 2026-06-02 cleanup. New items go here.)_
++This is the single source of live status: the **Decision log** at the end of this file. Do not add a dated snapshot here or in `CLAUDE.md` — snapshots in two places drift apart. Append to the log instead.
+ 
+ ---
+ 
+-- 
+2.43.0
+
