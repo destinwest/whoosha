@@ -84,7 +84,8 @@ const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 // and lives on its own: it slowly grows, drifts outward (the two arms spreading
 // apart), and fades to nothing. The finger keeps shedding new small ones near it,
 // so a diverging V of feathered wavelets is left behind in its path. Calm and
-// low-contrast: no rings, no glow, source-over, very low alpha.
+// low-contrast: no rings, no glow, very low alpha (base ribbon is
+// source-over; the highlight/shadow bands below use screen/multiply).
 // A wavelet is born small + more opaque + already out to the side/front, then
 // grows, drifts outward, and fades to the SAME final state (offset/size/gone)
 // as before. Thickness has its OWN gentle linear ramp (decoupled from the
@@ -125,6 +126,27 @@ const WAKE_COLOR          = '205,210,236'  // soft cool moonlight-lavender
 const WAKELET_RIBBON_PASSES = [
   { thick: 1.8, alpha: 0.35 },
   { thick: 1,   alpha: 1    },
+]
+
+// Highlight/shadow — fakes light on water using the wavelet's OWN outward
+// curvature as the "light source": the outward-facing edge (the crest,
+// catching open sky) gets a highlight band, the inward-facing edge (the
+// trough, toward the path) gets a shadow band. No fixed world light
+// direction needed, so it stays consistent regardless of which way the
+// finger moves. Colors pulled from the actual baked night sky (nightSky.js)
+// rather than invented: highlight leans toward the pale-blue star tint
+// (205,220,255), shadow leans toward the deep navy base wash (#0E1235 /
+// #181A47) lightened just enough to still read against a dark background.
+// Composited with 'screen' (brightens what's beneath) / 'multiply' (darkens
+// it) instead of flat source-over, so the light actually interacts with the
+// scene rather than looking painted on top of it.
+const WAKE_HIGHLIGHT_COLOR = '220,230,255'
+const WAKE_SHADOW_COLOR    = '48,52,98'
+const WAKELET_EDGE_THICK_MUL = 0.55  // highlight/shadow band width, × the base ribbon's half-thickness
+const WAKELET_EDGE_SHIFT_MUL = 0.42  // how far the band rides toward its edge, × peak half-thickness
+const WAKELET_EDGE_PASSES = [
+  { color: WAKE_HIGHLIGHT_COLOR, alphaMul: 0.65, shiftSign: 1,  blend: 'screen'   },
+  { color: WAKE_SHADOW_COLOR,    alphaMul: 0.55, shiftSign: -1, blend: 'multiply' },
 ]
 
 // Per-wavelet randomness — seeded once at spawn (not per-frame), so it costs a
@@ -667,6 +689,12 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
             const tl = Math.hypot(tx, ty) || 1
             nx[k] = -ty / tl; ny[k] = tx / tl
           }
+          // Which fill direction (+normal or -normal) is actually "outward"
+          // (away from the path) for THIS wavelet — decides which edge gets
+          // the highlight vs the shadow below. One check (middle sample) is
+          // enough; the ribbon doesn't curve enough to flip along its length.
+          const midK = S >> 1
+          const outwardSign = (nx[midK] * ioX + ny[midK] * ioY) >= 0 ? 1 : -1
 
           // Fill the tapered ribbon outline — thickest at the middle sample,
           // tapering to (not all the way to a point at) both ends. Two passes
@@ -686,6 +714,33 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
             ctx.globalAlpha = a * pass.alpha
             ctx.fill()
           }
+
+          // Highlight (outward edge, 'screen') + shadow (inward edge,
+          // 'multiply') bands — narrower than the base ribbon and shifted
+          // toward their respective edge, so light and shadow read as part
+          // of the wave's own curvature rather than a flat painted stroke.
+          for (const edge of WAKELET_EDGE_PASSES) {
+            const sign = outwardSign * edge.shiftSign
+            ctx.beginPath()
+            for (let k = 0; k < S; k++) {
+              const hw    = peakThick * WAKELET_TAPER[k] * WAKELET_EDGE_THICK_MUL
+              const shift = peakThick * WAKELET_EDGE_SHIFT_MUL * sign
+              const px = sx[k] + nx[k] * (shift + hw), py = sy[k] + ny[k] * (shift + hw)
+              if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+            }
+            for (let k = S - 1; k >= 0; k--) {
+              const hw    = peakThick * WAKELET_TAPER[k] * WAKELET_EDGE_THICK_MUL
+              const shift = peakThick * WAKELET_EDGE_SHIFT_MUL * sign
+              ctx.lineTo(sx[k] + nx[k] * (shift - hw), sy[k] + ny[k] * (shift - hw))
+            }
+            ctx.closePath()
+            ctx.fillStyle = `rgb(${edge.color})`
+            ctx.globalCompositeOperation = edge.blend
+            ctx.globalAlpha = a * edge.alphaMul
+            ctx.fill()
+          }
+          ctx.fillStyle = `rgb(${WAKE_COLOR})`
+          ctx.globalCompositeOperation = 'source-over'
         }
         ctx.globalAlpha = 1
         ctx.restore()
