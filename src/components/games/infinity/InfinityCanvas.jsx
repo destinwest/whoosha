@@ -166,6 +166,7 @@ const WAKELET_TIP_FADE = 0.3   // fraction of the ribbon's length, from each tip
 const WAKELET_JITTER_SIZE     = 0.14   // ± size variance (offset/length/thickness together)
 const WAKELET_JITTER_LIFE     = 0.18   // ± lifetime variance — desyncs the grow/fade rhythm
 const WAKELET_JITTER_FADE     = 0.35   // ± fade-in-speed variance — desyncs the birth pop
+const WAKELET_FADE_IN_FRAC    = 0.22   // fraction of life spent fading IN — a gentle build, still much quicker than the ~100%-of-life fade-out
 const WAKELET_JITTER_BOW      = 0.25   // ± crescent-curvature variance
 const WAKELET_JITTER_POS_LW   = 0.06   // birth-position jitter along the direction of travel, × lw
 const WAKELET_WOBBLE_AMT      = 0.10   // contour wobble amplitude (fraction of half-length) — breaks the perfect parabola
@@ -668,11 +669,12 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
           w.age += dt
           if (w.age >= w.maxLife) { pool.splice(i, 1); continue }
           const t   = w.age / w.maxLife
-          // Born opaque (very short fade-in avoids a hard pop), then fades to
-          // nothing — matches the old curve from t≈0.12 on, so the FINAL state is
-          // unchanged while young wavelets are ~2× more opaque than before.
-          // fadeMul desyncs how quickly each individual wavelet pops in.
-          const env = Math.min(1, t / (0.04 * w.fadeMul)) * (1 - t)
+          // Gentle eased build-in (smoothstep, not linear, so it starts very
+          // faint and gradually accelerates — reads as the finger's motion
+          // "building" the wave rather than popping it in), then a much
+          // slower fade to nothing over the rest of its life. fadeMul
+          // desyncs how quickly each individual wavelet builds in.
+          const env = smoothstep(Math.min(1, t / (WAKELET_FADE_IN_FRAC * w.fadeMul))) * (1 - t)
           const a   = WAKE_ALPHA * env
           if (a < 0.004) continue
           // sizeMul makes each wavelet's whole family of dimensions slightly
