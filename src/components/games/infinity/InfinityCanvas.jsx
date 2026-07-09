@@ -93,9 +93,9 @@ const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 //
 // Each wavelet is rendered as ONE filled tapered ribbon (ctx.fill over a
 // hand-built outline), not stamped circular dabs — thickest at its middle
-// sample, pointed at both ends — so it reads as a whole little wave rather
-// than a string of beads. Two fill passes (wide+faint, then narrow+firm) fake
-// a soft edge cheaply, without shadowBlur.
+// sample, gently tapering (not to a sharp point) at both ends — so it reads
+// as a whole little wave rather than a string of beads. Two fill passes
+// (wide+faint, then narrow+firm) fake a soft edge cheaply, without shadowBlur.
 const WAKELET_LIFE_MS     = 1600   // each wavelet: grow → spread → dissipate over this long
 const SHED_SPACING_LW     = 0.3556 // shed a wavelet PAIR every this much finger travel (density) — 0.20/0.75/0.75, i.e. shed frequency -25% twice
 const WAKELET_MAX         = 110    // particle-pool cap
@@ -148,13 +148,19 @@ const WAKELET_WOBBLE_FREQ_MIN = 0.5   // fewest wave-cycles across the crescent'
 const WAKELET_WOBBLE_FREQ_MAX = 1.5   // most wave-cycles across the crescent's length
 // Sample positions across the ribbon (u ∈ [-1,1]) and their taper profile —
 // both fixed by WAKELET_SAMPLES, so bake them once instead of recomputing per
-// particle per frame. Taper is 0 at both ends (pointed tips), 1 at the middle
-// (peak thickness). Raised to a power > 1 (sharper than a plain parabola) so
+// particle per frame. Raised to a power > 1 (sharper than a plain parabola) so
 // it stays slender along most of its length and only pinches wide right at
-// the center — reads as a curved ARC, not a rounded half-circle blob.
+// the center — reads as a curved ARC, not a rounded half-circle blob. Rescaled
+// into [TAPER_FLOOR, 1] (not [0, 1]) so the tips keep real width instead of
+// coming to a sharp point — still 1 (full peak thickness) at the middle, but a
+// subtle taper down to TAPER_FLOOR at the ends rather than all the way to 0.
 const WAKELET_TAPER_POWER = 1.8
+const WAKELET_TAPER_FLOOR = 0.6
 const WAKELET_U = Array.from({ length: WAKELET_SAMPLES }, (_, k) => (k / (WAKELET_SAMPLES - 1)) * 2 - 1)
-const WAKELET_TAPER = WAKELET_U.map(u => Math.pow(Math.max(0, 1 - u * u), WAKELET_TAPER_POWER))
+const WAKELET_TAPER = WAKELET_U.map(u => {
+  const raw = Math.pow(Math.max(0, 1 - u * u), WAKELET_TAPER_POWER)
+  return WAKELET_TAPER_FLOOR + (1 - WAKELET_TAPER_FLOOR) * raw
+})
 
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
@@ -663,8 +669,8 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
           }
 
           // Fill the tapered ribbon outline — thickest at the middle sample,
-          // pointed at both ends (WAKELET_TAPER is 0 there). Two passes (wide+
-          // faint, then narrow+firm) fake a soft edge without shadowBlur.
+          // tapering to (not all the way to a point at) both ends. Two passes
+          // (wide+faint, then narrow+firm) fake a soft edge without shadowBlur.
           for (const pass of WAKELET_RIBBON_PASSES) {
             ctx.beginPath()
             for (let k = 0; k < S; k++) {
