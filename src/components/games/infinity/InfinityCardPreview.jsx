@@ -4,9 +4,9 @@ import { useEffect, useRef } from 'react'
 // The Infinity counterpart to Square/HexagonCardPreview: a soft, muted render of
 // the Infinity game for the home carousel card — a calm "resting" state that the
 // launch cross-dissolve blooms into the vivid game. Deliberately NOT a faithful
-// game frame: a quiet night gradient (a few faint stars, no Milky Way band /
-// nebulae) and a flat lavender figure-8 track (no shadow), with one quiet pale
-// pacing dot. No breathing labels.
+// game frame: a quiet night gradient with a soft central glow (no stars, no
+// Milky Way band / nebulae) and a translucent, glass-like lavender figure-8
+// track (no shadow), with one quiet pale pacing dot. No breathing labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — the same vertical lemniscate + track-width
@@ -18,16 +18,6 @@ const RAW    = 1 / (2 * Math.SQRT2)   // max |x| of the raw lemniscate
 const VFILL  = 0.74                   // card-tuned: leave room for the bottom title
 const WFILL  = 0.80
 const CY     = 0.43                   // track vertical center, nudged up off the title
-
-// Tiny seeded PRNG so the faint star sprinkle is stable across re-draws.
-function mulberry32(seed) {
-  return function () {
-    seed |= 0; seed = (seed + 0x6D2B79F5) | 0
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
 
 function drawScene(ctx, w, h) {
   // Soft night gradient — the game's palette, dimmed and calmed (no band/nebulae).
@@ -44,21 +34,6 @@ function drawScene(ctx, w, h) {
   glow.addColorStop(1, 'rgba(120,95,190,0)')
   ctx.fillStyle = glow
   ctx.fillRect(0, 0, w, h)
-
-  // A few quiet stars for night identity.
-  const rand = mulberry32(0x1FEED)
-  const stars = Math.round((w * h) / 4200)
-  ctx.globalCompositeOperation = 'screen'
-  for (let i = 0; i < stars; i++) {
-    const x = rand() * w
-    const y = rand() * h
-    const r = 0.4 + rand() * rand() * 1.2
-    ctx.fillStyle = `rgba(255,255,255,${(0.3 + rand() * 0.5).toFixed(3)})`
-    ctx.beginPath()
-    ctx.arc(x, y, r, 0, Math.PI * 2)
-    ctx.fill()
-  }
-  ctx.globalCompositeOperation = 'source-over'
 
   // ── Figure-8 geometry — mirrors InfinityCanvas buildGeo (card-tuned fit) ────
   const cx = w / 2
@@ -77,7 +52,8 @@ function drawScene(ctx, w, h) {
     return [cx + ((st * ct) / d) * scaleX, cy - (ct / d) * scaleY]
   }
 
-  // Flat lavender track — a single soft band (no shadow / highlight).
+  // Translucent glass-like lavender track — a single soft band (no shadow /
+  // highlight), reduced opacity so the night gradient/glow shows through it.
   ctx.beginPath()
   let [x0, y0] = pt(0)
   ctx.moveTo(x0, y0)
@@ -87,7 +63,10 @@ function drawScene(ctx, w, h) {
   ctx.lineJoin    = 'round'
   ctx.lineCap     = 'round'
   ctx.strokeStyle = '#D0C4EC'
+  ctx.save()
+  ctx.globalAlpha = 0.55
   ctx.stroke()
+  ctx.restore()
 
   // Quiet pacing dot at the top apex of the inhale lobe (s = 0.25) — a clean,
   // uncluttered spot away from the center crossover.
