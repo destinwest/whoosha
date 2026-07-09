@@ -84,23 +84,134 @@ const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 // and lives on its own: it slowly grows, drifts outward (the two arms spreading
 // apart), and fades to nothing. The finger keeps shedding new small ones near it,
 // so a diverging V of feathered wavelets is left behind in its path. Calm and
-// low-contrast: no rings, no glow, source-over, very low alpha.
+// low-contrast: no rings, no glow, very low alpha (base ribbon is
+// source-over; the highlight/shadow bands below use screen/multiply).
+// A wavelet is born small + more opaque + already out to the side/front, then
+// grows, drifts outward, and fades to the SAME final state (offset/size/gone)
+// as before. Thickness has its OWN gentle linear ramp (decoupled from the
+// crescent half-length) so it never compounds down to a sub-pixel sliver at
+// birth.
+//
+// Each wavelet is rendered as ONE filled tapered ribbon (ctx.fill over a
+// hand-built outline), not stamped circular dabs — thickest at its middle
+// sample, gently tapering (not to a sharp point) at both ends — so it reads
+// as a whole little wave rather than a string of beads. Two fill passes
+// (wide+faint, then narrow+firm) fake a soft edge cheaply, without shadowBlur.
 const WAKELET_LIFE_MS     = 1600   // each wavelet: grow → spread → dissipate over this long
-const SHED_SPACING_LW     = 0.20   // shed a wavelet PAIR every this much finger travel (density)
+const SHED_SPACING_LW     = 0.4741 // shed a wavelet PAIR every this much finger travel (density) — 0.20/0.75^3, i.e. shed frequency -25% three times
 const WAKELET_MAX         = 110    // particle-pool cap
-const WAKELET_INIT_OFF_LW = 0.10   // wavelet's starting offset from the path (arms begin near the finger)
-const WAKELET_SPREAD_LW   = 0.52   // how far a wavelet drifts outward over its life (the V spreading)
-const WAKELET_INIT_LEN_LW = 0.10   // starting crescent half-length
-const WAKELET_GROW_LW     = 0.24   // crescent growth over its life
-const WAKELET_DAB_R_LW    = 0.11   // dab radius within a crescent (finer = more wave-like)
-const WAKELET_SAMPLES     = 6      // dabs per crescent
+const WAKELET_INIT_OFF_LW = 0.48   // starting side offset (2× — placement doubled to match the doubled length)
+const WAKELET_SPREAD_LW   = 0.76   // extra outward drift over life  → final offset = INIT_OFF + SPREAD (1.24, 2×)
+const WAKELET_FRONT_OFF_LW= 0.18   // born this far ahead of the shed point (toward the front of the touch)
+const WAKELET_INIT_LEN_LW = 0.20   // starting crescent half-length (2× again — length only, per user's answer)
+const WAKELET_GROW_LW     = 1.16   // growth over life             → final half-length = INIT_LEN + GROW (1.36, 2×)
+const WAKELET_THICK_INIT_LW = 0.0375 // starting peak (middle) half-thickness — 25% thinner than before
+const WAKELET_THICK_GROW_LW = 0.0375 // peak-thickness growth over life → final = INIT + GROW (0.075 — 25% thinner than before)
+const WAKELET_SAMPLES     = 9      // ribbon cross-section samples (more = smoother taper curve)
 const WAKELET_BOW         = 0.55   // crescent bow toward the direction of travel (× half-length)
-const WAKE_ALPHA          = 0.12   // peak per-dab alpha — intentionally faint
+// The tip axis was pure "outward, perpendicular to travel" (0°/180°). Tilt it
+// 45° so the tip nearer the path swings toward the FORWARD direction (pulled
+// "higher", closer to the finger) and the tip farther from the path swings
+// BACKWARD (trailing, "lower") — like the diagonal wavelets in the reference
+// photos, not a perpendicular crescent. Baked once (module load), reused as a
+// rotation of each wavelet's own outward axis (side-corrected, so it mirrors
+// correctly for the left and right arms).
+const WAKELET_TILT_DEG = 45
+const WAKELET_TILT_COS = Math.cos(WAKELET_TILT_DEG * Math.PI / 180)
+const WAKELET_TILT_SIN = Math.sin(WAKELET_TILT_DEG * Math.PI / 180)
+const WAKE_ALPHA          = 0.12   // peak fill alpha — intentionally faint (unchanged final)
 const WAKE_COLOR          = '205,210,236'  // soft cool moonlight-lavender
+// Two fill passes per wavelet — wide+faint outer, narrow+firm inner — fake a
+// soft feathered edge without shadowBlur (expensive to animate on iOS Safari).
+const WAKELET_RIBBON_PASSES = [
+  { thick: 1.8, alpha: 0.35 },
+  { thick: 1,   alpha: 1    },
+]
+
+// Highlight/shadow — fakes light on water using the wavelet's OWN outward
+// curvature as the "light source": the outward-facing edge (the crest,
+// catching open sky) gets a highlight band, the inward-facing edge (the
+// trough, toward the path) gets a shadow band. No fixed world light
+// direction needed, so it stays consistent regardless of which way the
+// finger moves. Colors pulled from the actual baked night sky (nightSky.js)
+// rather than invented: highlight leans toward the pale-blue star tint
+// (205,220,255), shadow leans toward the deep navy base wash (#0E1235 /
+// #181A47) lightened just enough to still read against a dark background.
+// Composited with 'screen' (brightens what's beneath) / 'multiply' (darkens
+// it) instead of flat source-over, so the light actually interacts with the
+// scene rather than looking painted on top of it.
+const WAKE_HIGHLIGHT_COLOR = '220,230,255'
+const WAKE_SHADOW_COLOR    = '48,52,98'
+const WAKELET_EDGE_THICK_MUL = 0.55  // highlight/shadow band width, × the base ribbon's half-thickness
+const WAKELET_EDGE_SHIFT_MUL = 0.42  // how far the band rides toward its edge, × peak half-thickness
+const WAKELET_EDGE_PASSES = [
+  { color: WAKE_HIGHLIGHT_COLOR, alphaMul: 0.65, shiftSign: 1,  blend: 'screen'   },
+  { color: WAKE_SHADOW_COLOR,    alphaMul: 0.55, shiftSign: -1, blend: 'multiply' },
+]
+// Tip fade — the ribbon still reads as a "drawn stroke" because it has a
+// crisp, uniform-opacity edge even after v20's width taper; real water
+// disturbance loses visibility toward the edges of the disturbed patch, not
+// just width. Fade each wavelet's OPACITY toward both tips (independent of,
+// and on top of, the width taper) via a linear gradient along its own
+// length instead of a flat fillStyle — one gradient per wavelet per color
+// (reused across every pass painted in that color), so this adds no extra
+// draw calls, just per-pixel color interpolation on the same tiny fills.
+const WAKELET_TIP_FADE = 0.3   // fraction of the ribbon's length, from each tip, that fades toward transparent
+
+// Per-wavelet randomness — seeded once at spawn (not per-frame), so it costs a
+// handful of Math.random() calls only when a wavelet is born, never in the
+// draw loop. This is what keeps the wake from reading as a stamped, metronomic
+// pattern: no two wavelets (not even a spawned L/R pair) grow, fade, or curve
+// identically, so the family resemblance stays but the rhythm feels organic.
+const WAKELET_JITTER_SIZE     = 0.14   // ± size variance (offset/length/thickness together)
+const WAKELET_JITTER_LIFE     = 0.18   // ± lifetime variance — desyncs the grow/fade rhythm
+const WAKELET_JITTER_FADE     = 0.35   // ± fade-in-speed variance — desyncs the birth pop
+const WAKELET_FADE_IN_FRAC    = 0.22   // fraction of life spent fading IN — a gentle build, still much quicker than the ~100%-of-life fade-out
+const WAKELET_JITTER_BOW      = 0.25   // ± crescent-curvature variance
+const WAKELET_JITTER_POS_LW   = 0.06   // birth-position jitter along the direction of travel, × lw
+const WAKELET_WOBBLE_AMT      = 0.10   // contour wobble amplitude (fraction of half-length) — breaks the perfect parabola
+// Wobble is a smooth sine wave (own random frequency + phase per wavelet, set
+// once at spawn), NOT independent per-sample noise — independent noise made
+// neighboring centerline samples uncorrelated, and differentiating that for
+// the ribbon's edge normals amplified it into sharp kinks. A sine is
+// continuous, so consecutive samples stay correlated and the outline stays
+// smooth while each wavelet still gets its own unique gentle undulation.
+const WAKELET_WOBBLE_FREQ_MIN = 0.5   // fewest wave-cycles across the crescent's length
+const WAKELET_WOBBLE_FREQ_MAX = 1.5   // most wave-cycles across the crescent's length
+// Sample positions across the ribbon (u ∈ [-1,1]) and their taper profile —
+// both fixed by WAKELET_SAMPLES, so bake them once instead of recomputing per
+// particle per frame. Raised to a power > 1 (sharper than a plain parabola) so
+// it stays slender along most of its length and only pinches wide right at
+// the center — reads as a curved ARC, not a rounded half-circle blob. Rescaled
+// into [TAPER_FLOOR, 1] (not [0, 1]) so the tips keep real width instead of
+// coming to a sharp point — still 1 (full peak thickness) at the middle, but a
+// subtle taper down to TAPER_FLOOR at the ends rather than all the way to 0.
+const WAKELET_TAPER_POWER = 1.8
+const WAKELET_TAPER_FLOOR = 0.6
+const WAKELET_U = Array.from({ length: WAKELET_SAMPLES }, (_, k) => (k / (WAKELET_SAMPLES - 1)) * 2 - 1)
+const WAKELET_TAPER = WAKELET_U.map(u => {
+  const raw = Math.pow(Math.max(0, 1 - u * u), WAKELET_TAPER_POWER)
+  return WAKELET_TAPER_FLOOR + (1 - WAKELET_TAPER_FLOOR) * raw
+})
 
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
 const easeOutSoft = t => 1 - Math.pow(1 - t, 2)
+
+// A linear gradient along (x0,y0)->(x1,y1), opaque `colorRGB` in the middle,
+// fading to fully transparent over WAKELET_TIP_FADE at each end. Used as the
+// wavelet ribbon's fillStyle so opacity fades toward the tips — perpendicular
+// position doesn't matter for a linear gradient, so the SAME gradient (built
+// from the wavelet's centerline) is reused for its laterally-offset
+// highlight/shadow bands too.
+function buildTipFadeGradient(ctx, x0, y0, x1, y1, colorRGB) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1)
+  g.addColorStop(0, `rgba(${colorRGB},0)`)
+  g.addColorStop(WAKELET_TIP_FADE, `rgba(${colorRGB},1)`)
+  g.addColorStop(1 - WAKELET_TIP_FADE, `rgba(${colorRGB},1)`)
+  g.addColorStop(1, `rgba(${colorRGB},0)`)
+  return g
+}
 
 // ── buildGeo ──────────────────────────────────────────────────────────────────
 // Samples the vertical lemniscate into a point array + cumulative arc-lengths.
@@ -277,7 +388,13 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
   // Wake — a pool of shed-and-left-behind wavelet particles
   const wakeletsRef    = useRef([])    // [{ x, y, nx, ny, fx, fy, side, age, maxLife }]
   const lastShedPosRef = useRef(null)  // last finger pos a wavelet pair was shed at
-  const dabSpriteRef   = useRef(null)  // baked soft radial-falloff dab (tinted WAKE_COLOR)
+  // Reusable scratch buffers for the ribbon build (centerline + normals) — sized
+  // once to WAKELET_SAMPLES and overwritten per wavelet per frame, so drawing
+  // the wake never allocates.
+  const wakeScratchXRef  = useRef(new Float32Array(WAKELET_SAMPLES))
+  const wakeScratchYRef  = useRef(new Float32Array(WAKELET_SAMPLES))
+  const wakeScratchNXRef = useRef(new Float32Array(WAKELET_SAMPLES))
+  const wakeScratchNYRef = useRef(new Float32Array(WAKELET_SAMPLES))
 
   // Fingerprint affordance
   const fpImgRef             = useRef(null)
@@ -304,31 +421,6 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
     const img = new Image()
     img.onload = () => { fpImgRef.current = img; fpImgReadyRef.current = true }
     img.src = '/assets/fingerprint.png'
-  }, [])
-
-  // ── Wake dab sprite — baked once ─────────────────────────────────────────────
-  // A soft radial-falloff disc tinted WAKE_COLOR. Drawn (blitted, scaled) at each
-  // trail point so the wake is a train of feathered dabs — cheap, no per-frame
-  // gradient creation. Falloff is eased (alpha ~ smoothstep) for very soft edges.
-  useEffect(() => {
-    const S = 64
-    const oc = document.createElement('canvas')
-    oc.width = S; oc.height = S
-    const c = oc.getContext('2d')
-    const img = c.createImageData(S, S)
-    const cx = (S - 1) / 2, cy = (S - 1) / 2, R = S / 2
-    const [cr, cg, cb] = WAKE_COLOR.split(',').map(Number)
-    for (let y = 0; y < S; y++) {
-      for (let x = 0; x < S; x++) {
-        const d = Math.hypot(x - cx, y - cy) / R          // 0 centre → 1 edge
-        const t = Math.max(0, 1 - d)
-        const a = Math.round(255 * (t * t * (3 - 2 * t)))  // smoothstep falloff
-        const o = (y * S + x) * 4
-        img.data[o] = cr; img.data[o + 1] = cg; img.data[o + 2] = cb; img.data[o + 3] = a
-      }
-    }
-    c.putImageData(img, 0, 0)
-    dabSpriteRef.current = oc
   }, [])
 
   // ── Imperative API ─────────────────────────────────────────────────────────
@@ -534,17 +626,28 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
         if (moved >= shedStep) {
           const ux = dx / moved, uy = dy / moved   // direction of travel
           const nx = -uy, ny = ux                  // perpendicular
+          const front = lw * WAKELET_FRONT_OFF_LW  // born ahead of the shed point (toward the front)
           const num = Math.min(8, Math.floor(moved / shedStep))
           const pool = wakeletsRef.current
           for (let s = 1; s <= num; s++) {
-            const bx = last.x + dx * ((s * shedStep) / moved)
-            const by = last.y + dy * ((s * shedStep) / moved)
+            const bx = last.x + dx * ((s * shedStep) / moved) + ux * front
+            const by = last.y + dy * ((s * shedStep) / moved) + uy * front
             for (const side of [1, -1]) {
               const w = pool.length < WAKELET_MAX
                 ? (pool.push({}), pool[pool.length - 1])
                 : pool.reduce((a, b) => (b.age > a.age ? b : a))   // recycle the oldest
-              w.x = bx; w.y = by; w.nx = nx; w.ny = ny; w.fx = ux; w.fy = uy
-              w.side = side; w.age = 0; w.maxLife = WAKELET_LIFE_MS
+              // Each side gets its own position jitter — an L/R pair spawned
+              // "together" no longer lands as an exact mirror image.
+              const posJ = (Math.random() * 2 - 1) * lw * WAKELET_JITTER_POS_LW
+              w.x = bx + ux * posJ; w.y = by + uy * posJ
+              w.nx = nx; w.ny = ny; w.fx = ux; w.fy = uy
+              w.side = side; w.age = 0
+              w.maxLife = WAKELET_LIFE_MS * (1 + (Math.random() * 2 - 1) * WAKELET_JITTER_LIFE)
+              w.sizeMul = 1 + (Math.random() * 2 - 1) * WAKELET_JITTER_SIZE
+              w.fadeMul = 1 + (Math.random() * 2 - 1) * WAKELET_JITTER_FADE
+              w.bowMul  = 1 + (Math.random() * 2 - 1) * WAKELET_JITTER_BOW
+              w.wobFreq  = WAKELET_WOBBLE_FREQ_MIN + Math.random() * (WAKELET_WOBBLE_FREQ_MAX - WAKELET_WOBBLE_FREQ_MIN)
+              w.wobPhase = Math.random() * Math.PI * 2
             }
           }
           lastShedPosRef.current = { x: fp.x, y: fp.y }
@@ -553,33 +656,123 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
 
       // Age + draw the wavelets. Each grows, drifts outward (arms spreading), and
       // fades over its life, anchored where it was born (left behind in the water).
-      const dab = dabSpriteRef.current
+      // Rendered as a filled tapered ribbon (see wakeScratch* below), not stamped
+      // dabs, so each wavelet reads as one whole little wave.
       const pool = wakeletsRef.current
-      if (dab && pool.length) {
-        const dabR = lw * WAKELET_DAB_R_LW
-        const S    = WAKELET_SAMPLES
+      if (pool.length) {
+        const S  = WAKELET_SAMPLES
+        const sx = wakeScratchXRef.current, sy = wakeScratchYRef.current
+        const nx = wakeScratchNXRef.current, ny = wakeScratchNYRef.current
         ctx.save()
         for (let i = pool.length - 1; i >= 0; i--) {
           const w = pool[i]
           w.age += dt
           if (w.age >= w.maxLife) { pool.splice(i, 1); continue }
           const t   = w.age / w.maxLife
-          const env = Math.min(1, t / 0.12) * (1 - t)   // quick fade-in, then fade to nothing
+          // Gentle eased build-in (smoothstep, not linear, so it starts very
+          // faint and gradually accelerates — reads as the finger's motion
+          // "building" the wave rather than popping it in), then a much
+          // slower fade to nothing over the rest of its life. fadeMul
+          // desyncs how quickly each individual wavelet builds in.
+          const env = smoothstep(Math.min(1, t / (WAKELET_FADE_IN_FRAC * w.fadeMul))) * (1 - t)
           const a   = WAKE_ALPHA * env
           if (a < 0.004) continue
-          const off  = lw * (WAKELET_INIT_OFF_LW + WAKELET_SPREAD_LW * t)  // drifts outward
-          const half = lw * (WAKELET_INIT_LEN_LW + WAKELET_GROW_LW * t)    // grows
-          const bow  = WAKELET_BOW * half
-          const cxp  = w.x + w.nx * w.side * off
-          const cyp  = w.y + w.ny * w.side * off
-          ctx.globalAlpha = a
+          // sizeMul makes each wavelet's whole family of dimensions slightly
+          // bigger or smaller than its neighbors (still shares the same curve).
+          const off      = lw * (WAKELET_INIT_OFF_LW + WAKELET_SPREAD_LW * t) * w.sizeMul  // drifts outward
+          const half     = lw * (WAKELET_INIT_LEN_LW + WAKELET_GROW_LW * t) * w.sizeMul     // grows
+          const peakThick = lw * (WAKELET_THICK_INIT_LW + WAKELET_THICK_GROW_LW * t) * w.sizeMul  // own gentle ramp — never sub-pixel
+          const bow      = WAKELET_BOW * half * w.bowMul
+          const cxp      = w.x + w.nx * w.side * off
+          const cyp      = w.y + w.ny * w.side * off
+          // True outward axis for THIS arm (flips correctly with side, so
+          // "inward" always means "toward the path" for both L and R), rotated
+          // 45° toward -forward — this is what tilts u=-1 (inward tip) toward
+          // +forward and u=+1 (outward tip) toward -forward (backward).
+          const ioX  = w.nx * w.side, ioY = w.ny * w.side
+          const tiltX = ioX * WAKELET_TILT_COS - w.fx * WAKELET_TILT_SIN
+          const tiltY = ioY * WAKELET_TILT_COS - w.fy * WAKELET_TILT_SIN
+
+          // Centerline samples — same curve + wobble as before, along the
+          // tilted axis instead of the raw perpendicular.
           for (let k = 0; k < S; k++) {
-            const u = (k / (S - 1)) * 2 - 1              // across the little crescent
-            const b = bow * (1 - u * u)                 // parabolic bow toward travel
-            const px = cxp + w.nx * (half * u) + w.fx * b
-            const py = cyp + w.ny * (half * u) + w.fy * b
-            ctx.drawImage(dab, px - dabR, py - dabR, dabR * 2, dabR * 2)
+            const u   = WAKELET_U[k]
+            const b   = bow * (1 - u * u)               // parabolic bow toward travel
+            // Smooth per-wavelet wobble (own frequency + phase, set at spawn)
+            // — a sine, not independent per-sample noise, so the contour
+            // stays smooth instead of zigzagging between samples.
+            const wob = Math.sin(u * Math.PI * w.wobFreq + w.wobPhase) * half * WAKELET_WOBBLE_AMT
+            sx[k] = cxp + tiltX * (half * u + wob) + w.fx * b
+            sy[k] = cyp + tiltY * (half * u + wob) + w.fy * b
           }
+          // Per-sample unit normal (finite difference of the centerline) —
+          // shared by both fill passes below, so it's computed only once.
+          for (let k = 0; k < S; k++) {
+            const k0 = k === 0 ? 0 : k - 1
+            const k1 = k === S - 1 ? S - 1 : k + 1
+            const tx = sx[k1] - sx[k0], ty = sy[k1] - sy[k0]
+            const tl = Math.hypot(tx, ty) || 1
+            nx[k] = -ty / tl; ny[k] = tx / tl
+          }
+          // Which fill direction (+normal or -normal) is actually "outward"
+          // (away from the path) for THIS wavelet — decides which edge gets
+          // the highlight vs the shadow below. One check (middle sample) is
+          // enough; the ribbon doesn't curve enough to flip along its length.
+          const midK = S >> 1
+          const outwardSign = (nx[midK] * ioX + ny[midK] * ioY) >= 0 ? 1 : -1
+
+          // Opacity fade toward both tips (perpendicular offset doesn't
+          // matter for a linear gradient, so the same base/highlight/shadow
+          // gradients — built once here from the centerline — are valid for
+          // the laterally-shifted highlight/shadow bands below too).
+          const gBase = buildTipFadeGradient(ctx, sx[0], sy[0], sx[S - 1], sy[S - 1], WAKE_COLOR)
+
+          // Fill the tapered ribbon outline — thickest at the middle sample,
+          // tapering to (not all the way to a point at) both ends. Two passes
+          // (wide+faint, then narrow+firm) fake a soft edge without shadowBlur.
+          ctx.fillStyle = gBase
+          for (const pass of WAKELET_RIBBON_PASSES) {
+            ctx.beginPath()
+            for (let k = 0; k < S; k++) {
+              const hw = peakThick * WAKELET_TAPER[k] * pass.thick
+              const px = sx[k] + nx[k] * hw, py = sy[k] + ny[k] * hw
+              if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+            }
+            for (let k = S - 1; k >= 0; k--) {
+              const hw = peakThick * WAKELET_TAPER[k] * pass.thick
+              ctx.lineTo(sx[k] - nx[k] * hw, sy[k] - ny[k] * hw)
+            }
+            ctx.closePath()
+            ctx.globalAlpha = a * pass.alpha
+            ctx.fill()
+          }
+
+          // Highlight (outward edge, 'screen') + shadow (inward edge,
+          // 'multiply') bands — narrower than the base ribbon and shifted
+          // toward their respective edge, so light and shadow read as part
+          // of the wave's own curvature rather than a flat painted stroke.
+          // Same tip-fade treatment as the base ribbon, in each band's color.
+          for (const edge of WAKELET_EDGE_PASSES) {
+            const sign = outwardSign * edge.shiftSign
+            ctx.beginPath()
+            for (let k = 0; k < S; k++) {
+              const hw    = peakThick * WAKELET_TAPER[k] * WAKELET_EDGE_THICK_MUL
+              const shift = peakThick * WAKELET_EDGE_SHIFT_MUL * sign
+              const px = sx[k] + nx[k] * (shift + hw), py = sy[k] + ny[k] * (shift + hw)
+              if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+            }
+            for (let k = S - 1; k >= 0; k--) {
+              const hw    = peakThick * WAKELET_TAPER[k] * WAKELET_EDGE_THICK_MUL
+              const shift = peakThick * WAKELET_EDGE_SHIFT_MUL * sign
+              ctx.lineTo(sx[k] + nx[k] * (shift - hw), sy[k] + ny[k] * (shift - hw))
+            }
+            ctx.closePath()
+            ctx.fillStyle = buildTipFadeGradient(ctx, sx[0], sy[0], sx[S - 1], sy[S - 1], edge.color)
+            ctx.globalCompositeOperation = edge.blend
+            ctx.globalAlpha = a * edge.alphaMul
+            ctx.fill()
+          }
+          ctx.globalCompositeOperation = 'source-over'
         }
         ctx.globalAlpha = 1
         ctx.restore()
