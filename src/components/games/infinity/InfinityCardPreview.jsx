@@ -5,8 +5,9 @@ import { useEffect, useRef } from 'react'
 // the Infinity game for the home carousel card — a calm "resting" state that the
 // launch cross-dissolve blooms into the vivid game. Deliberately NOT a faithful
 // game frame: a quiet night gradient with a soft central glow (no stars, no
-// Milky Way band / nebulae) and a translucent, glass-like lavender figure-8
-// track (no shadow), with one quiet pale pacing dot. No breathing labels.
+// Milky Way band / nebulae) and a ghostly, nearly-invisible dashed lavender
+// figure-8 outline (no shadow), with one quiet pale pacing dot. No breathing
+// labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — the same vertical lemniscate + track-width
@@ -52,20 +53,37 @@ function drawScene(ctx, w, h) {
     return [cx + ((st * ct) / d) * scaleX, cy - (ct / d) * scaleY]
   }
 
-  // Translucent glass-like lavender track — a single soft band (no shadow /
-  // highlight), reduced opacity so the night gradient/glow shows through it.
-  ctx.beginPath()
+  // Ghostly, nearly-invisible dashed lavender outline. The figure-8 crosses
+  // itself at the center, so stroking it directly at low alpha would
+  // double-composite the overlap there and leave a visibly darker patch
+  // (exactly the artifact this replaces). Instead: bake the dashed path fully
+  // opaque onto an offscreen canvas (overlaps just paint the same solid color
+  // over itself — no darkening), then composite that whole bitmap onto the
+  // card at one uniform low alpha, so every pixel of the track — including
+  // the crossover — gets blended exactly once.
+  const dpr = ctx.canvas.width / w
+  const trackCanvas = document.createElement('canvas')
+  trackCanvas.width  = ctx.canvas.width
+  trackCanvas.height = ctx.canvas.height
+  const tctx = trackCanvas.getContext('2d')
+  tctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+
+  tctx.beginPath()
   let [x0, y0] = pt(0)
-  ctx.moveTo(x0, y0)
-  for (let i = 1; i <= N; i++) { const [x, y] = pt(i / N); ctx.lineTo(x, y) }
-  ctx.closePath()
-  ctx.lineWidth   = lw
-  ctx.lineJoin    = 'round'
-  ctx.lineCap     = 'round'
-  ctx.strokeStyle = '#D0C4EC'
+  tctx.moveTo(x0, y0)
+  for (let i = 1; i <= N; i++) { const [x, y] = pt(i / N); tctx.lineTo(x, y) }
+  tctx.closePath()
+  tctx.lineWidth   = lw
+  tctx.lineJoin    = 'round'
+  tctx.lineCap     = 'round'
+  tctx.setLineDash([lw * 1.0, lw * 1.4])
+  tctx.strokeStyle = '#D0C4EC'
+  tctx.stroke()
+
   ctx.save()
-  ctx.globalAlpha = 0.55
-  ctx.stroke()
+  ctx.globalAlpha = 0.14
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.drawImage(trackCanvas, 0, 0)
   ctx.restore()
 
   // Quiet pacing dot at the top apex of the inhale lobe (s = 0.25) — a clean,
