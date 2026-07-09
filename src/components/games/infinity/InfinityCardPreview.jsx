@@ -5,9 +5,9 @@ import { useEffect, useRef } from 'react'
 // the Infinity game for the home carousel card — a calm "resting" state that the
 // launch cross-dissolve blooms into the vivid game. Deliberately NOT a faithful
 // game frame: a quiet night gradient with a soft central glow (no stars, no
-// Milky Way band / nebulae) and a ghostly, nearly-invisible dashed lavender
-// figure-8 outline (no shadow), with one quiet pale pacing dot. No breathing
-// labels.
+// Milky Way band / nebulae) and a "Liquid Glass" translucent figure-8 track —
+// bright top highlight, tinted glass body, dimmer bottom, background showing
+// through — with one quiet pale pacing dot. No breathing labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — the same vertical lemniscate + track-width
@@ -53,37 +53,48 @@ function drawScene(ctx, w, h) {
     return [cx + ((st * ct) / d) * scaleX, cy - (ct / d) * scaleY]
   }
 
-  // Ghostly, nearly-invisible dashed lavender outline. The figure-8 crosses
-  // itself at the center, so stroking it directly at low alpha would
-  // double-composite the overlap there and leave a visibly darker patch
-  // (exactly the artifact this replaces). Instead: bake the dashed path fully
-  // opaque onto an offscreen canvas (overlaps just paint the same solid color
-  // over itself — no darkening), then composite that whole bitmap onto the
-  // card at one uniform low alpha, so every pixel of the track — including
-  // the crossover — gets blended exactly once.
+  // "Liquid Glass" figure-8 track (iOS control-center style): a bright
+  // highlight along the top softening into a tinted, translucent glass body
+  // and dimming toward the bottom, so the night gradient/glow shows through.
+  // Built as: (1) stroke the path fully opaque onto an offscreen canvas as a
+  // shape MASK, (2) 'source-in' a top-to-bottom gradient fill into that mask.
+  // The figure-8 crosses itself at the center — stroking directly with a
+  // translucent color would double-composite the overlap into a dark patch
+  // (see git history); routing through an opaque mask first means the
+  // gradient fill lands on every track pixel, including the crossover,
+  // exactly once.
   const dpr = ctx.canvas.width / w
-  const trackCanvas = document.createElement('canvas')
-  trackCanvas.width  = ctx.canvas.width
-  trackCanvas.height = ctx.canvas.height
-  const tctx = trackCanvas.getContext('2d')
-  tctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  const maskCanvas = document.createElement('canvas')
+  maskCanvas.width  = ctx.canvas.width
+  maskCanvas.height = ctx.canvas.height
+  const mctx = maskCanvas.getContext('2d')
+  mctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-  tctx.beginPath()
+  mctx.beginPath()
   let [x0, y0] = pt(0)
-  tctx.moveTo(x0, y0)
-  for (let i = 1; i <= N; i++) { const [x, y] = pt(i / N); tctx.lineTo(x, y) }
-  tctx.closePath()
-  tctx.lineWidth   = lw
-  tctx.lineJoin    = 'round'
-  tctx.lineCap     = 'round'
-  tctx.setLineDash([lw * 1.0, lw * 1.4])
-  tctx.strokeStyle = '#D0C4EC'
-  tctx.stroke()
+  mctx.moveTo(x0, y0)
+  for (let i = 1; i <= N; i++) { const [x, y] = pt(i / N); mctx.lineTo(x, y) }
+  mctx.closePath()
+  mctx.lineWidth   = lw
+  mctx.lineJoin    = 'round'
+  mctx.lineCap     = 'round'
+  mctx.strokeStyle = '#fff'
+  mctx.stroke()
+
+  mctx.globalCompositeOperation = 'source-in'
+  const trackTop    = cy - scaleY - lw / 2
+  const trackBottom = cy + scaleY + lw / 2
+  const glass = mctx.createLinearGradient(0, trackTop, 0, trackBottom)
+  glass.addColorStop(0,    'rgba(255,255,255,0.55)')   // bright top highlight
+  glass.addColorStop(0.12, 'rgba(255,255,255,0.22)')
+  glass.addColorStop(0.5,  'rgba(214,201,238,0.16)')   // lavender-tinted glass body
+  glass.addColorStop(1,    'rgba(150,140,182,0.10)')   // dim toward the bottom
+  mctx.fillStyle = glass
+  mctx.fillRect(0, 0, w, h)
 
   ctx.save()
-  ctx.globalAlpha = 0.14
   ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.drawImage(trackCanvas, 0, 0)
+  ctx.drawImage(maskCanvas, 0, 0)
   ctx.restore()
 
   // Quiet pacing dot at the top apex of the inhale lobe (s = 0.25) — a clean,
