@@ -108,6 +108,16 @@ const WAKELET_THICK_INIT_LW = 0.0375 // starting peak (middle) half-thickness �
 const WAKELET_THICK_GROW_LW = 0.0375 // peak-thickness growth over life → final = INIT + GROW (0.075 — 25% thinner than before)
 const WAKELET_SAMPLES     = 9      // ribbon cross-section samples (more = smoother taper curve)
 const WAKELET_BOW         = 0.55   // crescent bow toward the direction of travel (× half-length)
+// The tip axis was pure "outward, perpendicular to travel" (0°/180°). Tilt it
+// 45° so the tip nearer the path swings toward the FORWARD direction (pulled
+// "higher", closer to the finger) and the tip farther from the path swings
+// BACKWARD (trailing, "lower") — like the diagonal wavelets in the reference
+// photos, not a perpendicular crescent. Baked once (module load), reused as a
+// rotation of each wavelet's own outward axis (side-corrected, so it mirrors
+// correctly for the left and right arms).
+const WAKELET_TILT_DEG = 45
+const WAKELET_TILT_COS = Math.cos(WAKELET_TILT_DEG * Math.PI / 180)
+const WAKELET_TILT_SIN = Math.sin(WAKELET_TILT_DEG * Math.PI / 180)
 const WAKE_ALPHA          = 0.12   // peak fill alpha — intentionally faint (unchanged final)
 const WAKE_COLOR          = '205,210,236'  // soft cool moonlight-lavender
 // Two fill passes per wavelet — wide+faint outer, narrow+firm inner — fake a
@@ -616,16 +626,24 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
           const bow      = WAKELET_BOW * half * w.bowMul
           const cxp      = w.x + w.nx * w.side * off
           const cyp      = w.y + w.ny * w.side * off
+          // True outward axis for THIS arm (flips correctly with side, so
+          // "inward" always means "toward the path" for both L and R), rotated
+          // 45° toward -forward — this is what tilts u=-1 (inward tip) toward
+          // +forward and u=+1 (outward tip) toward -forward (backward).
+          const ioX  = w.nx * w.side, ioY = w.ny * w.side
+          const tiltX = ioX * WAKELET_TILT_COS - w.fx * WAKELET_TILT_SIN
+          const tiltY = ioY * WAKELET_TILT_COS - w.fy * WAKELET_TILT_SIN
 
-          // Centerline samples — same curve + wobble as before.
+          // Centerline samples — same curve + wobble as before, along the
+          // tilted axis instead of the raw perpendicular.
           for (let k = 0; k < S; k++) {
             const u   = WAKELET_U[k]
             const b   = bow * (1 - u * u)               // parabolic bow toward travel
             // Cheap per-sample contour wobble — a lookup, not a runtime noise
             // call — so the ribbon isn't a geometrically perfect parabola.
             const wob = WAKE_WOBBLE_LUT[(w.seed + k * 7) % WAKE_WOBBLE_LUT.length] * half * WAKELET_WOBBLE_AMT
-            sx[k] = cxp + w.nx * (half * u + wob) + w.fx * b
-            sy[k] = cyp + w.ny * (half * u + wob) + w.fy * b
+            sx[k] = cxp + tiltX * (half * u + wob) + w.fx * b
+            sy[k] = cyp + tiltY * (half * u + wob) + w.fy * b
           }
           // Per-sample unit normal (finite difference of the centerline) —
           // shared by both fill passes below, so it's computed only once.
