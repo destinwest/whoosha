@@ -78,31 +78,25 @@ const TRACK_BODY   = '#CBBEE8'
 const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 
 // ── Wake (finger through water) ───────────────────────────────────────────────
-// The ONLY finger effect: a soft canoe WAKE. Like the reference photos, the V is
-// the ENVELOPE and the substance is a repetition of small curved WAVELETS — soft
-// little crescents shed behind the fingertip, growing wider + fading toward the
-// tail so the wake dissipates to nothing. Short + close to the finger (~1 inch),
-// calm and low-contrast: no rings, no glow, source-over, very low alpha.
-//
-// The wake spine runs from a short BOW ahead of the finger (extrapolated along
-// the heading) back through the finger and along the recent trail — so the finger
-// sits at the CENTER, not the front tip. Walking that spine we shed wavelet PAIRS
-// (a left + a right crescent) offset ±perpendicular, with a clear middle, so two
-// feathered arms diverge (the V). Each crescent is a short arc of soft DABS bowed
-// toward the bow. Crescents fade fore + aft of the finger; a global fade heals it.
-const WAKE_LIFE_MS        = 1600   // how long a trail point lingers before the water "heals"
-const WAKE_SPACING_LW     = 0.05   // trail-point spacing (fine — for smooth arc-length + heading)
-const WAKE_MAX            = 90      // trail-buffer cap
-const WAKE_LENGTH_LW      = 1.3     // wake length BEHIND the finger (track-widths)
-const WAKE_FRONT_LW       = 1.1     // wake length AHEAD of the finger (the bow) — centres the finger
-const WAKE_WIDTH_LW       = 1.10    // total V width at the tail (≈ the pacing-circle diameter)
-const WAKE_ALPHA          = 0.10    // per-dab alpha — dabs overlap into a soft, faint crescent
+// The ONLY finger effect: a soft canoe WAKE, shed-and-LEFT-BEHIND like the photos.
+// As the finger moves it EMITS wavelet pairs (a left + a right little crescent).
+// Once born, each wavelet is anchored in the world (it does NOT follow the finger)
+// and lives on its own: it slowly grows, drifts outward (the two arms spreading
+// apart), and fades to nothing. The finger keeps shedding new small ones near it,
+// so a diverging V of feathered wavelets is left behind in its path. Calm and
+// low-contrast: no rings, no glow, source-over, very low alpha.
+const WAKELET_LIFE_MS     = 1600   // each wavelet: grow → spread → dissipate over this long
+const SHED_SPACING_LW     = 0.20   // shed a wavelet PAIR every this much finger travel (density)
+const WAKELET_MAX         = 110    // particle-pool cap
+const WAKELET_INIT_OFF_LW = 0.10   // wavelet's starting offset from the path (arms begin near the finger)
+const WAKELET_SPREAD_LW   = 0.52   // how far a wavelet drifts outward over its life (the V spreading)
+const WAKELET_INIT_LEN_LW = 0.10   // starting crescent half-length
+const WAKELET_GROW_LW     = 0.24   // crescent growth over its life
+const WAKELET_DAB_R_LW    = 0.11   // dab radius within a crescent (finer = more wave-like)
+const WAKELET_SAMPLES     = 6      // dabs per crescent
+const WAKELET_BOW         = 0.55   // crescent bow toward the direction of travel (× half-length)
+const WAKE_ALPHA          = 0.12   // peak per-dab alpha — intentionally faint
 const WAKE_COLOR          = '205,210,236'  // soft cool moonlight-lavender
-const WAVELET_SPACING_LW  = 0.28    // gap between successive wavelet pairs (the "repeat")
-const WAVELET_LEN_LW      = 0.26    // half-length of each little arm crescent
-const WAVELET_DAB_R_LW    = 0.11    // dab radius within a crescent (finer = more wave-like)
-const WAVELET_SAMPLES     = 6       // dabs per crescent
-const WAVELET_BOW         = 0.55    // how much each crescent bows toward the bow (× its half-length)
 
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
@@ -280,11 +274,10 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
   const prevFracRef    = useRef(null)
   const childPathRateRef = useRef(0)    // fraction-units/ms, smoothed
 
-  // Wake — a buffer of recent finger positions that trails + heals
-  const wakeTrailRef   = useRef([])    // [{ x, y, age }] oldest → newest
-  const lastWakePtRef  = useRef(null)  // last finger pos a trail point was laid at
+  // Wake — a pool of shed-and-left-behind wavelet particles
+  const wakeletsRef    = useRef([])    // [{ x, y, nx, ny, fx, fy, side, age, maxLife }]
+  const lastShedPosRef = useRef(null)  // last finger pos a wavelet pair was shed at
   const dabSpriteRef   = useRef(null)  // baked soft radial-falloff dab (tinted WAKE_COLOR)
-  const headingRef     = useRef({ x: 0, y: -1 })  // smoothed heading — orients the bow ahead of the finger
 
   // Fingerprint affordance
   const fpImgRef             = useRef(null)
@@ -352,8 +345,8 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
       pacingStartRef.current   = performance.now()
       childPathRateRef.current = 0
 
-      wakeTrailRef.current     = []
-      lastWakePtRef.current    = null
+      wakeletsRef.current      = []
+      lastShedPosRef.current   = null
 
       fingerprintActiveRef.current = true
       fpDismissTRef.current        = 0
@@ -425,9 +418,8 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
     childPosRef.current = { x: proj.x, y: proj.y, clx: proj.x, cly: proj.y, fraction: frac }
     touchRef.current    = true
 
-    // Wake starts at the touch point (no splash — just the beginning of the trail).
-    wakeTrailRef.current.push({ x: px, y: py, age: 0 })
-    lastWakePtRef.current = { x: px, y: py }
+    // Wake: mark the shed origin (no splash). Wavelets are shed as the finger moves.
+    lastShedPosRef.current = { x: px, y: py }
   }
 
   function onPointerMove(px, py) {
@@ -439,8 +431,8 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
     touchRef.current         = false
     tracingRef.current       = false
     childPathRateRef.current = 0
-    // Stop laying trail points; the existing wake ages out on its own (heals).
-    lastWakePtRef.current = null
+    // Stop shedding; the wavelets already in the water grow, spread, and fade out.
+    lastShedPosRef.current = null
   }
 
   function handleMouseDown(e)  { const p = getRawPos(e); onPointerDown(p.x, p.y) }
@@ -528,120 +520,69 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
         ctx.stroke(path)
       }
 
-      // ── 1b. Wake — trail the fingertip with a soft ribbon that heals behind ──
-      // Lay evenly-spaced trail points along the drag (interpolated so a fast
-      // drag stays continuous). No splash, no rings — just the furrow.
+      // ── 1b. Wake — shed wavelet pairs, then let them live in the water ───────
+      // While the finger moves, emit a left + right wavelet every SHED_SPACING of
+      // travel, born at the finger with its current heading. Each is world-anchored
+      // (does NOT follow the finger) — below it grows, drifts outward, and fades.
       if (touchRef.current && fingerPosRef.current) {
-        const fp   = fingerPosRef.current
-        const last = lastWakePtRef.current
-        const spacing = lw * WAKE_SPACING_LW
-        if (!last) {
-          wakeTrailRef.current.push({ x: fp.x, y: fp.y, age: 0 })
-          lastWakePtRef.current = { x: fp.x, y: fp.y }
-        } else {
-          const dx = fp.x - last.x, dy = fp.y - last.y
-          const moved = Math.hypot(dx, dy)
-          if (moved >= spacing) {
-            const steps = Math.min(WAKE_MAX, Math.floor(moved / spacing))
-            for (let s = 1; s <= steps; s++) {
-              const t = (s * spacing) / moved
-              wakeTrailRef.current.push({ x: last.x + dx * t, y: last.y + dy * t, age: 0 })
+        const fp = fingerPosRef.current
+        if (!lastShedPosRef.current) lastShedPosRef.current = { x: fp.x, y: fp.y }
+        const last = lastShedPosRef.current
+        const dx = fp.x - last.x, dy = fp.y - last.y
+        const moved = Math.hypot(dx, dy)
+        const shedStep = lw * SHED_SPACING_LW
+        if (moved >= shedStep) {
+          const ux = dx / moved, uy = dy / moved   // direction of travel
+          const nx = -uy, ny = ux                  // perpendicular
+          const num = Math.min(8, Math.floor(moved / shedStep))
+          const pool = wakeletsRef.current
+          for (let s = 1; s <= num; s++) {
+            const bx = last.x + dx * ((s * shedStep) / moved)
+            const by = last.y + dy * ((s * shedStep) / moved)
+            for (const side of [1, -1]) {
+              const w = pool.length < WAKELET_MAX
+                ? (pool.push({}), pool[pool.length - 1])
+                : pool.reduce((a, b) => (b.age > a.age ? b : a))   // recycle the oldest
+              w.x = bx; w.y = by; w.nx = nx; w.ny = ny; w.fx = ux; w.fy = uy
+              w.side = side; w.age = 0; w.maxLife = WAKELET_LIFE_MS
             }
-            lastWakePtRef.current = { x: fp.x, y: fp.y }
           }
+          lastShedPosRef.current = { x: fp.x, y: fp.y }
         }
       }
 
-      // Age + prune the trail (the water heals) and cap the buffer, then trim it
-      // to a short arc-length behind the finger so the wake stays close and small.
-      const trail = wakeTrailRef.current
-      for (let i = trail.length - 1; i >= 0; i--) {
-        trail[i].age += dt
-        if (trail[i].age >= WAKE_LIFE_MS) trail.splice(i, 1)
-      }
-      if (trail.length > WAKE_MAX) trail.splice(0, trail.length - WAKE_MAX)
-      {
-        const maxLen = lw * WAKE_LENGTH_LW
-        let acc = 0, cut = 0
-        for (let i = trail.length - 1; i > 0; i--) {
-          acc += Math.hypot(trail[i].x - trail[i - 1].x, trail[i].y - trail[i - 1].y)
-          if (acc > maxLen) { cut = i; break }
-        }
-        if (cut > 0) trail.splice(0, cut)
-      }
-
-      // Draw the wake: two feathered arms of little crescents, with the finger at
-      // the centre. Build a spine from a BOW ahead of the finger (extrapolated
-      // along the heading) back through the finger and along the trail; walk it
-      // shedding wavelet PAIRS (left + right) offset ±perpendicular so the arms
-      // diverge with a clear middle. Crescents bow toward the bow and fade fore +
-      // aft of the finger. globalFade heals the whole thing after a lift.
+      // Age + draw the wavelets. Each grows, drifts outward (arms spreading), and
+      // fades over its life, anchored where it was born (left behind in the water).
       const dab = dabSpriteRef.current
-      if (dab && trail.length >= 3) {
-        const n = trail.length
-        const globalFade = Math.max(0, 1 - trail[n - 1].age / WAKE_LIFE_MS)
-        if (globalFade > 0.01) {
-          // Heading — smoothed direction of travel at the finger (retain last good).
-          const kb = Math.min(n - 1, 6)
-          let hx = trail[n - 1].x - trail[n - 1 - kb].x
-          let hy = trail[n - 1].y - trail[n - 1 - kb].y
-          const hl = Math.hypot(hx, hy)
-          if (hl > 2) headingRef.current = { x: hx / hl, y: hy / hl }
-          const hd = headingRef.current
-          const fx = trail[n - 1].x, fy = trail[n - 1].y
-
-          // Spine, apex(bow) → tail: extrapolated front points, then the trail.
-          const sstep = lw * WAKE_SPACING_LW
-          const spine = []
-          for (let d = lw * WAKE_FRONT_LW; d > 1e-3; d -= sstep) spine.push({ x: fx + hd.x * d, y: fy + hd.y * d })
-          for (let i = n - 1; i >= 0; i--) spine.push({ x: trail[i].x, y: trail[i].y })
-          const m = spine.length
-
-          const maxHalf   = 0.5 * lw * WAKE_WIDTH_LW
-          const spreadLen = lw * (WAKE_FRONT_LW + WAKE_LENGTH_LW)  // apex → tail
-          const fingerAt  = lw * WAKE_FRONT_LW                     // spine distance of the finger
-          const dabR = lw * WAVELET_DAB_R_LW
-          const wl   = lw * WAVELET_LEN_LW
-          const step = lw * WAVELET_SPACING_LW
-          const bow  = WAVELET_BOW * wl
-          const S    = WAVELET_SAMPLES
-
-          ctx.save()
-          let acc = 0, dist = 0
-          for (let j = 1; j < m; j++) {
-            const seg = Math.hypot(spine[j].x - spine[j - 1].x, spine[j].y - spine[j - 1].y)
-            dist += seg; acc += seg
-            if (acc < step) continue
-            acc = 0
-            const q   = Math.min(1, dist / spreadLen)   // 0 bow → 1 tail
-            const off = maxHalf * q                     // arm offset (the V spreads back)
-            if (off < wl * 0.9) continue                // near the bow the arms would merge — leave it clean
-            // fade: brightest at the finger, easing to nothing fore (bow) + aft (tail)
-            const df = dist < fingerAt ? (fingerAt - dist) / fingerAt : (dist - fingerAt) / (spreadLen - fingerAt)
-            const a  = WAKE_ALPHA * globalFade * Math.max(0, 1 - df)
-            if (a < 0.004) continue
-            // local frame: tangent (toward tail), normal, forward (toward bow)
-            const A = spine[j - 1], B = spine[Math.min(m - 1, j + 1)]
-            const tx = B.x - A.x, ty = B.y - A.y
-            const L = Math.hypot(tx, ty) || 1
-            const nx = -ty / L, ny = tx / L             // across the arm
-            const fwx = -(tx / L), fwy = -(ty / L)      // toward the bow
-            ctx.globalAlpha = a
-            for (const sgn of [1, -1]) {
-              const cxp = spine[j].x + nx * off * sgn
-              const cyp = spine[j].y + ny * off * sgn
-              for (let k = 0; k < S; k++) {
-                const u = (k / (S - 1)) * 2 - 1         // across the little crescent
-                const b = bow * (1 - u * u)            // parabolic bow toward the bow
-                const px = cxp + nx * (wl * u) + fwx * b
-                const py = cyp + ny * (wl * u) + fwy * b
-                ctx.drawImage(dab, px - dabR, py - dabR, dabR * 2, dabR * 2)
-              }
-            }
+      const pool = wakeletsRef.current
+      if (dab && pool.length) {
+        const dabR = lw * WAKELET_DAB_R_LW
+        const S    = WAKELET_SAMPLES
+        ctx.save()
+        for (let i = pool.length - 1; i >= 0; i--) {
+          const w = pool[i]
+          w.age += dt
+          if (w.age >= w.maxLife) { pool.splice(i, 1); continue }
+          const t   = w.age / w.maxLife
+          const env = Math.min(1, t / 0.12) * (1 - t)   // quick fade-in, then fade to nothing
+          const a   = WAKE_ALPHA * env
+          if (a < 0.004) continue
+          const off  = lw * (WAKELET_INIT_OFF_LW + WAKELET_SPREAD_LW * t)  // drifts outward
+          const half = lw * (WAKELET_INIT_LEN_LW + WAKELET_GROW_LW * t)    // grows
+          const bow  = WAKELET_BOW * half
+          const cxp  = w.x + w.nx * w.side * off
+          const cyp  = w.y + w.ny * w.side * off
+          ctx.globalAlpha = a
+          for (let k = 0; k < S; k++) {
+            const u = (k / (S - 1)) * 2 - 1              // across the little crescent
+            const b = bow * (1 - u * u)                 // parabolic bow toward travel
+            const px = cxp + w.nx * (half * u) + w.fx * b
+            const py = cyp + w.ny * (half * u) + w.fy * b
+            ctx.drawImage(dab, px - dabR, py - dabR, dabR * 2, dabR * 2)
           }
-          ctx.globalAlpha = 1
-          ctx.restore()
         }
+        ctx.globalAlpha = 1
+        ctx.restore()
       }
 
       // ── Pacing position ───────────────────────────────────────────────────
