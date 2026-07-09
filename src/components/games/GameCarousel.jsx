@@ -105,7 +105,7 @@ function CarouselCard({ game, distance }) {
           // Preview canvases paint their own soft background; the solid here is
           // just a fallback behind them. Others use the flat gradient.
           background: isSquare
-            ? '#082B26'
+            ? '#08362F'
             : isHexagon
               ? '#D99E6A'
               : isInfinity
