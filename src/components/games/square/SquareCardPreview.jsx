@@ -3,10 +3,10 @@ import { useEffect, useRef } from 'react'
 // ── SquareCardPreview ───────────────────────────────────────────────────────
 // A soft, muted render of the Square game for the home carousel card — a calm,
 // low-stimulation "resting" state that the zoom-blur transition later blooms
-// into the vivid game. Deliberately NOT a faithful game frame: a gentle sage
-// background (no light shafts / sun pools / dapples), a flat track (no
-// shadow or inner-wall shading), and a quiet pale pacing dot. No breathing
-// labels.
+// into the vivid game. Deliberately NOT a faithful game frame: a dark teal
+// background sourced from the bottom of the game's meadow-bg gradient (no
+// light shafts / sun pools / dapples), a flat track (no shadow or inner-wall
+// shading), and a quiet pale pacing dot. No breathing labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // ratios still match the game so the card and game stay compositionally aligned
@@ -21,11 +21,12 @@ const CY_RATIO     = 0.50     // track vertical center — CENTERED to match the
                               // game's centered track at the dissolve (no vertical jump).
 
 function drawScene(ctx, w, h) {
-  // Soft sage background — a gentle gradient, muted, with none of the game's
-  // light shafts / sun pools / canopy dapples.
+  // Dark teal background — the two darkest stops from the game's own
+  // meadow-bg gradient (buildMeadowBg in SquareGame.jsx), muted, with none
+  // of the game's light shafts / sun pools / canopy dapples.
   const bg = ctx.createLinearGradient(0, 0, w * 0.5, h)
-  bg.addColorStop(0, '#B8D2C6')
-  bg.addColorStop(1, '#8FAE9F')
+  bg.addColorStop(0, '#094E44')
+  bg.addColorStop(1, '#082B26')
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
 
