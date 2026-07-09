@@ -1,6 +1,6 @@
 # Working With Claude on Whoosha
 
-A meta-guide: how the project's docs are meant to work, and how to get good results from Claude / Claude Code on this codebase. This file is for **you** (and any future collaborator) — it's not auto-loaded every session. Edit it freely; the `TODO (you)` blocks mark places where your judgment or project specifics belong.
+A meta-guide: how the project's docs are meant to work, and how to get good results from Claude / Claude Code on this codebase. This file is for **you** (and any future collaborator) — it's not auto-loaded every session. Edit it freely.
 
 ---
 
@@ -36,7 +36,7 @@ These are the rules that keep the docs from rotting. Most of the cleanup this sy
 
 ## 3. Starting a task with Claude
 
-`BRIEFING.md` is large — don't ask Claude to "read the whole briefing" for a scoped task. Point it at the sections that matter. A good kickoff names: the goal, the relevant BRIEFING section(s), the relevant POLISH rules if visual, and the definition of done.
+`BRIEFING.md` is large — don't ask Claude to "read the whole briefing" for a scoped task. Point it at the sections that matter. A good kickoff names: the goal, the relevant BRIEFING section(s), and the relevant POLISH rules if visual.
 
 **Kickoff template:**
 
@@ -44,59 +44,25 @@ These are the rules that keep the docs from rotting. Most of the cleanup this sy
 Task: <one line — what should exist when this is done>
 Read first: BRIEFING §<n> (<why>), POLISH-STRATEGY §<name> (<why, if visual>)
 Constraints that apply: <e.g. layer budget, file-ownership split, color roles>
-Done when: <see §4 — the checklist for this task type>
 Commit: after each verified step.
 ```
 
-> **TODO (you):** decide and note here whether `CLAUDE.md`'s instruction to "read this briefing at the start of every session" should become "read the sections named in the task." If Claude Code reliably reads on demand, loosen it — full-briefing reads are token-expensive and dull the signal. If you like the full read, keep it and delete this note.
+**Resolved:** Claude reads sections named in the task rather than the whole briefing — `CLAUDE.md` says so directly. Full reads are token-expensive and dull the signal; this project isn't formal enough yet to warrant a fixed Definition-of-Done checklist per task type, so there isn't one — verification is scoped per task as it comes up.
 
 ---
 
-## 4. Definition of Done (by task type)
-
-Claude skips verification unless told to. These are the gates a task must pass before it's "done." I've seeded each with the obvious ones; **fill in the specifics you actually care about.**
-
-**Any code change**
-- [ ] Builds clean, no new console errors
-- [ ] Committed in small verified steps (not one big commit)
-- [ ] `BRIEFING`/`POLISH` still accurate — or a Decision log line added (see §5)
-- [ ] TODO (you): <lint / typecheck / test command, if any>
-
-**Visual / game-canvas change**
-- [ ] Stated the perf cost before implementing ("adds N layers, M ms/frame")
-- [ ] Verified on real iOS hardware, not just desktop Safari
-- [ ] Layer budget still respected (≤5 full-screen layers)
-- [ ] Decision log line appended (what was tried / what stuck)
-- [ ] TODO (you): <your iOS test device + how you expose the dev server, e.g. the Cloudflare tunnel command>
-
-**New game**
-- [ ] Follows the per-game folder + `<Name>Game`/`<Name>Canvas`/`<Name>CardPreview` pattern (BRIEFING §9)
-- [ ] Canvas-vs-orchestration ownership split honored (BRIEFING §6.4)
-- [ ] Added to the carousel roster + tier table
-- [ ] Session save wired with the correct `game_slug`
-- [ ] TODO (you): <anything game-specific — sound hookup? intro variant?>
-
-**Docs change**
-- [ ] Sections stayed timeless; anything time-bound went to the Decision log
-- [ ] No fact duplicated into a second file
-- [ ] TODO (you): <your own additions>
-
----
-
-## 5. Drift prevention — the one rule that matters
+## 4. Drift prevention — the one rule that matters
 
 At the end of any session that **added or removed a file, subsystem, dependency, or scope decision**, do both of these before considering it finished:
 
 1. **Reconcile intent:** confirm `BRIEFING.md` still describes the intended product correctly. (It describes intent, not status — so most implementation changes shouldn't touch it. Scope changes — like deferring a feature — do.)
 2. **Log the change:** append one line to the `POLISH-STRATEGY.md` Decision log — `YYYY-MM-DD — what changed — what stuck`.
 
-Every drift this project has had to clean up (a dead payment dependency in three files, stale "next step" snapshots, a completed plan still listed as upcoming) would have been caught by this single habit.
-
-> **TODO (you):** consider adding this as an explicit workflow rule in `CLAUDE.md` so Claude Code self-enforces it, not just you.
+Every drift this project has had to clean up (a dead payment dependency in three files, stale "next step" snapshots, a completed plan still listed as upcoming) would have been caught by this single habit. **Resolved:** this is now an explicit workflow rule in `CLAUDE.md` (rule 4) so Claude Code self-enforces it, not just you.
 
 ---
 
-## 6. "I just decided/changed X — where does it go?"
+## 5. "I just decided/changed X — where does it go?"
 
 A quick routing map for new content:
 
@@ -106,14 +72,3 @@ A quick routing map for new content:
 - **A rule for how Claude should operate** (verify on X, commit cadence) → `CLAUDE.md`.
 - **An idea not yet greenlit** → `docs/future/<name>.md`.
 - **A tuning constant / pixel value** → the code, not the docs.
-
----
-
-## 7. Open decisions for you
-
-Collected `TODO (you)` items to resolve when you have a moment — decide, edit the relevant doc, then delete the item here:
-
-- [ ] CLAUDE hard-rules: keep them as a "tripwire summary" pointing to POLISH, or delete the duplication if POLISH is always read for visual work? (Decide based on whether Claude Code reliably opens POLISH before visual tasks.)
-- [ ] BRIEFING: full-read every session vs. fetch-by-section (see §3 TODO).
-- [ ] Whether to fold this file's drift rule into `CLAUDE.md` (see §5 TODO).
-- [ ] TODO (you): <your own open questions about the doc system>

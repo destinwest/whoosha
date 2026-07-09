@@ -1,11 +1,11 @@
 // ── roundedPolyPath ───────────────────────────────────────────────────────────
 // Traces a rounded, arbitrary (convex) polygon path from an explicit vertex
-// list, rounding every corner with the same radius via arcTo. It is the
-// irregular-polygon analog of roundedNgonPath: use it when the side lengths
-// differ, so roundedNgonPath's single-circumradius model no longer describes
-// the shape (e.g. the Hexagon game's shortened "hold" sides). The drawn track
-// then follows the exact same vertices the pacing/trace centerline is built
-// from, keeping the visible track welded to the traceable path.
+// list, rounding every corner with the same radius via arcTo. Use it when
+// side lengths differ, so a single-circumradius regular-ngon model no longer
+// describes the shape (e.g. the Hexagon game's shortened "hold" sides). The
+// drawn track then follows the exact same vertices the pacing/trace
+// centerline is built from, keeping the visible track welded to the
+// traceable path.
 //
 //   ctx          — CanvasRenderingContext2D
 //   verts        — array of { x, y } vertices in draw order (>= 3), CSS or
@@ -29,8 +29,7 @@ export function roundedPolyPath(ctx, verts, cornerRadius) {
 
   // Start at the midpoint of edge 0 so the first arcTo's implicit line segment
   // covers half of edge 0 cleanly; closePath() connects the final corner's
-  // tangent point back to this midpoint along edge 0's straight run. (Mirrors
-  // roundedNgonPath.)
+  // tangent point back to this midpoint along edge 0's straight run.
   const startMidX = (verts[0].x + verts[1].x) / 2
   const startMidY = (verts[0].y + verts[1].y) / 2
   ctx.moveTo(startMidX, startMidY)

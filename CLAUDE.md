@@ -6,7 +6,7 @@ Operating instructions for Claude Code in the Whoosha repo. Read this first ever
 
 Whoosha is a React + Vite + Canvas 2D web app — breathing games for children. The flagship is the Square Breathing game (`src/components/games/square/`). Auth via Supabase, Sentry for errors. Tier gating is a client-side check against `profiles.tier`; no payment processor is wired (deferred post-MVP).
 
-**Read these before touching game/visual code:**
+**Read the relevant sections before touching game/visual code — not the whole file.** Both docs are long; open the section that matters for the task, not the full document.
 - `BRIEFING.md` — product spec, design system, game mechanics (the WHAT and WHY)
 - `POLISH-STRATEGY.md` — iOS perf budget, layering rules, visual technique catalog, anti-patterns (the HOW)
 
@@ -16,19 +16,7 @@ Whoosha is a React + Vite + Canvas 2D web app — breathing games for children. 
 
 Target hardware floor: **iPhone 12 and newer.** Real users are parents on iOS Safari.
 
-Two prior sessions broke iOS perf trying to add visual polish. The lessons are in `POLISH-STRATEGY.md`. Do not relitigate them.
-
-### Hard rules — do not violate without explicit user approval
-
-> Tripwire summary only. `POLISH-STRATEGY.md` (Layering rules + Anti-patterns) is authoritative — if this list and that doc disagree, that doc wins.
-
-1. **Layer budget: one bg canvas, one game canvas, at most ONE CSS overlay div above them.** Vignette is the allowed overlay.
-2. **No `mixBlendMode` chains.** A single overlay using `mixBlendMode` may be acceptable; stacks of them are not.
-3. **No `filter: url(#...)` referencing SVG `<filter>` elements applied to animating or transforming content.** Static SVG used as a `<img>`, `background-image`, or pattern source is fine.
-4. **No `feTurbulence` evaluated per-frame.** Bake to bitmap once at resize.
-5. **`filter: blur` only during the intro phase.** Remove (along with `will-change`) on phase transition to game.
-6. **DPR-aware canvas sizing is mandatory.** Any new canvas must scale by `devicePixelRatio`. Verify on retina.
-7. **Bake static visual content at resize, not per-frame.** Textures, lighting, gradients → into an offscreen canvas once.
+Two prior sessions broke iOS perf trying to add visual polish. The lessons — layer budget, anti-patterns, why each rule exists — live in `POLISH-STRATEGY.md` (Layering rules + Anti-patterns sections). Read it before touching game/visual code. Do not relitigate those lessons, and do not re-copy the rules here — one copy, no drift.
 
 ### Default polish approach
 
@@ -38,9 +26,9 @@ Static SVG assets → baked into an offscreen canvas at resize → composited as
 
 1. **Commit after each verified step.** The "two bad sessions" recovery commit is the symptom of skipping this. Smaller commits = smaller blast radius.
 2. **State the perf cost before suggesting an approach.** "This adds N compositing layers and M ms per frame." If you can't estimate, say so.
-3. **Visual changes must be verified on iOS hardware**, not just desktop Safari or simulator. Vite dev server is exposed via Cloudflare tunnel (already in `vite.config.js`) for this.
-4. **Update `POLISH-STRATEGY.md` at end of session** with a one-line decision log entry: what was tried, what worked, what didn't.
-5. **Do not edit `BRIEFING.md`** unless explicitly asked — it's the product source of truth.
+3. **Visual changes must be verified on iOS hardware**, not just desktop Safari or simulator. Vite dev server is exposed via Cloudflare tunnel (already in `vite.config.js`) for this. The user does this verification manually — don't spend tokens on desktop browser preview/screenshot tools for this project; own build/console/functional correctness instead.
+4. **End-of-session drift check.** If this session added or removed a file, subsystem, dependency, or scope decision: (a) confirm `BRIEFING.md` still describes the product accurately — it covers intent, not status, so pure-implementation changes usually don't need an edit, but scope changes (e.g. deferring a feature, dropping a dependency) do; (b) append one line to the `POLISH-STRATEGY.md` Decision log — `YYYY-MM-DD — what changed — what stuck`. This single habit is what prevents the docs from rotting.
+5. **Only edit `BRIEFING.md` for a scope change** (rule 4 above) or when explicitly asked. Implementation details, technique, and status belong in `POLISH-STRATEGY.md`'s Decision log, not here.
 
 ## Stack quick reference
 
