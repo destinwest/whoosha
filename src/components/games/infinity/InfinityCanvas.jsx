@@ -100,11 +100,11 @@ const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 const WAKELET_LIFE_MS     = 1600   // each wavelet: grow → spread → dissipate over this long
 const SHED_SPACING_LW     = 0.4741 // shed a wavelet PAIR every this much finger travel (density) — 0.20/0.75^3, i.e. shed frequency -25% three times
 const WAKELET_MAX         = 110    // particle-pool cap
-const WAKELET_INIT_OFF_LW = 0.24   // starting side offset (out to the side, not under the touch)
-const WAKELET_SPREAD_LW   = 0.38   // extra outward drift over life  → final offset = INIT_OFF + SPREAD (0.62)
+const WAKELET_INIT_OFF_LW = 0.48   // starting side offset (2× — placement doubled to match the doubled length)
+const WAKELET_SPREAD_LW   = 0.76   // extra outward drift over life  → final offset = INIT_OFF + SPREAD (1.24, 2×)
 const WAKELET_FRONT_OFF_LW= 0.18   // born this far ahead of the shed point (toward the front of the touch)
-const WAKELET_INIT_LEN_LW = 0.10   // starting crescent half-length (2× — birth size doubled)
-const WAKELET_GROW_LW     = 0.58   // growth over life             → final half-length = INIT_LEN + GROW (0.68, 2× final)
+const WAKELET_INIT_LEN_LW = 0.20   // starting crescent half-length (2× again — length only, per user's answer)
+const WAKELET_GROW_LW     = 1.16   // growth over life             → final half-length = INIT_LEN + GROW (1.36, 2×)
 const WAKELET_THICK_INIT_LW = 0.0375 // starting peak (middle) half-thickness — 25% thinner than before
 const WAKELET_THICK_GROW_LW = 0.0375 // peak-thickness growth over life → final = INIT + GROW (0.075 — 25% thinner than before)
 const WAKELET_SAMPLES     = 9      // ribbon cross-section samples (more = smoother taper curve)
