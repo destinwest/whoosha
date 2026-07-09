@@ -104,8 +104,8 @@ const WAKELET_SPREAD_LW   = 0.38   // extra outward drift over life  → final o
 const WAKELET_FRONT_OFF_LW= 0.18   // born this far ahead of the shed point (toward the front of the touch)
 const WAKELET_INIT_LEN_LW = 0.10   // starting crescent half-length (2× — birth size doubled)
 const WAKELET_GROW_LW     = 0.58   // growth over life             → final half-length = INIT_LEN + GROW (0.68, 2× final)
-const WAKELET_THICK_INIT_LW = 0.05   // starting peak (middle) half-thickness (2× — birth size doubled)
-const WAKELET_THICK_GROW_LW = 0.05   // peak-thickness growth over life → final = INIT + GROW (0.10, 2× final — thin arc, not a blob)
+const WAKELET_THICK_INIT_LW = 0.0375 // starting peak (middle) half-thickness — 25% thinner than before
+const WAKELET_THICK_GROW_LW = 0.0375 // peak-thickness growth over life → final = INIT + GROW (0.075 — 25% thinner than before)
 const WAKELET_SAMPLES     = 9      // ribbon cross-section samples (more = smoother taper curve)
 const WAKELET_BOW         = 0.55   // crescent bow toward the direction of travel (× half-length)
 const WAKE_ALPHA          = 0.12   // peak fill alpha — intentionally faint (unchanged final)
