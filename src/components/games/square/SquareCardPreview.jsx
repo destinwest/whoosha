@@ -2,23 +2,23 @@ import { useEffect, useRef } from 'react'
 
 // ── SquareCardPreview ───────────────────────────────────────────────────────
 // A soft, muted render of the Square game for the home carousel card — a calm,
-// low-stimulation "resting" state that the zoom-blur transition later blooms
-// into the vivid game. Deliberately NOT a faithful game frame: a dark teal
-// background sourced from the bottom of the game's meadow-bg gradient (no
-// light shafts / sun pools / dapples), a flat track (no shadow or inner-wall
-// shading), and a quiet pale pacing dot. No breathing labels.
+// low-stimulation "resting" state before FadeLaunch cross-dissolves into the
+// vivid game (an opaque veil fade, not a positional zoom — the card's track
+// position doesn't need to match the game's on-screen position). Deliberately
+// NOT a faithful game frame: a dark teal background sourced from the bottom
+// of the game's meadow-bg gradient (no light shafts / sun pools / dapples),
+// a flat track (no shadow or inner-wall shading), and a quiet pale pacing dot.
+// No breathing labels.
 //
-// Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
-// ratios still match the game so the card and game stay compositionally aligned
-// for the zoom; only the styling is softened.
+// Drawn ONCE per mount/resize (no rAF loop), DPR-aware.
 
 const SIZE_RATIO   = 0.70     // sq / min(w, h)
 const RADIUS_RATIO = 0.22     // corner radius / sq
 const CIRCLE_RATIO = 0.0728   // track width = 2·(sq·CIRCLE_RATIO) + 8
-const CY_RATIO     = 0.50     // track vertical center — CENTERED to match the game's
-                              // buildGeo (cy = h/2). The launch bloom scales about the
-                              // card's centre, so a centered track lands exactly on the
-                              // game's centered track at the dissolve (no vertical jump).
+const CY_RATIO     = 0.43     // track vertical center — shifted up from dead-center (0.50)
+                              // so the track sits centered in the space between the card's
+                              // top edge and the title text (title center ≈ 0.86 of card
+                              // height in GameCarousel's CarouselCard, so (0 + 0.86)/2 ≈ 0.43).
 
 function drawScene(ctx, w, h) {
   // Dark teal background — the two darkest stops from the game's own

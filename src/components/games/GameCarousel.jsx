@@ -92,9 +92,10 @@ function CarouselCard({ game, distance }) {
   const isHexagon  = game.gameKey === 'hexagon'
   const isInfinity = game.gameKey === 'infinity'
   const hasPreview = isSquare || isHexagon || isInfinity   // full-bleed track render + bottom title
-  // Title colour matched to each preview's palette (dark on the light square/hex
-  // cards, light on the infinity night card).
-  const titleColor = isSquare ? '#3A5A4D' : isHexagon ? '#5C2E1C' : '#E8E3F8'
+  // Title colour matched to each preview's palette (light on the dark square/
+  // infinity cards — square's matches its pacing dot — dark on the light
+  // hexagon card).
+  const titleColor = isSquare ? '#F4F0E6' : isHexagon ? '#5C2E1C' : '#E8E3F8'
   return (
     <div data-card-index="" style={cardStyle(distance)}>
       {game.locked && <LockBadge />}
@@ -104,7 +105,7 @@ function CarouselCard({ game, distance }) {
           // Preview canvases paint their own soft background; the solid here is
           // just a fallback behind them. Others use the flat gradient.
           background: isSquare
-            ? '#8FAE9F'
+            ? '#082B26'
             : isHexagon
               ? '#D99E6A'
               : isInfinity
