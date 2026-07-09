@@ -87,8 +87,15 @@ const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 // low-contrast: no rings, no glow, source-over, very low alpha.
 // A wavelet is born small + more opaque + already out to the side/front, then
 // grows, drifts outward, and fades to the SAME final state (offset/size/gone)
-// as before. Dab radius has its OWN gentle linear ramp (decoupled from the
-// crescent half-length) so it never compounds down to a sub-pixel dot at birth.
+// as before. Thickness has its OWN gentle linear ramp (decoupled from the
+// crescent half-length) so it never compounds down to a sub-pixel sliver at
+// birth.
+//
+// Each wavelet is rendered as ONE filled tapered ribbon (ctx.fill over a
+// hand-built outline), not stamped circular dabs — thickest at its middle
+// sample, pointed at both ends — so it reads as a whole little wave rather
+// than a string of beads. Two fill passes (wide+faint, then narrow+firm) fake
+// a soft edge cheaply, without shadowBlur.
 const WAKELET_LIFE_MS     = 1600   // each wavelet: grow → spread → dissipate over this long
 const SHED_SPACING_LW     = 0.20   // shed a wavelet PAIR every this much finger travel (density)
 const WAKELET_MAX         = 110    // particle-pool cap
@@ -96,28 +103,40 @@ const WAKELET_INIT_OFF_LW = 0.24   // starting side offset (out to the side, not
 const WAKELET_SPREAD_LW   = 0.38   // extra outward drift over life  → final offset = INIT_OFF + SPREAD (0.62)
 const WAKELET_FRONT_OFF_LW= 0.18   // born this far ahead of the shed point (toward the front of the touch)
 const WAKELET_INIT_LEN_LW = 0.05   // starting crescent half-length (≈ half of before)
-const WAKELET_GROW_LW     = 0.29   // growth over life           → final half-length = INIT_LEN + GROW (0.34)
-const WAKELET_DAB_INIT_LW = 0.055  // starting dab radius (half of final — stays visible, no sub-pixel dots)
-const WAKELET_DAB_GROW_LW = 0.055  // dab-radius growth over life → final = INIT + GROW (0.11, matches old fixed radius)
-const WAKELET_SAMPLES     = 6      // dabs per crescent
+const WAKELET_GROW_LW     = 0.29   // growth over life             → final half-length = INIT_LEN + GROW (0.34)
+const WAKELET_THICK_INIT_LW = 0.055  // starting peak (middle) half-thickness — stays visible, no sub-pixel dots
+const WAKELET_THICK_GROW_LW = 0.055  // peak-thickness growth over life → final = INIT + GROW (0.11, matches v10)
+const WAKELET_SAMPLES     = 9      // ribbon cross-section samples (more = smoother taper curve)
 const WAKELET_BOW         = 0.55   // crescent bow toward the direction of travel (× half-length)
-const WAKE_ALPHA          = 0.12   // peak per-dab alpha — intentionally faint (unchanged final)
+const WAKE_ALPHA          = 0.12   // peak fill alpha — intentionally faint (unchanged final)
 const WAKE_COLOR          = '205,210,236'  // soft cool moonlight-lavender
+// Two fill passes per wavelet — wide+faint outer, narrow+firm inner — fake a
+// soft feathered edge without shadowBlur (expensive to animate on iOS Safari).
+const WAKELET_RIBBON_PASSES = [
+  { thick: 1.8, alpha: 0.35 },
+  { thick: 1,   alpha: 1    },
+]
 
 // Per-wavelet randomness — seeded once at spawn (not per-frame), so it costs a
 // handful of Math.random() calls only when a wavelet is born, never in the
 // draw loop. This is what keeps the wake from reading as a stamped, metronomic
 // pattern: no two wavelets (not even a spawned L/R pair) grow, fade, or curve
 // identically, so the family resemblance stays but the rhythm feels organic.
-const WAKELET_JITTER_SIZE     = 0.14   // ± size variance (offset/length/dab radius together)
+const WAKELET_JITTER_SIZE     = 0.14   // ± size variance (offset/length/thickness together)
 const WAKELET_JITTER_LIFE     = 0.18   // ± lifetime variance — desyncs the grow/fade rhythm
 const WAKELET_JITTER_FADE     = 0.35   // ± fade-in-speed variance — desyncs the birth pop
 const WAKELET_JITTER_BOW      = 0.25   // ± crescent-curvature variance
 const WAKELET_JITTER_POS_LW   = 0.06   // birth-position jitter along the direction of travel, × lw
-const WAKELET_WOBBLE_AMT      = 0.10   // per-dab contour wobble (fraction of half-length) — breaks the perfect parabola
-// Baked once at module load: a small lookup of random values so per-dab wobble
-// is a free array read in the draw loop instead of a runtime noise function.
+const WAKELET_WOBBLE_AMT      = 0.10   // per-sample contour wobble (fraction of half-length) — breaks the perfect parabola
+// Baked once at module load: a small lookup of random values so per-sample
+// wobble is a free array read in the draw loop instead of a runtime noise call.
 const WAKE_WOBBLE_LUT = Array.from({ length: 64 }, () => Math.random() * 2 - 1)
+// Sample positions across the ribbon (u ∈ [-1,1]) and their taper profile —
+// both fixed by WAKELET_SAMPLES, so bake them once instead of recomputing
+// per particle per frame. Taper is 0 at both ends (pointed tips), 1 at the
+// middle (peak thickness) — a parabola, matching the crescent's own bow shape.
+const WAKELET_U = Array.from({ length: WAKELET_SAMPLES }, (_, k) => (k / (WAKELET_SAMPLES - 1)) * 2 - 1)
+const WAKELET_TAPER = WAKELET_U.map(u => 1 - u * u)
 
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
@@ -298,7 +317,13 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
   // Wake — a pool of shed-and-left-behind wavelet particles
   const wakeletsRef    = useRef([])    // [{ x, y, nx, ny, fx, fy, side, age, maxLife }]
   const lastShedPosRef = useRef(null)  // last finger pos a wavelet pair was shed at
-  const dabSpriteRef   = useRef(null)  // baked soft radial-falloff dab (tinted WAKE_COLOR)
+  // Reusable scratch buffers for the ribbon build (centerline + normals) — sized
+  // once to WAKELET_SAMPLES and overwritten per wavelet per frame, so drawing
+  // the wake never allocates.
+  const wakeScratchXRef  = useRef(new Float32Array(WAKELET_SAMPLES))
+  const wakeScratchYRef  = useRef(new Float32Array(WAKELET_SAMPLES))
+  const wakeScratchNXRef = useRef(new Float32Array(WAKELET_SAMPLES))
+  const wakeScratchNYRef = useRef(new Float32Array(WAKELET_SAMPLES))
 
   // Fingerprint affordance
   const fpImgRef             = useRef(null)
@@ -325,31 +350,6 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
     const img = new Image()
     img.onload = () => { fpImgRef.current = img; fpImgReadyRef.current = true }
     img.src = '/assets/fingerprint.png'
-  }, [])
-
-  // ── Wake dab sprite — baked once ─────────────────────────────────────────────
-  // A soft radial-falloff disc tinted WAKE_COLOR. Drawn (blitted, scaled) at each
-  // trail point so the wake is a train of feathered dabs — cheap, no per-frame
-  // gradient creation. Falloff is eased (alpha ~ smoothstep) for very soft edges.
-  useEffect(() => {
-    const S = 64
-    const oc = document.createElement('canvas')
-    oc.width = S; oc.height = S
-    const c = oc.getContext('2d')
-    const img = c.createImageData(S, S)
-    const cx = (S - 1) / 2, cy = (S - 1) / 2, R = S / 2
-    const [cr, cg, cb] = WAKE_COLOR.split(',').map(Number)
-    for (let y = 0; y < S; y++) {
-      for (let x = 0; x < S; x++) {
-        const d = Math.hypot(x - cx, y - cy) / R          // 0 centre → 1 edge
-        const t = Math.max(0, 1 - d)
-        const a = Math.round(255 * (t * t * (3 - 2 * t)))  // smoothstep falloff
-        const o = (y * S + x) * 4
-        img.data[o] = cr; img.data[o + 1] = cg; img.data[o + 2] = cb; img.data[o + 3] = a
-      }
-    }
-    c.putImageData(img, 0, 0)
-    dabSpriteRef.current = oc
   }, [])
 
   // ── Imperative API ─────────────────────────────────────────────────────────
@@ -584,11 +584,15 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
 
       // Age + draw the wavelets. Each grows, drifts outward (arms spreading), and
       // fades over its life, anchored where it was born (left behind in the water).
-      const dab = dabSpriteRef.current
+      // Rendered as a filled tapered ribbon (see wakeScratch* below), not stamped
+      // dabs, so each wavelet reads as one whole little wave.
       const pool = wakeletsRef.current
-      if (dab && pool.length) {
-        const S = WAKELET_SAMPLES
+      if (pool.length) {
+        const S  = WAKELET_SAMPLES
+        const sx = wakeScratchXRef.current, sy = wakeScratchYRef.current
+        const nx = wakeScratchNXRef.current, ny = wakeScratchNYRef.current
         ctx.save()
+        ctx.fillStyle = `rgb(${WAKE_COLOR})`
         for (let i = pool.length - 1; i >= 0; i--) {
           const w = pool[i]
           w.age += dt
@@ -603,22 +607,50 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
           if (a < 0.004) continue
           // sizeMul makes each wavelet's whole family of dimensions slightly
           // bigger or smaller than its neighbors (still shares the same curve).
-          const off  = lw * (WAKELET_INIT_OFF_LW + WAKELET_SPREAD_LW * t) * w.sizeMul  // drifts outward
-          const half = lw * (WAKELET_INIT_LEN_LW + WAKELET_GROW_LW * t) * w.sizeMul    // grows
-          const dabR = lw * (WAKELET_DAB_INIT_LW + WAKELET_DAB_GROW_LW * t) * w.sizeMul  // own gentle ramp — never sub-pixel
-          const bow  = WAKELET_BOW * half * w.bowMul
-          const cxp  = w.x + w.nx * w.side * off
-          const cyp  = w.y + w.ny * w.side * off
-          ctx.globalAlpha = a
+          const off      = lw * (WAKELET_INIT_OFF_LW + WAKELET_SPREAD_LW * t) * w.sizeMul  // drifts outward
+          const half     = lw * (WAKELET_INIT_LEN_LW + WAKELET_GROW_LW * t) * w.sizeMul     // grows
+          const peakThick = lw * (WAKELET_THICK_INIT_LW + WAKELET_THICK_GROW_LW * t) * w.sizeMul  // own gentle ramp — never sub-pixel
+          const bow      = WAKELET_BOW * half * w.bowMul
+          const cxp      = w.x + w.nx * w.side * off
+          const cyp      = w.y + w.ny * w.side * off
+
+          // Centerline samples — same curve + wobble as before.
           for (let k = 0; k < S; k++) {
-            const u   = (k / (S - 1)) * 2 - 1            // across the little crescent
+            const u   = WAKELET_U[k]
             const b   = bow * (1 - u * u)               // parabolic bow toward travel
-            // Cheap per-dab contour wobble — a lookup, not a runtime noise call —
-            // so the crescent isn't a geometrically perfect parabola.
+            // Cheap per-sample contour wobble — a lookup, not a runtime noise
+            // call — so the ribbon isn't a geometrically perfect parabola.
             const wob = WAKE_WOBBLE_LUT[(w.seed + k * 7) % WAKE_WOBBLE_LUT.length] * half * WAKELET_WOBBLE_AMT
-            const px  = cxp + w.nx * (half * u + wob) + w.fx * b
-            const py  = cyp + w.ny * (half * u + wob) + w.fy * b
-            ctx.drawImage(dab, px - dabR, py - dabR, dabR * 2, dabR * 2)
+            sx[k] = cxp + w.nx * (half * u + wob) + w.fx * b
+            sy[k] = cyp + w.ny * (half * u + wob) + w.fy * b
+          }
+          // Per-sample unit normal (finite difference of the centerline) —
+          // shared by both fill passes below, so it's computed only once.
+          for (let k = 0; k < S; k++) {
+            const k0 = k === 0 ? 0 : k - 1
+            const k1 = k === S - 1 ? S - 1 : k + 1
+            const tx = sx[k1] - sx[k0], ty = sy[k1] - sy[k0]
+            const tl = Math.hypot(tx, ty) || 1
+            nx[k] = -ty / tl; ny[k] = tx / tl
+          }
+
+          // Fill the tapered ribbon outline — thickest at the middle sample,
+          // pointed at both ends (WAKELET_TAPER is 0 there). Two passes (wide+
+          // faint, then narrow+firm) fake a soft edge without shadowBlur.
+          for (const pass of WAKELET_RIBBON_PASSES) {
+            ctx.beginPath()
+            for (let k = 0; k < S; k++) {
+              const hw = peakThick * WAKELET_TAPER[k] * pass.thick
+              const px = sx[k] + nx[k] * hw, py = sy[k] + ny[k] * hw
+              if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+            }
+            for (let k = S - 1; k >= 0; k--) {
+              const hw = peakThick * WAKELET_TAPER[k] * pass.thick
+              ctx.lineTo(sx[k] - nx[k] * hw, sy[k] - ny[k] * hw)
+            }
+            ctx.closePath()
+            ctx.globalAlpha = a * pass.alpha
+            ctx.fill()
           }
         }
         ctx.globalAlpha = 1
