@@ -21,13 +21,17 @@ const CY_RATIO     = 0.43     // track vertical center — shifted up from dead-
                               // height in GameCarousel's CarouselCard, so (0 + 0.86)/2 ≈ 0.43).
 
 function drawScene(ctx, w, h) {
-  // Dark teal background — nudged ~55% lighter (toward the game's next-up
-  // gradient stop, #097969) from the two darkest stops of the game's own
-  // meadow-bg gradient (buildMeadowBg in SquareGame.jsx), muted, with none
-  // of the game's light shafts / sun pools / canopy dapples.
+  // Dark teal background, sampled from the game's own meadow-bg gradient
+  // (buildMeadowBg in SquareGame.jsx). Previously nudged partway between the
+  // game's two darkest stops (#094E44/#082B26) toward its next-lighter stop
+  // (#097969) — but that window has a ceiling: even fully shifted, its
+  // darkest point can't exceed the old top's lightness. So the sampling
+  // window moved up one full stop (now blending the game's #097969/#094E44
+  // pair ~75% toward its next stop, #159986), keeping the darker of the two
+  // new stops clearly lighter than any point in the previous gradient.
   const bg = ctx.createLinearGradient(0, 0, w * 0.5, h)
-  bg.addColorStop(0, '#096658')
-  bg.addColorStop(1, '#093E37')
+  bg.addColorStop(0, '#12917F')
+  bg.addColorStop(1, '#096E60')
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
 
