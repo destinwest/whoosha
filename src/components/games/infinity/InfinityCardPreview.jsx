@@ -6,8 +6,8 @@ import { useEffect, useRef } from 'react'
 // launch cross-dissolve blooms into the vivid game. Deliberately NOT a faithful
 // game frame: a quiet night gradient with a soft central glow (no stars, no
 // Milky Way band / nebulae) and a "Liquid Glass" translucent figure-8 track —
-// bright top highlight, tinted glass body, dimmer bottom, background showing
-// through — with one quiet pale pacing dot. No breathing labels.
+// a uniform tinted glass body, background showing through — with one quiet
+// pale pacing dot. No breathing labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — the same vertical lemniscate + track-width
@@ -53,16 +53,14 @@ function drawScene(ctx, w, h) {
     return [cx + ((st * ct) / d) * scaleX, cy - (ct / d) * scaleY]
   }
 
-  // "Liquid Glass" figure-8 track (iOS control-center style): a bright
-  // highlight along the top softening into a tinted, translucent glass body
-  // and dimming toward the bottom, so the night gradient/glow shows through.
+  // "Liquid Glass" figure-8 track (iOS control-center style): a uniform
+  // tinted, translucent glass body so the night gradient/glow shows through.
   // Built as: (1) stroke the path fully opaque onto an offscreen canvas as a
-  // shape MASK, (2) 'source-in' a top-to-bottom gradient fill into that mask.
-  // The figure-8 crosses itself at the center — stroking directly with a
+  // shape MASK, (2) 'source-in' a flat translucent fill into that mask. The
+  // figure-8 crosses itself at the center — stroking directly with a
   // translucent color would double-composite the overlap into a dark patch
-  // (see git history); routing through an opaque mask first means the
-  // gradient fill lands on every track pixel, including the crossover,
-  // exactly once.
+  // (see git history); routing through an opaque mask first means the fill
+  // lands on every track pixel, including the crossover, exactly once.
   const dpr = ctx.canvas.width / w
   const maskCanvas = document.createElement('canvas')
   maskCanvas.width  = ctx.canvas.width
@@ -82,14 +80,7 @@ function drawScene(ctx, w, h) {
   mctx.stroke()
 
   mctx.globalCompositeOperation = 'source-in'
-  const trackTop    = cy - scaleY - lw / 2
-  const trackBottom = cy + scaleY + lw / 2
-  const glass = mctx.createLinearGradient(0, trackTop, 0, trackBottom)
-  glass.addColorStop(0,    'rgba(255,255,255,0.55)')   // bright top highlight
-  glass.addColorStop(0.12, 'rgba(255,255,255,0.22)')
-  glass.addColorStop(0.5,  'rgba(214,201,238,0.16)')   // lavender-tinted glass body
-  glass.addColorStop(1,    'rgba(150,140,182,0.10)')   // dim toward the bottom
-  mctx.fillStyle = glass
+  mctx.fillStyle = 'rgba(150,140,182,0.10)'   // flat glass tint — the previous gradient's dimmest stop
   mctx.fillRect(0, 0, w, h)
 
   ctx.save()
