@@ -137,10 +137,15 @@ const WAKELET_JITTER_LIFE     = 0.18   // ± lifetime variance — desyncs the g
 const WAKELET_JITTER_FADE     = 0.35   // ± fade-in-speed variance — desyncs the birth pop
 const WAKELET_JITTER_BOW      = 0.25   // ± crescent-curvature variance
 const WAKELET_JITTER_POS_LW   = 0.06   // birth-position jitter along the direction of travel, × lw
-const WAKELET_WOBBLE_AMT      = 0.10   // per-sample contour wobble (fraction of half-length) — breaks the perfect parabola
-// Baked once at module load: a small lookup of random values so per-sample
-// wobble is a free array read in the draw loop instead of a runtime noise call.
-const WAKE_WOBBLE_LUT = Array.from({ length: 64 }, () => Math.random() * 2 - 1)
+const WAKELET_WOBBLE_AMT      = 0.10   // contour wobble amplitude (fraction of half-length) — breaks the perfect parabola
+// Wobble is a smooth sine wave (own random frequency + phase per wavelet, set
+// once at spawn), NOT independent per-sample noise — independent noise made
+// neighboring centerline samples uncorrelated, and differentiating that for
+// the ribbon's edge normals amplified it into sharp kinks. A sine is
+// continuous, so consecutive samples stay correlated and the outline stays
+// smooth while each wavelet still gets its own unique gentle undulation.
+const WAKELET_WOBBLE_FREQ_MIN = 0.5   // fewest wave-cycles across the crescent's length
+const WAKELET_WOBBLE_FREQ_MAX = 1.5   // most wave-cycles across the crescent's length
 // Sample positions across the ribbon (u ∈ [-1,1]) and their taper profile —
 // both fixed by WAKELET_SAMPLES, so bake them once instead of recomputing per
 // particle per frame. Taper is 0 at both ends (pointed tips), 1 at the middle
@@ -588,7 +593,8 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
               w.sizeMul = 1 + (Math.random() * 2 - 1) * WAKELET_JITTER_SIZE
               w.fadeMul = 1 + (Math.random() * 2 - 1) * WAKELET_JITTER_FADE
               w.bowMul  = 1 + (Math.random() * 2 - 1) * WAKELET_JITTER_BOW
-              w.seed    = (Math.random() * WAKE_WOBBLE_LUT.length) | 0
+              w.wobFreq  = WAKELET_WOBBLE_FREQ_MIN + Math.random() * (WAKELET_WOBBLE_FREQ_MAX - WAKELET_WOBBLE_FREQ_MIN)
+              w.wobPhase = Math.random() * Math.PI * 2
             }
           }
           lastShedPosRef.current = { x: fp.x, y: fp.y }
@@ -639,9 +645,10 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
           for (let k = 0; k < S; k++) {
             const u   = WAKELET_U[k]
             const b   = bow * (1 - u * u)               // parabolic bow toward travel
-            // Cheap per-sample contour wobble — a lookup, not a runtime noise
-            // call — so the ribbon isn't a geometrically perfect parabola.
-            const wob = WAKE_WOBBLE_LUT[(w.seed + k * 7) % WAKE_WOBBLE_LUT.length] * half * WAKELET_WOBBLE_AMT
+            // Smooth per-wavelet wobble (own frequency + phase, set at spawn)
+            // — a sine, not independent per-sample noise, so the contour
+            // stays smooth instead of zigzagging between samples.
+            const wob = Math.sin(u * Math.PI * w.wobFreq + w.wobPhase) * half * WAKELET_WOBBLE_AMT
             sx[k] = cxp + tiltX * (half * u + wob) + w.fx * b
             sy[k] = cyp + tiltY * (half * u + wob) + w.fy * b
           }
