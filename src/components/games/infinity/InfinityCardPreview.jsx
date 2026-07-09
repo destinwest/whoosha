@@ -6,8 +6,9 @@ import { useEffect, useRef } from 'react'
 // launch cross-dissolve blooms into the vivid game. Deliberately NOT a faithful
 // game frame: a quiet night gradient with a soft central glow (no stars, no
 // Milky Way band / nebulae) and a "Liquid Glass" translucent figure-8 track —
-// a uniform tinted glass body, background showing through — with one quiet
-// pale pacing dot. No breathing labels.
+// a uniform tinted glass body, background showing through, plus a subtle
+// specular highlight near the top-lobe crown — with one quiet pale pacing
+// dot. No breathing labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — the same vertical lemniscate + track-width
@@ -87,6 +88,23 @@ function drawScene(ctx, w, h) {
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.drawImage(maskCanvas, 0, 0)
   ctx.restore()
+
+  // Subtle specular highlight near the crown of the top lobe — echoes the
+  // bright rim catching the light on the reference Liquid Glass icons. A
+  // short, thin, soft-capped arc; this span doesn't cross itself, so it can
+  // be stroked directly (no mask needed).
+  const HI_FROM = 0.15, HI_TO = 0.35, HI_N = 40
+  ctx.beginPath()
+  let [hx0, hy0] = pt(HI_FROM)
+  ctx.moveTo(hx0, hy0)
+  for (let i = 1; i <= HI_N; i++) {
+    const [hx, hy] = pt(HI_FROM + (HI_TO - HI_FROM) * (i / HI_N))
+    ctx.lineTo(hx, hy)
+  }
+  ctx.lineWidth   = lw * 0.2
+  ctx.lineCap     = 'round'
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+  ctx.stroke()
 
   // Quiet pacing dot at the top apex of the inhale lobe (s = 0.25) — a clean,
   // uncluttered spot away from the center crossover.
