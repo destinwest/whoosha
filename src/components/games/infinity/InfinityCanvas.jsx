@@ -97,7 +97,7 @@ const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 // than a string of beads. Two fill passes (wide+faint, then narrow+firm) fake
 // a soft edge cheaply, without shadowBlur.
 const WAKELET_LIFE_MS     = 1600   // each wavelet: grow → spread → dissipate over this long
-const SHED_SPACING_LW     = 0.2667 // shed a wavelet PAIR every this much finger travel (density) — 0.20/0.75, i.e. shed frequency -25%
+const SHED_SPACING_LW     = 0.3556 // shed a wavelet PAIR every this much finger travel (density) — 0.20/0.75/0.75, i.e. shed frequency -25% twice
 const WAKELET_MAX         = 110    // particle-pool cap
 const WAKELET_INIT_OFF_LW = 0.24   // starting side offset (out to the side, not under the touch)
 const WAKELET_SPREAD_LW   = 0.38   // extra outward drift over life  → final offset = INIT_OFF + SPREAD (0.62)
