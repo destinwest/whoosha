@@ -246,9 +246,9 @@ function buildTrackGradient(ctx, { left, top, sqW, lw }) {
   // Position stops so the transition spans from straight inner edge (t=0)
   // through straight outer edge (~t=0.46) to corner outer edges (~t=0.88).
   const grad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
-  grad.addColorStop(0,   '#927567')   // inner edge of straights — lightest warm umber
-  grad.addColorStop(0.4, '#8A6D57')   // straight outer edge — base warm umber
-  grad.addColorStop(1,   '#7E5E46')   // corner outer edges — darkest umber
+  grad.addColorStop(0,   '#E2CFBE')   // inner edge of straights — lightest warm tan
+  grad.addColorStop(0.4, '#DAC7AE')   // straight outer edge — base warm tan
+  grad.addColorStop(1,   '#CEB89D')   // corner outer edges — darkest tan
   return grad
 }
 
@@ -270,7 +270,7 @@ function drawTrackBody(ctx, { left, top, sqW, cr, lw }, trackGradient) {
   ctx.beginPath()
   ctx.roundRect(left, top, sqW, sqW, cr)
   ctx.lineWidth   = lw
-  ctx.strokeStyle = trackGradient ?? '#8A6D57'
+  ctx.strokeStyle = trackGradient ?? '#DAC7AE'
   ctx.stroke()
   ctx.restore()
 }
