@@ -148,6 +148,15 @@ const WAKELET_EDGE_PASSES = [
   { color: WAKE_HIGHLIGHT_COLOR, alphaMul: 0.65, shiftSign: 1,  blend: 'screen'   },
   { color: WAKE_SHADOW_COLOR,    alphaMul: 0.55, shiftSign: -1, blend: 'multiply' },
 ]
+// Tip fade — the ribbon still reads as a "drawn stroke" because it has a
+// crisp, uniform-opacity edge even after v20's width taper; real water
+// disturbance loses visibility toward the edges of the disturbed patch, not
+// just width. Fade each wavelet's OPACITY toward both tips (independent of,
+// and on top of, the width taper) via a linear gradient along its own
+// length instead of a flat fillStyle — one gradient per wavelet per color
+// (reused across every pass painted in that color), so this adds no extra
+// draw calls, just per-pixel color interpolation on the same tiny fills.
+const WAKELET_TIP_FADE = 0.3   // fraction of the ribbon's length, from each tip, that fades toward transparent
 
 // Per-wavelet randomness — seeded once at spawn (not per-frame), so it costs a
 // handful of Math.random() calls only when a wavelet is born, never in the
@@ -187,6 +196,21 @@ const WAKELET_TAPER = WAKELET_U.map(u => {
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
 const easeOutSoft = t => 1 - Math.pow(1 - t, 2)
+
+// A linear gradient along (x0,y0)->(x1,y1), opaque `colorRGB` in the middle,
+// fading to fully transparent over WAKELET_TIP_FADE at each end. Used as the
+// wavelet ribbon's fillStyle so opacity fades toward the tips — perpendicular
+// position doesn't matter for a linear gradient, so the SAME gradient (built
+// from the wavelet's centerline) is reused for its laterally-offset
+// highlight/shadow bands too.
+function buildTipFadeGradient(ctx, x0, y0, x1, y1, colorRGB) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1)
+  g.addColorStop(0, `rgba(${colorRGB},0)`)
+  g.addColorStop(WAKELET_TIP_FADE, `rgba(${colorRGB},1)`)
+  g.addColorStop(1 - WAKELET_TIP_FADE, `rgba(${colorRGB},1)`)
+  g.addColorStop(1, `rgba(${colorRGB},0)`)
+  return g
+}
 
 // ── buildGeo ──────────────────────────────────────────────────────────────────
 // Samples the vertical lemniscate into a point array + cumulative arc-lengths.
@@ -639,7 +663,6 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
         const sx = wakeScratchXRef.current, sy = wakeScratchYRef.current
         const nx = wakeScratchNXRef.current, ny = wakeScratchNYRef.current
         ctx.save()
-        ctx.fillStyle = `rgb(${WAKE_COLOR})`
         for (let i = pool.length - 1; i >= 0; i--) {
           const w = pool[i]
           w.age += dt
@@ -696,9 +719,16 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
           const midK = S >> 1
           const outwardSign = (nx[midK] * ioX + ny[midK] * ioY) >= 0 ? 1 : -1
 
+          // Opacity fade toward both tips (perpendicular offset doesn't
+          // matter for a linear gradient, so the same base/highlight/shadow
+          // gradients — built once here from the centerline — are valid for
+          // the laterally-shifted highlight/shadow bands below too).
+          const gBase = buildTipFadeGradient(ctx, sx[0], sy[0], sx[S - 1], sy[S - 1], WAKE_COLOR)
+
           // Fill the tapered ribbon outline — thickest at the middle sample,
           // tapering to (not all the way to a point at) both ends. Two passes
           // (wide+faint, then narrow+firm) fake a soft edge without shadowBlur.
+          ctx.fillStyle = gBase
           for (const pass of WAKELET_RIBBON_PASSES) {
             ctx.beginPath()
             for (let k = 0; k < S; k++) {
@@ -719,6 +749,7 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
           // 'multiply') bands — narrower than the base ribbon and shifted
           // toward their respective edge, so light and shadow read as part
           // of the wave's own curvature rather than a flat painted stroke.
+          // Same tip-fade treatment as the base ribbon, in each band's color.
           for (const edge of WAKELET_EDGE_PASSES) {
             const sign = outwardSign * edge.shiftSign
             ctx.beginPath()
@@ -734,12 +765,11 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
               ctx.lineTo(sx[k] + nx[k] * (shift - hw), sy[k] + ny[k] * (shift - hw))
             }
             ctx.closePath()
-            ctx.fillStyle = `rgb(${edge.color})`
+            ctx.fillStyle = buildTipFadeGradient(ctx, sx[0], sy[0], sx[S - 1], sy[S - 1], edge.color)
             ctx.globalCompositeOperation = edge.blend
             ctx.globalAlpha = a * edge.alphaMul
             ctx.fill()
           }
-          ctx.fillStyle = `rgb(${WAKE_COLOR})`
           ctx.globalCompositeOperation = 'source-over'
         }
         ctx.globalAlpha = 1
