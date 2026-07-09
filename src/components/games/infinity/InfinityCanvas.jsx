@@ -104,6 +104,21 @@ const WAKELET_BOW         = 0.55   // crescent bow toward the direction of trave
 const WAKE_ALPHA          = 0.12   // peak per-dab alpha — intentionally faint (unchanged final)
 const WAKE_COLOR          = '205,210,236'  // soft cool moonlight-lavender
 
+// Per-wavelet randomness — seeded once at spawn (not per-frame), so it costs a
+// handful of Math.random() calls only when a wavelet is born, never in the
+// draw loop. This is what keeps the wake from reading as a stamped, metronomic
+// pattern: no two wavelets (not even a spawned L/R pair) grow, fade, or curve
+// identically, so the family resemblance stays but the rhythm feels organic.
+const WAKELET_JITTER_SIZE     = 0.14   // ± size variance (offset/length/dab radius together)
+const WAKELET_JITTER_LIFE     = 0.18   // ± lifetime variance — desyncs the grow/fade rhythm
+const WAKELET_JITTER_FADE     = 0.35   // ± fade-in-speed variance — desyncs the birth pop
+const WAKELET_JITTER_BOW      = 0.25   // ± crescent-curvature variance
+const WAKELET_JITTER_POS_LW   = 0.06   // birth-position jitter along the direction of travel, × lw
+const WAKELET_WOBBLE_AMT      = 0.10   // per-dab contour wobble (fraction of half-length) — breaks the perfect parabola
+// Baked once at module load: a small lookup of random values so per-dab wobble
+// is a free array read in the draw loop instead of a runtime noise function.
+const WAKE_WOBBLE_LUT = Array.from({ length: 64 }, () => Math.random() * 2 - 1)
+
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
 const easeOutSoft = t => 1 - Math.pow(1 - t, 2)
@@ -550,8 +565,17 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
               const w = pool.length < WAKELET_MAX
                 ? (pool.push({}), pool[pool.length - 1])
                 : pool.reduce((a, b) => (b.age > a.age ? b : a))   // recycle the oldest
-              w.x = bx; w.y = by; w.nx = nx; w.ny = ny; w.fx = ux; w.fy = uy
-              w.side = side; w.age = 0; w.maxLife = WAKELET_LIFE_MS
+              // Each side gets its own position jitter — an L/R pair spawned
+              // "together" no longer lands as an exact mirror image.
+              const posJ = (Math.random() * 2 - 1) * lw * WAKELET_JITTER_POS_LW
+              w.x = bx + ux * posJ; w.y = by + uy * posJ
+              w.nx = nx; w.ny = ny; w.fx = ux; w.fy = uy
+              w.side = side; w.age = 0
+              w.maxLife = WAKELET_LIFE_MS * (1 + (Math.random() * 2 - 1) * WAKELET_JITTER_LIFE)
+              w.sizeMul = 1 + (Math.random() * 2 - 1) * WAKELET_JITTER_SIZE
+              w.fadeMul = 1 + (Math.random() * 2 - 1) * WAKELET_JITTER_FADE
+              w.bowMul  = 1 + (Math.random() * 2 - 1) * WAKELET_JITTER_BOW
+              w.seed    = (Math.random() * WAKE_WOBBLE_LUT.length) | 0
             }
           }
           lastShedPosRef.current = { x: fp.x, y: fp.y }
@@ -573,21 +597,27 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
           // Born opaque (very short fade-in avoids a hard pop), then fades to
           // nothing — matches the old curve from t≈0.12 on, so the FINAL state is
           // unchanged while young wavelets are ~2× more opaque than before.
-          const env = Math.min(1, t / 0.04) * (1 - t)
+          // fadeMul desyncs how quickly each individual wavelet pops in.
+          const env = Math.min(1, t / (0.04 * w.fadeMul)) * (1 - t)
           const a   = WAKE_ALPHA * env
           if (a < 0.004) continue
-          const off  = lw * (WAKELET_INIT_OFF_LW + WAKELET_SPREAD_LW * t)  // drifts outward
-          const half = lw * (WAKELET_INIT_LEN_LW + WAKELET_GROW_LW * t)    // grows
-          const dabR = lw * (WAKELET_DAB_INIT_LW + WAKELET_DAB_GROW_LW * t)  // own gentle ramp — never sub-pixel
-          const bow  = WAKELET_BOW * half
+          // sizeMul makes each wavelet's whole family of dimensions slightly
+          // bigger or smaller than its neighbors (still shares the same curve).
+          const off  = lw * (WAKELET_INIT_OFF_LW + WAKELET_SPREAD_LW * t) * w.sizeMul  // drifts outward
+          const half = lw * (WAKELET_INIT_LEN_LW + WAKELET_GROW_LW * t) * w.sizeMul    // grows
+          const dabR = lw * (WAKELET_DAB_INIT_LW + WAKELET_DAB_GROW_LW * t) * w.sizeMul  // own gentle ramp — never sub-pixel
+          const bow  = WAKELET_BOW * half * w.bowMul
           const cxp  = w.x + w.nx * w.side * off
           const cyp  = w.y + w.ny * w.side * off
           ctx.globalAlpha = a
           for (let k = 0; k < S; k++) {
-            const u = (k / (S - 1)) * 2 - 1              // across the little crescent
-            const b = bow * (1 - u * u)                 // parabolic bow toward travel
-            const px = cxp + w.nx * (half * u) + w.fx * b
-            const py = cyp + w.ny * (half * u) + w.fy * b
+            const u   = (k / (S - 1)) * 2 - 1            // across the little crescent
+            const b   = bow * (1 - u * u)               // parabolic bow toward travel
+            // Cheap per-dab contour wobble — a lookup, not a runtime noise call —
+            // so the crescent isn't a geometrically perfect parabola.
+            const wob = WAKE_WOBBLE_LUT[(w.seed + k * 7) % WAKE_WOBBLE_LUT.length] * half * WAKELET_WOBBLE_AMT
+            const px  = cxp + w.nx * (half * u + wob) + w.fx * b
+            const py  = cyp + w.ny * (half * u + wob) + w.fy * b
             ctx.drawImage(dab, px - dabR, py - dabR, dabR * 2, dabR * 2)
           }
         }
