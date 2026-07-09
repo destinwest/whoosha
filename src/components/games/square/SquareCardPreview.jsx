@@ -49,7 +49,7 @@ function drawScene(ctx, w, h) {
   ctx.beginPath()
   ctx.roundRect(left, top, sq, sq, cornerR)
   ctx.lineWidth   = lw
-  ctx.strokeStyle = '#DAC7AE'
+  ctx.strokeStyle = '#D2BD9D'
   ctx.stroke()
 
   // Quiet pacing dot at the start of the bottom side — soft, no glow.
