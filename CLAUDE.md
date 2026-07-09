@@ -4,7 +4,7 @@ Operating instructions for Claude Code in the Whoosha repo. Read this first ever
 
 ## Project orientation
 
-Whoosha is a React + Vite + Canvas 2D web app — breathing games for children. The flagship is the Square Breathing game (`src/components/games/square/`). Auth via Supabase, payments via Stripe (test mode), Sentry for errors.
+Whoosha is a React + Vite + Canvas 2D web app — breathing games for children. The flagship is the Square Breathing game (`src/components/games/square/`). Auth via Supabase, Sentry for errors. Tier gating is a client-side check against `profiles.tier`; no payment processor is wired (deferred post-MVP).
 
 **Read these before touching game/visual code:**
 - `BRIEFING.md` — product spec, design system, game mechanics (the WHAT and WHY)
@@ -19,6 +19,8 @@ Target hardware floor: **iPhone 12 and newer.** Real users are parents on iOS Sa
 Two prior sessions broke iOS perf trying to add visual polish. The lessons are in `POLISH-STRATEGY.md`. Do not relitigate them.
 
 ### Hard rules — do not violate without explicit user approval
+
+> Tripwire summary only. `POLISH-STRATEGY.md` (Layering rules + Anti-patterns) is authoritative — if this list and that doc disagree, that doc wins.
 
 1. **Layer budget: one bg canvas, one game canvas, at most ONE CSS overlay div above them.** Vignette is the allowed overlay.
 2. **No `mixBlendMode` chains.** A single overlay using `mixBlendMode` may be acceptable; stacks of them are not.
@@ -44,9 +46,10 @@ Static SVG assets → baked into an offscreen canvas at resize → composited as
 
 - React 18 + Vite 6, Tailwind 3, Zustand 5
 - Canvas 2D for game rendering — no WebGL, no Three.js, no external drawing libs
-- Supabase (auth + Postgres), Stripe (test mode), Sentry, Rive (Dragon game only)
+- Supabase (auth + Postgres), Sentry, Rive (Dragon game only)
+- Adaptive audio: synthesis (`src/sound/`) + sampled beds. Samples allowed for atmospheric beds only; breath-coupled / cued elements stay synthesized (POLISH log 2026-06-02)
 - Node 18+
 
-## Current state (2026-05-19, post Step 1)
+## Current state
 
-Main is clean. Step 1 of the polish refactor landed: 6 CSS overlays baked into the bg canvas, DPR fixed, `bgCanvas` moved inside the saturate wrapper, `SquareCanvas` made `position: absolute`. Compositing layer count down from ~11 to ~4. Next up: Step 2 (SVG track texture). See `POLISH-STRATEGY.md` § "Staged plan forward."
+Status is not tracked here — it drifts. For the live state of `main` and what's next, read the tail of the **Decision log** in `POLISH-STRATEGY.md`.

@@ -60,11 +60,12 @@ Three strategies were considered:
 ```
 [saturate(var(--game-saturation)) wrapper]   ← one GPU filter, gauge-driven
   ├─ [bg canvas, baked]                       ← SVG textures + lighting + gradients
-  └─ [game canvas]                            ← dynamic paint/fingerprint/pacing
+  ├─ [game canvas]                            ← dynamic paint / fingerprint / trace
+  └─ [pacing canvas]                          ← pacing circle, isolated from paint compositing
 [vignette div]                                ← outside the filter, anchors the frame
 ```
 
-Three GPU layers total. iPhone 12 has plenty of headroom.
+Four GPU layers total (Square/Hexagon use bg + game; Infinity splits the pacing circle onto its own canvas — see the 2026-07-02 Decision log entry). The layer budget (≤5 concurrent full-screen layers) still holds with headroom on iPhone 12. The pacing canvas counts against the budget — do not add further persistent canvases without baking something else down first.
 
 ---
 
@@ -122,7 +123,7 @@ Do **not** desaturate via `ctx.filter` per-frame, `getImageData` pixel ops, or r
 - **Authoring:** static `.svg` light-pool assets (radial blooms, shafts)
 - **Runtime:** baked into the bg canvas at resize using `globalCompositeOperation = 'screen'` (or `'overlay'`) — all composition happens in canvas-land, not CSS
 - **Per-frame cost:** zero
-- **Animated variant (optional):** if static feels flat, see Step 5 of the staged plan — uses the single CSS overlay slot, which means the vignette must first be baked into the bg canvas.
+- **Animated variant (optional, not currently used):** if static lighting feels flat, an animated lighting overlay is possible but requires freeing the single CSS overlay slot first — the vignette would have to be baked into the bg canvas (as a darkening pass in `buildMeadowBg`) before adding one animated div (SVG-as-`background-image`, slow opacity/transform, no `mixBlendMode` stack).
 
 ### Vignette
 - Current implementation is a CSS `radial-gradient` div — keep. Cheap, single layer, no SVG needed.
@@ -147,56 +148,9 @@ Do **not** desaturate via `ctx.filter` per-frame, `getImageData` pixel ops, or r
 
 ---
 
-## Current state of `main` (as of 2026-05-19, post Step 1)
+## Current state
 
-Working tree clean. Step 1 landed. Conforms to all layering rules.
-
-- **6 CSS overlays removed.** Their visual intent (canopy dapples, top-edge shadow, dark/bright shafts) is now baked into `buildMeadowBg` via Canvas 2D `globalCompositeOperation`.
-- **DPR fixed.** `buildMeadowBg` and the display canvas both size at `w * dpr × h * dpr`; drawing scaled accordingly.
-- **`bgCanvas` lives inside the saturate wrapper.** Desaturates with the heat gauge in lockstep.
-- **`SquareCanvas` is `position: absolute`** so it paints above the opaque baked bg canvas. Both siblings now use the same positioning mode per rule #7.
-- **`stampStroke.js`** in place as the Classic default.
-- Compositing layer count: ~4 full-screen layers (was ~11 pre-refactor).
-
-Next: Step 2 — SVG track texture.
-
----
-
-## Staged plan forward
-
-Each step is a separate commit. Each is independently verifiable on iOS. Stop after any step if the result is good enough.
-
-### Step 1 — Refactor baseline (no visual goal; mechanical)
-- Delete the 6 `mixBlendMode` overlay divs from `SquareGame.jsx`
-- Migrate their visual intent into `buildMeadowBg` using Canvas 2D `globalCompositeOperation` (`screen`, `overlay`)
-- Fix DPR in `buildMeadowBg` — size offscreen canvas at `w * dpr × h * dpr`, scale ctx accordingly
-- Move `bgCanvas` inside the saturate wrapper
-- Verify on iOS: same/better perf, visual is close to current (lighting may shift; polish in later steps)
-- Commit
-
-### Step 2 — SVG track texture
-- Author or import one `.svg` for track surface texture
-- Bake into racetrack passes via `ctx.createPattern()` at resize in `SquareCanvas`
-- Verify on iOS. Commit.
-
-### Step 3 — SVG background texture
-- One `.svg` for paper/meadow grain
-- `drawImage` into `buildMeadowBg` during bake
-- Verify on iOS. Commit.
-
-### Step 4 — Refine baked lighting with SVG
-- If canvas-composed lighting from Step 1 isn't rich enough, replace with SVG light-pool assets baked in
-- Verify on iOS. Commit.
-
-### Step 5 (optional) — One animated overlay
-- Only if static lighting feels too flat after Steps 1–4
-- The layer budget allows **one** CSS overlay above the game canvas, currently held by the vignette. To add an animated lighting overlay, the vignette must first be baked into the bg canvas (as a darkening pass during `buildMeadowBg`), freeing the overlay slot.
-- The new overlay: one div, SVG-as-`background-image`, slow opacity or transform animation. No `mixBlendMode` stack.
-- Verify on iOS. Commit.
-
-### Queued cleanups (not on the critical path)
-
-_(All previously queued items completed in the 2026-06-02 cleanup. New items go here.)_
+This is the single source of live status: the **Decision log** at the end of this file. Do not add a dated snapshot here or in `CLAUDE.md` — snapshots in two places drift apart. Append to the log instead.
 
 ---
 

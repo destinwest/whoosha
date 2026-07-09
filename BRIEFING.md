@@ -37,7 +37,7 @@
 
 **Whoosha** is a web application that helps elementary-aged children (ages 5–12) regulate their nervous systems through interactive, multisensory breathing games. The name evokes the sound and feeling of a calming breath.
 
-Children trace illustrated shapes on the screen with their finger, following a guided breathing pattern. Visual feedback, audio cues (todo), and gentle on-screen encouragement guide the user. The experience is tactile, calming, and designed to work even when a child is dysregulated or distressed.
+Children trace illustrated shapes on the screen with their finger, following a guided breathing pattern. Visual feedback, adaptive audio, and gentle on-screen encouragement guide the user. The experience is tactile, calming, and designed to work even when a child is dysregulated or distressed.
 
 **The core insight driving the design:** Research shows that combining tactile interaction, geometric tracing, and paced breathwork is one of the most effective nervous system regulation techniques for children. The app makes this accessible and engaging without requiring adult instruction during use.
 
@@ -88,12 +88,13 @@ Every screen must answer the question **"what do I do next?"** within two second
 |---------|------|-------|
 | **Supabase Auth** | Authentication | Email/password + Google OAuth. Local dev uses Supabase local or cloud free tier |
 | **Supabase DB** | PostgreSQL database | Parent profiles, child profiles (first name only), session history |
-| **Stripe (Test Mode)** | Simulated payments | Use test card 4242 4242 4242 4242. No real money. Simulate free + paid tier access |
+
+Tier access for MVP is a client-side check against `profiles.tier` (see Section 11). No payment processor is wired in the MVP.
 
 ### Pre-Launch (Do Not Build Yet — but write forward-compatible code)
 - Vercel (hosting, replaces local dev server)
 - Cloudflare (domain + DNS + WAF)
-- Stripe Live Mode (real payments)
+- Stripe (payments — both test and live mode deferred to pre-launch)
 - Resend (transactional email)
 - Staging environment
 - PostHog (analytics)
@@ -383,7 +384,7 @@ The child places their finger on the amber circle and begins dragging to trigger
   - Triggers only once per qualifying lap, with a minimum 30-second cooldown between triggers
   - Lateral drift is ignored — this is a path-distance check only
 
-- **No completion state.** The game runs indefinitely. The child exits via the exit button when ready.
+- **No win/lose state.** The game loop runs indefinitely — there is no scoring, failure, or forced end. The child exits via the exit button when ready; on exit, a gentle session-end card summarizes the session before returning home.
 
 - **Session save:** When the child taps the exit button, write to Supabase `sessions` table: `child_id`, `game_slug: 'square-breathing'`, `duration_seconds`, `completed: true`.
 
@@ -567,84 +568,29 @@ The auto-playing Square Breathing demo on the landing page is a looping React an
 
 ---
 
-## 9. Project Folder Structure
+## 9. Folder Conventions
 
-```
-whoosha/
-├── .env                          # Never commit this
-├── .env.example                  # Commit this — shows required variables without values
-├── .gitignore
-├── index.html
-├── package.json
-├── vite.config.js
-├── tailwind.config.js
-├── BRIEFING.md                   # This file — product spec, design system, voice (WHAT and WHY)
-├── CLAUDE.md                     # Operating instructions Claude reads at session start
-├── POLISH-STRATEGY.md            # Visual technique, iOS perf budget, layering rules (HOW)
-├── design-assets/                # Color palette references, mockups, visual reference imagery
-├── public/
-│   ├── favicon.ico
-│   ├── og-image.png              # Social sharing image placeholder
-│   ├── assets/                   # Static binary assets used by games
-│   │   ├── dragon-spike.riv      # Rive animation for the Dragon Breath spike
-│   │   ├── fingerprint.png       # Pre-touch fingerprint hint glyph
-│   │   └── fingerprintDark.png   # Dark variant of the fingerprint glyph
-│   └── textures/                 # Static SVG textures baked into game canvases
-│       ├── track-dirt.svg        # Dirt-path texture stroked on the racetrack
-│       └── meadow-ground.svg     # Meadow ground texture (grass clumps, leaf specks)
-└── src/
-    ├── main.jsx                  # App entry point
-    ├── App.jsx                   # Router setup + auth/onboarding gating
-    ├── index.css                 # Tailwind base + global styles
-    ├── lib/
-    │   ├── supabaseClient.js     # Supabase initialization
-    │   └── stripe.js             # Stripe initialization (test mode)
-    ├── store/
-    │   └── useStore.js           # Zustand store — auth, active child, game state
-    ├── hooks/
-    │   ├── useAuth.js            # Auth state hook — keeps store in sync with Supabase
-    │   └── useSession.js         # Game session tracking hook
-    ├── components/
-    │   ├── auth/
-    │   │   └── AuthForm.jsx       # Shared auth card used by LoginPage and SignupPage
-    │   ├── layout/
-    │   │   ├── Navbar.jsx        # Landing page nav (logged out)
-    │   │   ├── AppNav.jsx        # App nav (logged in, minimal)
-    │   │   └── Footer.jsx
-    │   ├── ui/
-    │   │   ├── Button.jsx        # Reusable button component
-    │   │   ├── Card.jsx          # Reusable card component
-    │   │   ├── LoadingSpinner.jsx
-    │   │   └── transitions/
-    │   │       ├── GameIntro.jsx             # Shared intro wrapper — accepts introVariant prop, calls onComplete
-    │   │       ├── ZoomOverlay.jsx           # Home-card → game route tile-zoom transition
-    │   │       └── variants/
-    │   │           └── FadeSettleIntro.jsx   # 'fadeSettle' variant — color fade + blur resolve + scale settle
-    │   └── games/
-    │       ├── GameCard.jsx       # Shared card used for game tiles on /home
-    │       ├── square/
-    │       │   ├── SquareGame.jsx         # Phase manager — 'intro' | 'game', stroke state, session timing
-    │       │   ├── SquareCanvas.jsx       # Everything canvas — geometry, drawing, input, lap logic
-    │       │   ├── StrokeSelector.jsx     # Top-right stroke style picker UI
-    │       │   └── strokes/
-    │       │       ├── stampStroke.js     # 'Classic' stroke (default): radial-gradient stamps along centerline
-    │       │       ├── layeredWash.js     # 'Watercolor' stroke: multi-layer wash with organic depth
-    │       │       └── taperedStroke.js   # Prior default — retained for reference, pending retirement
-    │       └── dragon/
-    │           └── DragonGame.jsx         # Rive-based Dragon Breath spike
-    └── pages/
-        ├── LandingPage.jsx
-        ├── DemoPage.jsx          # Public interactive preview of Square Breathing
-        ├── LoginPage.jsx
-        ├── SignupPage.jsx
-        ├── OnboardingPage.jsx     # Child name capture, first login only
-        ├── HomePage.jsx           # Game selection
-        ├── DashboardPage.jsx      # Stub
-        ├── AccountPage.jsx        # Stub
-        └── games/
-            ├── SquarePage.jsx     # Square Breathing page wrapper
-            └── DragonPage.jsx     # Dragon Breath page wrapper (Rive spike)
-```
+This section describes *where things go and why* — the conventions a new file must follow. It is not a file inventory; for the current file list, read the tree directly (`ls`, or your editor). Keeping this as conventions rather than a mirror is deliberate: a mirror drifts every commit, conventions don't.
+
+**Repo root** holds the three living docs — `BRIEFING.md` (product/design intent, WHAT + WHY), `CLAUDE.md` (session operating instructions), `POLISH-STRATEGY.md` (visual technique + iOS perf, HOW) — plus standard Vite config (`index.html`, `package.json`, `vite.config.js`, `tailwind.config.js`), `design-assets/` for visual reference imagery, and `docs/future/` for parked specs that shouldn't add reading weight to every session. Never commit `.env`; commit `.env.example`.
+
+**`public/`** is static assets served as-is: `assets/` for binary game assets (Rive files, hint glyphs), `sounds/` for sampled atmospheric beds (see `POLISH-STRATEGY.md` for the samples-vs-synthesis rule), `textures/` for static SVGs that get baked into game canvases at resize.
+
+**`src/` layering** — keep responsibilities in their layer; don't reach across:
+- `lib/` — third-party client setup (Supabase, etc.). `store/` — the single Zustand store. `data/` — static content/config (e.g. the carousel roster). `hooks/` — reusable stateful logic; every data fetch goes through a hook, never directly in a page.
+- `sound/` — the adaptive audio system: one `SoundDirector` owning the AudioContext + bus spine, plus per-element synth modules. Game canvases feed it per-frame state via a hook; canvases never touch the AudioContext directly.
+- `pages/` — one component per route, thin. A page under `pages/games/` is just a wrapper that mounts the corresponding game component; all game logic lives in the component, not the page.
+- `components/` — grouped by role: `auth/`, `layout/`, `ui/` (generic reusable primitives), and `games/`.
+
+**Two transition folders, deliberately distinct:** `components/ui/transitions/` holds *intro / threshold* transitions (the pre-game reveal, §6.0). `components/transitions/` holds *route-launch* transitions (home-card → game). Don't merge them; they run at different moments and have different owners.
+
+**The per-game folder pattern** (`components/games/<name>/`) is the most important convention — every new game follows it:
+- `<Name>Game.jsx` — React orchestration: phase/state, stroke/mode selection, session timing, exit. Owns everything *outside* the canvas.
+- `<Name>Canvas.jsx` — all canvas work: geometry, the `requestAnimationFrame` loop, pointer input, paint, lap/segment detection. Owns everything a canvas context or geometry touches. (This ownership split is the hard rule in §6.4 — honor it in every game.)
+- `<Name>CardPreview.jsx` — the carousel preview render for that game.
+- Game-specific subfolders as needed (e.g. Square's `strokes/` for selectable paint styles).
+
+Anything shared across games lives in `games/_shared/` (cross-game geometry, heat-gauge, synergy logic) or, for the card UI, in the top-level `games/` helpers (`GameCard`, `GameCarousel`, `GameShape`). Rule of thumb: if a second game would need it, it belongs in `_shared/`, not in a game folder.
 
 ---
 
@@ -657,9 +603,6 @@ Create a `.env` file in the project root with these values. Never commit `.env` 
 VITE_SUPABASE_URL=your_supabase_project_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 
-# Stripe (Test Mode only for MVP)
-VITE_STRIPE_PUBLISHABLE_KEY=pk_test_your_key_here
-
 # Sentry
 VITE_SENTRY_DSN=your_sentry_dsn
 ```
@@ -668,7 +611,7 @@ VITE_SENTRY_DSN=your_sentry_dsn
 
 ## 11. Tier Definitions (Free vs Paid)
 
-Used by Stripe test mode access checks and the pricing section on the landing page.
+Defines the client-side tier gating (reads `profiles.tier`) and the pricing section on the landing page. Payment processing is deferred to pre-launch.
 
 | Feature | Free Tier | Paid Tier |
 |---------|-----------|-----------|
@@ -743,14 +686,14 @@ All text in the app should feel soft. Use `font-weight: 600` (semibold) rather t
 - [ ] Greeting with child's first name on home screen
 - [ ] Parent dashboard stub page
 - [ ] Account settings stub page
-- [ ] Stripe test mode integration (simulated free vs paid tier access check)
+- [ ] Client-side free/paid tier gating from `profiles.tier` (no payment processor)
 - [ ] Zustand store for auth state and active child
 - [ ] Sentry error monitoring initialized
 - [ ] GitHub repository with clean commit history
 - [ ] `.env` configuration for all secrets
 
 ### Explicitly Out of Scope for MVP
-- Real payments (Stripe test mode only)
+- Payments (Stripe / any processor) — deferred to pre-launch
 - Email verification (can be disabled in Supabase for local testing)
 - Transactional email (Resend not needed yet)
 - Progress charts or detailed analytics on dashboard
@@ -795,100 +738,7 @@ Use this tone in all in-app copy, labels, feedback messages, and marketing text.
 ---
 
 <!--
-## 17. Nature Trace Game — Full Spec
-⚠️ THIS SECTION IS COMMENTED OUT — FOR FUTURE REFERENCE ONLY.
-Claude Code should not read or build anything in this section.
-Uncomment when ready to build the Nature Trace game.
--->
-
-<!--
-
-**Route:** `/games/nature-trace`
-**Game slug:** `nature-trace`
-**Unlock tier:** Paid
-**Estimated play time:** ~5 minutes per picture
-**Audience:** Child (immersive, same rules as Square Breathing game page)
-
-### 16.1 Concept
-
-The child traces a sequence of line segments that together form a nature scene. At any given moment they are zoomed in close enough to see only the active segment they are tracing, set against a soft nature-textured background. They cannot see the full picture. When all segments are complete, the view slowly zooms out to reveal the whole image — which progressively fills with color as it appears.
-
-The reveal is the emotional payoff. The tracing is the regulation mechanic.
-
-### 16.2 The Picture — A Whale
-
-The first Nature Trace picture is a **humpback whale** — a large, smooth, rounded creature made entirely of flowing curved lines. A whale is ideal for this game because:
-- Its outline is made of long, graceful curves with no sharp angles — natural for slow tracing
-- It is universally recognizable even from a partial reveal
-- It carries an inherently calming, oceanic association that reinforces the breathing mechanic
-- It fills a roughly square canvas naturally
-
-The whale is defined as an ordered array of segments. Each segment has a start point, end point (or control points for curves), a breathing instruction, and a pacing duration. The full image is drawn on a virtual canvas of 1000×1000 units — all coordinates are in this space and scaled to the device at render time.
-
-### 16.3 Segment Data Structure
-
-Each segment in the picture is defined as a JavaScript object:
-
-```js
-{
-  id: 1,
-  type: 'quadratic',        // 'line' | 'quadratic' | 'cubic'
-  from: [x, y],             // start point in 1000x1000 space
-  control1: [x, y],         // for quadratic curves
-  control2: [x, y],         // for cubic curves only
-  to: [x, y],               // end point
-  breath: 'in',             // 'in' | 'hold' | 'out' | 'hold'
-  duration: 4,              // seconds for pacing circle to travel this segment
-  strokeColor: '#5B9FAA',   // color of the line when traced
-  fillRegion: null,         // null or region id — used for color fill on reveal
-}
-```
-
-The full segment array for the whale picture is defined in `src/games/nature-trace/whaleSegments.js`. This file is the content layer — changing it produces a different picture without touching any game logic.
-
-### 16.4 Breathing Pattern
-
-Uses the same four-phase box breathing pattern as Square Breathing, assigned per segment. Segments cycle through IN → HOLD → OUT → HOLD in order. Longer segments use up to 6 seconds; shorter segments use 4 seconds.
-
-### 16.5 Camera and Zoom System
-
-**During tracing (zoomed in):** viewport frames the active segment with generous padding (~2× segment length). Camera applied via canvas transform matrix.
-
-**Between segments:** 2.5 second animated transition — camera pans and rescales from current viewport to next segment's viewport. Soft breathing cue appears during transition. Next start circle fades in when camera settles.
-
-**On reveal:** camera animates over 4 seconds back to the full 1000×1000 canvas. Slow ease-out curve. Triggers color fill animation on completion.
-
-### 16.6 Zoomed-In View — What the Child Sees
-
-Background: soft nature texture (static, does not move with camera). Completed segments visible in stroke colors. Active segment slightly thicker in soft teal. Pacing circle, trace circle, fading trail. Breathing instruction text at bottom. Subtle dot progress indicator at top. Exit button always visible.
-
-### 16.7 The Reveal — Color Fill Animation
-
-Over ~6 seconds, color washes into fill regions progressively — largest areas first, like watercolor soaking into paper. Fill colors: whale body in deep teal-blue, belly in warm cream, fins in darker teal, eye in deep forest. Low-opacity layered passes simulate watercolor, not flat fill. Completion UI fades in after 1.5 second pause: "You made this 🐋" with "Draw again" and "All done" buttons.
-
-### 16.8 Segment Transition
-
-When pacing circle reaches segment end: 2.5 second gap, completed segment glows briefly, breathing cue appears, next start circle fades in. Child's pace does not gate progression — pacing circle alone determines timing.
-
-### 16.9 Implementation Notes
-
-Single canvas element. Two contexts if needed (background picture layer + animation layer). All coordinates in 1000×1000 space, converted via `scaleFactor = Math.min(screenWidth, screenHeight) / 1000`. Bezier curve projection via lookup table (~100 points per segment). Camera state as `{ x, y, scale }`, lerped between states using `performance.now()`. Session save on completion with `game_slug: 'nature-trace'`.
-
-### 16.10 Claude Code Prompt — Building the Nature Trace Game
-
-```
-Build the Nature Trace game at /games/nature-trace. Read Section 17 of BRIEFING.md
-in full before writing any code — there are multiple subsections that all matter.
-
-Start with:
-1. The whale segment data file at src/games/nature-trace/whaleSegments.js
-2. The camera system — viewport calculation, smooth transitions, final zoom-out reveal
-3. The canvas rendering — background, completed segments, active segment, pacing circle, trace circle, trail
-4. The color fill reveal animation — watercolor-style progressive fill by region
-5. The completion UI per Section 17.7
-6. Session save to Supabase on completion
-
-Reference Section 6.4 for the canvas architecture and pacing circle mechanic.
-```
-
+Parked future games (Nature Trace, etc.) live under docs/future/ — kept out of this
+file so they don't add reading weight to every session. When one is greenlit, move its
+intent back here as a new §6 game screen. See docs/future/nature-trace.md.
 -->
