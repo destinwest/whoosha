@@ -246,9 +246,9 @@ function buildTrackGradient(ctx, { left, top, sqW, lw }) {
   // Position stops so the transition spans from straight inner edge (t=0)
   // through straight outer edge (~t=0.46) to corner outer edges (~t=0.88).
   const grad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
-  grad.addColorStop(0,   '#FAF2E0')   // inner edge of straights — lightest honey-cream
-  grad.addColorStop(0.4, '#F2EAD0')   // straight outer edge — base warm cream
-  grad.addColorStop(1,   '#E6DBBF')   // corner outer edges — darkest sand-cream
+  grad.addColorStop(0,   '#927567')   // inner edge of straights — lightest warm umber
+  grad.addColorStop(0.4, '#8A6D57')   // straight outer edge — base warm umber
+  grad.addColorStop(1,   '#7E5E46')   // corner outer edges — darkest umber
   return grad
 }
 
@@ -263,14 +263,14 @@ function drawTrackShadow(ctx, { left, top, sqW, cr, lw }) {
   ctx.restore()
 }
 
-// Pass B — gradient body: main cream surface, lit from above.
-// Falls back to plain cream if the gradient hasn't been built yet (pre-resize).
+// Pass B — gradient body: main track surface, lit from above.
+// Falls back to plain base tone if the gradient hasn't been built yet (pre-resize).
 function drawTrackBody(ctx, { left, top, sqW, cr, lw }, trackGradient) {
   ctx.save()
   ctx.beginPath()
   ctx.roundRect(left, top, sqW, sqW, cr)
   ctx.lineWidth   = lw
-  ctx.strokeStyle = trackGradient ?? '#F5EFE6'
+  ctx.strokeStyle = trackGradient ?? '#8A6D57'
   ctx.stroke()
   ctx.restore()
 }
