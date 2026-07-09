@@ -14,7 +14,10 @@ import { roundedPolyPath } from '../_shared/roundedPolyPath'
 // shortened vertical "hold" sides — so the card reads as the real hexagon
 // track, just softened.
 
-const CY_RATIO = 0.50   // track vertical center — centered, like the game (cy = h/2)
+const CY_RATIO = 0.43   // track vertical center — shifted up from dead-center (0.50),
+                        // same as SquareCardPreview: centers the track between the
+                        // card's top edge and the title (title center ≈ 0.86 of card
+                        // height in GameCarousel's CarouselCard, so (0 + 0.86)/2 ≈ 0.43).
 
 function drawScene(ctx, w, h) {
   // Soft sandstone background — the card's warm gradient, none of the game's
@@ -78,7 +81,7 @@ function drawScene(ctx, w, h) {
   const dotR = lw * 0.62
   ctx.beginPath()
   ctx.arc(dotX, dotY, dotR, 0, Math.PI * 2)
-  ctx.fillStyle = '#F7EFDD'
+  ctx.fillStyle = '#FFFFFF'
   ctx.fill()
 }
 
