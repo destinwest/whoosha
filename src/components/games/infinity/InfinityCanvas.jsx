@@ -85,17 +85,23 @@ const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 // apart), and fades to nothing. The finger keeps shedding new small ones near it,
 // so a diverging V of feathered wavelets is left behind in its path. Calm and
 // low-contrast: no rings, no glow, source-over, very low alpha.
+// A wavelet is born small + more opaque + already out to the side/front, then
+// grows, drifts outward, and fades to the SAME final state (offset/size/gone)
+// as before. Dab radius has its OWN gentle linear ramp (decoupled from the
+// crescent half-length) so it never compounds down to a sub-pixel dot at birth.
 const WAKELET_LIFE_MS     = 1600   // each wavelet: grow → spread → dissipate over this long
 const SHED_SPACING_LW     = 0.20   // shed a wavelet PAIR every this much finger travel (density)
 const WAKELET_MAX         = 110    // particle-pool cap
-const WAKELET_INIT_OFF_LW = 0.10   // wavelet's starting offset from the path (arms begin near the finger)
-const WAKELET_SPREAD_LW   = 0.52   // how far a wavelet drifts outward over its life (the V spreading)
-const WAKELET_INIT_LEN_LW = 0.10   // starting crescent half-length
-const WAKELET_GROW_LW     = 0.24   // crescent growth over its life
-const WAKELET_DAB_R_LW    = 0.11   // dab radius within a crescent (finer = more wave-like)
+const WAKELET_INIT_OFF_LW = 0.24   // starting side offset (out to the side, not under the touch)
+const WAKELET_SPREAD_LW   = 0.38   // extra outward drift over life  → final offset = INIT_OFF + SPREAD (0.62)
+const WAKELET_FRONT_OFF_LW= 0.18   // born this far ahead of the shed point (toward the front of the touch)
+const WAKELET_INIT_LEN_LW = 0.05   // starting crescent half-length (≈ half of before)
+const WAKELET_GROW_LW     = 0.29   // growth over life           → final half-length = INIT_LEN + GROW (0.34)
+const WAKELET_DAB_INIT_LW = 0.055  // starting dab radius (half of final — stays visible, no sub-pixel dots)
+const WAKELET_DAB_GROW_LW = 0.055  // dab-radius growth over life → final = INIT + GROW (0.11, matches old fixed radius)
 const WAKELET_SAMPLES     = 6      // dabs per crescent
 const WAKELET_BOW         = 0.55   // crescent bow toward the direction of travel (× half-length)
-const WAKE_ALPHA          = 0.12   // peak per-dab alpha — intentionally faint
+const WAKE_ALPHA          = 0.12   // peak per-dab alpha — intentionally faint (unchanged final)
 const WAKE_COLOR          = '205,210,236'  // soft cool moonlight-lavender
 
 const smoothstep  = t => t * t * (3 - 2 * t)
@@ -534,11 +540,12 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
         if (moved >= shedStep) {
           const ux = dx / moved, uy = dy / moved   // direction of travel
           const nx = -uy, ny = ux                  // perpendicular
+          const front = lw * WAKELET_FRONT_OFF_LW  // born ahead of the shed point (toward the front)
           const num = Math.min(8, Math.floor(moved / shedStep))
           const pool = wakeletsRef.current
           for (let s = 1; s <= num; s++) {
-            const bx = last.x + dx * ((s * shedStep) / moved)
-            const by = last.y + dy * ((s * shedStep) / moved)
+            const bx = last.x + dx * ((s * shedStep) / moved) + ux * front
+            const by = last.y + dy * ((s * shedStep) / moved) + uy * front
             for (const side of [1, -1]) {
               const w = pool.length < WAKELET_MAX
                 ? (pool.push({}), pool[pool.length - 1])
@@ -556,19 +563,22 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
       const dab = dabSpriteRef.current
       const pool = wakeletsRef.current
       if (dab && pool.length) {
-        const dabR = lw * WAKELET_DAB_R_LW
-        const S    = WAKELET_SAMPLES
+        const S = WAKELET_SAMPLES
         ctx.save()
         for (let i = pool.length - 1; i >= 0; i--) {
           const w = pool[i]
           w.age += dt
           if (w.age >= w.maxLife) { pool.splice(i, 1); continue }
           const t   = w.age / w.maxLife
-          const env = Math.min(1, t / 0.12) * (1 - t)   // quick fade-in, then fade to nothing
+          // Born opaque (very short fade-in avoids a hard pop), then fades to
+          // nothing — matches the old curve from t≈0.12 on, so the FINAL state is
+          // unchanged while young wavelets are ~2× more opaque than before.
+          const env = Math.min(1, t / 0.04) * (1 - t)
           const a   = WAKE_ALPHA * env
           if (a < 0.004) continue
           const off  = lw * (WAKELET_INIT_OFF_LW + WAKELET_SPREAD_LW * t)  // drifts outward
           const half = lw * (WAKELET_INIT_LEN_LW + WAKELET_GROW_LW * t)    // grows
+          const dabR = lw * (WAKELET_DAB_INIT_LW + WAKELET_DAB_GROW_LW * t)  // own gentle ramp — never sub-pixel
           const bow  = WAKELET_BOW * half
           const cxp  = w.x + w.nx * w.side * off
           const cyp  = w.y + w.ny * w.side * off
