@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 // A soft, muted render of the Square game for the home carousel card — a calm,
 // low-stimulation "resting" state that the zoom-blur transition later blooms
 // into the vivid game. Deliberately NOT a faithful game frame: a gentle sage
-// background (no light shafts / sun pools / dapples), a flat cream track (no
+// background (no light shafts / sun pools / dapples), a flat track (no
 // shadow or inner-wall shading), and a quiet pale pacing dot. No breathing
 // labels.
 //
@@ -38,11 +38,12 @@ function drawScene(ctx, w, h) {
   const left    = cx - half
   const top     = cy - half
 
-  // Flat cream track — a single soft band (no shadow / highlight / inner wall).
+  // Flat track — a single soft band (no shadow / highlight / inner wall),
+  // matching the game's base track color (SquareCanvas buildTrackGradient).
   ctx.beginPath()
   ctx.roundRect(left, top, sq, sq, cornerR)
   ctx.lineWidth   = lw
-  ctx.strokeStyle = '#ECE6D6'
+  ctx.strokeStyle = '#8A6D57'
   ctx.stroke()
 
   // Quiet pacing dot at the start of the bottom side — soft, no glow.
