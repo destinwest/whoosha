@@ -104,8 +104,8 @@ const WAKELET_SPREAD_LW   = 0.38   // extra outward drift over life  → final o
 const WAKELET_FRONT_OFF_LW= 0.18   // born this far ahead of the shed point (toward the front of the touch)
 const WAKELET_INIT_LEN_LW = 0.05   // starting crescent half-length (≈ half of before)
 const WAKELET_GROW_LW     = 0.29   // growth over life             → final half-length = INIT_LEN + GROW (0.34)
-const WAKELET_THICK_INIT_LW = 0.055  // starting peak (middle) half-thickness — stays visible, no sub-pixel dots
-const WAKELET_THICK_GROW_LW = 0.055  // peak-thickness growth over life → final = INIT + GROW (0.11, matches v10)
+const WAKELET_THICK_INIT_LW = 0.025  // starting peak (middle) half-thickness — stays visible, no sub-pixel dots
+const WAKELET_THICK_GROW_LW = 0.025  // peak-thickness growth over life → final = INIT + GROW (0.05 — thin arc, not a blob)
 const WAKELET_SAMPLES     = 9      // ribbon cross-section samples (more = smoother taper curve)
 const WAKELET_BOW         = 0.55   // crescent bow toward the direction of travel (× half-length)
 const WAKE_ALPHA          = 0.12   // peak fill alpha — intentionally faint (unchanged final)
@@ -132,11 +132,14 @@ const WAKELET_WOBBLE_AMT      = 0.10   // per-sample contour wobble (fraction of
 // wobble is a free array read in the draw loop instead of a runtime noise call.
 const WAKE_WOBBLE_LUT = Array.from({ length: 64 }, () => Math.random() * 2 - 1)
 // Sample positions across the ribbon (u ∈ [-1,1]) and their taper profile —
-// both fixed by WAKELET_SAMPLES, so bake them once instead of recomputing
-// per particle per frame. Taper is 0 at both ends (pointed tips), 1 at the
-// middle (peak thickness) — a parabola, matching the crescent's own bow shape.
+// both fixed by WAKELET_SAMPLES, so bake them once instead of recomputing per
+// particle per frame. Taper is 0 at both ends (pointed tips), 1 at the middle
+// (peak thickness). Raised to a power > 1 (sharper than a plain parabola) so
+// it stays slender along most of its length and only pinches wide right at
+// the center — reads as a curved ARC, not a rounded half-circle blob.
+const WAKELET_TAPER_POWER = 1.8
 const WAKELET_U = Array.from({ length: WAKELET_SAMPLES }, (_, k) => (k / (WAKELET_SAMPLES - 1)) * 2 - 1)
-const WAKELET_TAPER = WAKELET_U.map(u => 1 - u * u)
+const WAKELET_TAPER = WAKELET_U.map(u => Math.pow(Math.max(0, 1 - u * u), WAKELET_TAPER_POWER))
 
 const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
