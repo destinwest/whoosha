@@ -4,11 +4,12 @@ import { useEffect, useRef } from 'react'
 // The Infinity counterpart to Square/HexagonCardPreview: a soft, muted render of
 // the Infinity game for the home carousel card — a calm "resting" state that the
 // launch cross-dissolve blooms into the vivid game. Deliberately NOT a faithful
-// game frame: a quiet night gradient with a soft central glow (no stars, no
-// Milky Way band / nebulae) and a "Liquid Glass" translucent figure-8 track —
-// a uniform tinted glass body, background showing through, plus a subtle
-// specular highlight near the top-lobe crown — with one quiet pale pacing
-// dot. No breathing labels.
+// game frame: a quiet night gradient with a soft central glow and a vignette
+// darkening the edges (mirroring the game's own vignette overlay — see
+// InfinityGame.jsx), no stars, no Milky Way band / nebulae, and a "Liquid
+// Glass" translucent figure-8 track — a uniform tinted glass body,
+// background showing through — with one quiet pale pacing dot. No breathing
+// labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — the same vertical lemniscate + track-width
@@ -89,23 +90,6 @@ function drawScene(ctx, w, h) {
   ctx.drawImage(maskCanvas, 0, 0)
   ctx.restore()
 
-  // Subtle specular highlight near the crown of the top lobe — echoes the
-  // bright rim catching the light on the reference Liquid Glass icons. A
-  // short, thin, soft-capped arc; this span doesn't cross itself, so it can
-  // be stroked directly (no mask needed).
-  const HI_FROM = 0.15, HI_TO = 0.35, HI_N = 40
-  ctx.beginPath()
-  let [hx0, hy0] = pt(HI_FROM)
-  ctx.moveTo(hx0, hy0)
-  for (let i = 1; i <= HI_N; i++) {
-    const [hx, hy] = pt(HI_FROM + (HI_TO - HI_FROM) * (i / HI_N))
-    ctx.lineTo(hx, hy)
-  }
-  ctx.lineWidth   = lw * 0.2
-  ctx.lineCap     = 'round'
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)'
-  ctx.stroke()
-
   // Quiet pacing dot at the top apex of the inhale lobe (s = 0.25) — a clean,
   // uncluttered spot away from the center crossover.
   const [dotX, dotY] = pt(0.25)
@@ -113,6 +97,17 @@ function drawScene(ctx, w, h) {
   ctx.arc(dotX, dotY, lw * 0.62, 0, Math.PI * 2)
   ctx.fillStyle = '#EDE7FA'
   ctx.fill()
+
+  // Vignette — darker at the edges, lighter in the middle. Mirrors the
+  // game's own vignette overlay (InfinityGame.jsx: 'radial-gradient(ellipse
+  // at 50% 50%, transparent 40%, rgba(0,0,0,0.45) 100%)'), drawn last so it
+  // sits over everything, same as the game's DOM stacking (a CSS overlay
+  // above the game canvas).
+  const vignette = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.hypot(w / 2, h / 2))
+  vignette.addColorStop(0.4, 'rgba(0,0,0,0)')
+  vignette.addColorStop(1,   'rgba(0,0,0,0.45)')
+  ctx.fillStyle = vignette
+  ctx.fillRect(0, 0, w, h)
 }
 
 export default function InfinityCardPreview({ className = '' }) {
