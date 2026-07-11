@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import StrokeSelector from '../square/StrokeSelector'   // shared until refactor (game #3)
 import HexagonCanvas  from './HexagonCanvas'
+import CompletionScreen from '../square/CompletionScreen'
 import MuteButton     from '../../ui/MuteButton'
 import { useHexBreath } from '../../../hooks/useHexBreath'
 
@@ -8,6 +9,14 @@ import { useHexBreath } from '../../../hooks/useHexBreath'
 // share the StrokeSelector component, but each toggles its visibility
 // independently. Flip together when restoring the feature.
 const STROKE_SELECTOR_ENABLED = false
+
+// Game canvas opacity once completion phase begins — the world recedes
+// behind the completion card without vanishing entirely (matches Infinity).
+const COMPLETION_CANVAS_OPACITY = 0.25
+
+// Audio fade-out duration when the game ends (seconds) — matches Square's
+// COMPLETION_AUDIO_FADE_S so the breath tone settles at the same pace.
+const COMPLETION_AUDIO_FADE_S = 2.0
 
 // ── buildWaveBg ───────────────────────────────────────────────────────────────
 // Bakes the entire static background into a single offscreen canvas at
@@ -158,7 +167,8 @@ export default function HexagonGame({ onExit }) {
   // Mount straight into play — no in-game intro. The card→game launch is owned
   // by the FadeLaunch cross-dissolve (same as Square); a direct URL load drops
   // the player into the ready world immediately.
-  const [phase]                     = useState('game')    // 'game'
+  const [phase, setPhase]           = useState('game')    // 'game' | 'completion'
+  const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
   const [labelGeo, setLabelGeo]     = useState(null)      // { labelMids, sq }
 
@@ -205,12 +215,16 @@ export default function HexagonGame({ onExit }) {
     hexagonCanvasRef.current?.reset()
   }
 
-  // ── Exit ───────────────────────────────────────────────────────────────────
+  // ── Exit → completion → dismiss ─────────────────────────────────────────────
   function handleExit() {
+    if (phase === 'completion') { handleCompletionDismiss(); return }
     document.documentElement.style.setProperty('--game-saturation', '1')
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
-    onExit(dur)
+    setCompletionSeconds(dur)
+    breathRef.current?.fadeOut(COMPLETION_AUDIO_FADE_S)
+    setPhase('completion')
   }
+  function handleCompletionDismiss() { onExit(completionSeconds) }
 
   return (
     <div
@@ -233,7 +247,9 @@ export default function HexagonGame({ onExit }) {
       {/* mute toggle — top-right, mirrors exit-button treatment (same as Square) */}
       <MuteButton className="absolute top-4 right-4 z-20" />
 
-      {/* game canvas — always mounted; blur/scale driven by CSS custom properties */}
+      {/* game canvas — always mounted; blur/scale driven by CSS custom properties.
+          Dims (doesn't vanish) once completion phase begins, same treatment as
+          Infinity's world wrapper. */}
       <div style={{
         position: 'absolute',
         inset: 0,
@@ -241,6 +257,8 @@ export default function HexagonGame({ onExit }) {
         transform: 'translateY(var(--intro-y, 0px)) scale(var(--intro-scale, 1))',
         transformOrigin: 'center center',
         willChange: 'transform, filter',
+        opacity: phase === 'completion' ? COMPLETION_CANVAS_OPACITY : 1,
+        transition: phase === 'completion' ? 'opacity 1800ms ease' : undefined,
       }}>
         {/* Saturation wrapper — bg canvas and game canvas share one filter so
             the heat gauge desaturates the entire world in lockstep. */}
@@ -321,6 +339,16 @@ export default function HexagonGame({ onExit }) {
         <StrokeSelector
           activeStroke={activeStroke}
           onSelect={handleStrokeSelect}
+        />
+      )}
+
+      {/* completion overlay — no time shown, per user-preference-testing variant. */}
+      {phase === 'completion' && (
+        <CompletionScreen
+          durationSeconds={completionSeconds}
+          onDismiss={handleCompletionDismiss}
+          showTime={false}
+          message="good job breathing"
         />
       )}
     </div>

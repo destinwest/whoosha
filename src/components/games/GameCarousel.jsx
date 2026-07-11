@@ -6,6 +6,8 @@ import GameShape from './GameShape'
 import SquareCardPreview from './square/SquareCardPreview'
 import HexagonCardPreview from './hexagon/HexagonCardPreview'
 import InfinityCardPreview from './infinity/InfinityCardPreview'
+import TriangleCardPreview from './triangle/TriangleCardPreview'
+import StarCardPreview from './star/StarCardPreview'
 
 // ── Tunable layout constants ──────────────────────────────────────────────────
 const CARD_W       = 200    // px
@@ -91,11 +93,17 @@ function CarouselCard({ game, distance }) {
   const isSquare   = game.gameKey === 'square'
   const isHexagon  = game.gameKey === 'hexagon'
   const isInfinity = game.gameKey === 'infinity'
-  const hasPreview = isSquare || isHexagon || isInfinity   // full-bleed track render + bottom title
+  const isTriangle = game.gameKey === 'triangle'
+  const isStar     = game.gameKey === 'star'
+  const hasPreview = isSquare || isHexagon || isInfinity || isTriangle || isStar   // full-bleed track render + bottom title
   // Title colour matched to each preview's palette (light on the dark square/
   // infinity cards — square's matches its pacing dot — dark on the light
-  // hexagon card).
-  const titleColor = isSquare ? '#F4F0E6' : isHexagon ? '#5C2E1C' : '#E8E3F8'
+  // hexagon / triangle / star cards).
+  const titleColor = isSquare ? '#F4F0E6'
+    : isHexagon ? '#5C2E1C'
+    : isTriangle ? '#33465A'
+    : isStar ? '#5E5A86'
+    : '#E8E3F8'
   return (
     <div data-card-index="" style={cardStyle(distance)}>
       {game.locked && <LockBadge />}
@@ -110,7 +118,11 @@ function CarouselCard({ game, distance }) {
               ? '#D99E6A'
               : isInfinity
                 ? '#1B1F4D'
-                : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
+                : isTriangle
+                  ? '#A6C7D8'
+                  : isStar
+                    ? '#ECD5E4'
+                    : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
           boxShadow: '0 12px 32px rgba(62, 94, 82, 0.22), 0 2px 6px rgba(62, 94, 82, 0.12)',
           filter: game.placeholder
             ? 'blur(1.5px) saturate(0.4)'
@@ -128,7 +140,11 @@ function CarouselCard({ game, distance }) {
               ? <SquareCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
               : isHexagon
                 ? <HexagonCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
-                : <InfinityCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />}
+                : isInfinity
+                  ? <InfinityCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
+                  : isTriangle
+                    ? <TriangleCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
+                    : <StarCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />}
             <div
               className="absolute inset-x-0 px-3 text-center pointer-events-none font-display text-[18px] leading-tight font-semibold"
               style={{ top: '86%', transform: 'translateY(-50%)', color: titleColor }}

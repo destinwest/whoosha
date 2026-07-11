@@ -1,18 +1,21 @@
 // ── CompletionScreen ───────────────────────────────────────────────────────
-// In-place completion overlay shown after the user exits the game. Sits
-// above the dimming game canvas, gives a single calm line ("You breathed
-// for mm:ss <emoji>"), and dismisses on either a Done tap or a ~10-second
+// In-place completion overlay shown after the user exits a game. Sits above
+// the dimming game canvas and dismisses on either a Done tap or a ~10-second
 // timer. On dismissal, calls onDismiss which navigates to /home.
 //
 // Designed to feel like the world is settling down around the child, not
 // a hard screen transition. Card uses the same bg-cream visual language
 // as the auth cards so it reads as a "human moment" within the app.
+//
+// Shared across games (Square, Infinity, Hexagon, Triangle, Star) so each
+// can run a different copy variant for user-preference testing, all inside
+// the same visual shell (card, fade timing, Done button, auto-dismiss). Three
+// message shapes, chosen via props:
+//   1. showTime=true,  leadText set    → "{leadText}\n{time}"        (Square/Infinity default)
+//   2. showTime=true,  leadText=''     → "{time}\n{trailText}"       (e.g. Triangle: "of just breathing")
+//   3. showTime=false                  → "{message}"                (e.g. Hexagon/Star: no time shown)
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-
-// Emoji pool — varied between sessions so the completion moment feels
-// organic. All match the nature-bathing theme.
-const EMOJI_POOL = ['🌿', '🌱', '🍃', '🌸', '🌙']
+import { useEffect, useRef, useState } from 'react'
 
 // Auto-dismiss timer. Long enough that a child who wants to sit with the
 // moment can, short enough that an inattentive child isn't left there
@@ -30,11 +33,16 @@ function formatDuration(seconds) {
   return `${mins}:${String(secs).padStart(2, '0')}`
 }
 
-export default function CompletionScreen({ durationSeconds, onDismiss }) {
+export default function CompletionScreen({
+  durationSeconds,
+  onDismiss,
+  showTime = true,
+  leadText = 'You breathed for',
+  trailText = '',
+  message = '',
+}) {
   const [visible, setVisible] = useState(false)
   const dismissedRef = useRef(false)
-  // Pick one emoji per mount — random across sessions, stable within one.
-  const emoji = useMemo(() => EMOJI_POOL[Math.floor(Math.random() * EMOJI_POOL.length)], [])
 
   // Single-fire dismissal: protect against both timer + button firing.
   function dismissOnce() {
@@ -69,9 +77,23 @@ export default function CompletionScreen({ durationSeconds, onDismiss }) {
         }}
       >
         <p className="font-display text-3xl md:text-4xl font-semibold text-text-forest leading-tight">
-          You breathed for
-          <br />
-          <span className="text-primary">{formatted}</span> {emoji}
+          {showTime ? (
+            leadText ? (
+              <>
+                {leadText}
+                <br />
+                <span className="text-primary">{formatted}</span>
+              </>
+            ) : (
+              <>
+                <span className="text-primary">{formatted}</span>
+                <br />
+                {trailText}
+              </>
+            )
+          ) : (
+            message
+          )}
         </p>
 
         <button

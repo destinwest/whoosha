@@ -62,7 +62,7 @@ export default function AccountPage() {
           {/* Placeholder */}
           <div className="bg-white/60 rounded-3xl p-6 shadow-sm">
             <p className="font-body text-sm text-text-sage">
-              Account settings coming soon 🌱
+              Account settings coming soon
             </p>
           </div>
 

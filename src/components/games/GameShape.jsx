@@ -34,16 +34,21 @@ export default function GameShape({ kind, className = '' }) {
         </svg>
       )
 
-    case 'flower':
+    case 'triangle':
+      // Point-up equilateral triangle with softly rounded corners.
       return (
         <svg viewBox="0 0 100 100" fill="none" aria-hidden="true" className={className}>
-          <g stroke={STROKE} strokeWidth={SW} strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="50" cy="50" r="12" />
-            <ellipse cx="50" cy="22" rx="14" ry="18" />
-            <ellipse cx="78" cy="50" rx="18" ry="14" />
-            <ellipse cx="50" cy="78" rx="14" ry="18" />
-            <ellipse cx="22" cy="50" rx="18" ry="14" />
-          </g>
+          <path d="M50 16 L84 78 L16 78 Z"
+            stroke={STROKE} strokeWidth={SW} strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+      )
+
+    case 'star':
+      // Five-pointed star outline, one tip oriented up (matches the game).
+      return (
+        <svg viewBox="0 0 100 100" fill="none" aria-hidden="true" className={className}>
+          <path d="M50 12 L59.4 37.1 L86.1 38.3 L65.2 54.9 L72.3 80.7 L50 66 L27.7 80.7 L34.8 54.9 L13.9 38.3 L40.6 37.1 Z"
+            stroke={STROKE} strokeWidth={SW} strokeLinejoin="round" strokeLinecap="round" />
         </svg>
       )
 

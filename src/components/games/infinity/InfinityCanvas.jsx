@@ -100,13 +100,23 @@ const TRACK_SHADOW = 'rgba(40,30,70,0.28)'
 const WAKELET_LIFE_MS     = 1600   // each wavelet: grow → spread → dissipate over this long
 const SHED_SPACING_LW     = 0.4741 // shed a wavelet PAIR every this much finger travel (density) — 0.20/0.75^3, i.e. shed frequency -25% three times
 const WAKELET_MAX         = 110    // particle-pool cap
-const WAKELET_INIT_OFF_LW = 0.48   // starting side offset (2× — placement doubled to match the doubled length)
-const WAKELET_SPREAD_LW   = 0.76   // extra outward drift over life  → final offset = INIT_OFF + SPREAD (1.24, 2×)
+// Arm spacing — INIT_OFF and SPREAD both halved (0.48→0.24, 0.76→0.38) from the
+// prior tuning so the two arms are 50% closer together both at birth and at
+// full spread: off(t) = INIT_OFF + SPREAD·t is linear, so scaling both terms
+// by the same factor scales the whole birth→fade-out trajectory by that same
+// factor at every t, not just the endpoints.
+const WAKELET_INIT_OFF_LW = 0.24   // starting side offset
+const WAKELET_SPREAD_LW   = 0.38   // extra outward drift over life  → final offset = INIT_OFF + SPREAD (0.62)
 const WAKELET_FRONT_OFF_LW= 0.18   // born this far ahead of the shed point (toward the front of the touch)
-const WAKELET_INIT_LEN_LW = 0.20   // starting crescent half-length (2× again — length only, per user's answer)
-const WAKELET_GROW_LW     = 1.16   // growth over life             → final half-length = INIT_LEN + GROW (1.36, 2×)
-const WAKELET_THICK_INIT_LW = 0.0375 // starting peak (middle) half-thickness — 25% thinner than before
-const WAKELET_THICK_GROW_LW = 0.0375 // peak-thickness growth over life → final = INIT + GROW (0.075 — 25% thinner than before)
+// Birth size — INIT_LEN and THICK_INIT each dropped 25% from the prior tuning
+// (a wavelet is born smaller), while GROW/THICK_GROW increased by the same
+// absolute amount so the FINAL size (INIT + GROW) is unchanged — the wavelet
+// still grows to the exact same peak length/thickness it always did, just
+// from a smaller starting point.
+const WAKELET_INIT_LEN_LW = 0.15   // starting crescent half-length (was 0.20 — 25% smaller)
+const WAKELET_GROW_LW     = 1.21   // growth over life             → final half-length = INIT_LEN + GROW (1.36, unchanged)
+const WAKELET_THICK_INIT_LW = 0.028125 // starting peak (middle) half-thickness (was 0.0375 — 25% smaller)
+const WAKELET_THICK_GROW_LW = 0.046875 // peak-thickness growth over life → final = INIT + GROW (0.075, unchanged)
 const WAKELET_SAMPLES     = 9      // ribbon cross-section samples (more = smoother taper curve)
 const WAKELET_BOW         = 0.55   // crescent bow toward the direction of travel (× half-length)
 // The tip axis was pure "outward, perpendicular to travel" (0°/180°). Tilt it

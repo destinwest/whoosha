@@ -10,6 +10,11 @@
 //                       (required on iOS). Idempotent.
 //   update(fraction)  — drive the breath with the pacing fraction [0,6) each
 //                       frame. No-op until the context is running.
+//   fadeOut(seconds)  — linearly ramp the master gain to 0 over `seconds`.
+//                       Same pattern as SoundDirector.fadeOut — cancels any
+//                       scheduled gain automation first so it's safe to call
+//                       mid-ramp. Used on game exit so the breath tone doesn't
+//                       keep playing under the completion popup.
 //
 // Everything is created in a mount effect and fully torn down on unmount.
 
@@ -21,7 +26,7 @@ import { useMutePref }        from './useMutePref'
 const MASTER_GAIN = 0.9
 
 export function useHexBreath() {
-  const ref      = useRef({ unlock() {}, update() {} })
+  const ref      = useRef({ unlock() {}, update() {}, fadeOut() {} })
   const mutedRef = useRef(false)
   const [muted]  = useMutePref()
 
@@ -53,6 +58,12 @@ export function useHexBreath() {
       setMuted(m) {
         master.gain.setTargetAtTime(m ? 0 : MASTER_GAIN, ctx.currentTime, 0.02)
       },
+      fadeOut(seconds = 2.0) {
+        const now = ctx.currentTime
+        master.gain.cancelScheduledValues(now)
+        master.gain.setValueAtTime(master.gain.value, now)
+        master.gain.linearRampToValueAtTime(0, now + Math.max(0.01, seconds))
+      },
     }
 
     return () => {
@@ -60,7 +71,7 @@ export function useHexBreath() {
       try { breath.dispose() }   catch (e) {}
       try { master.disconnect() } catch (e) {}
       try { ctx.close() }        catch (e) {}
-      ref.current = { unlock() {}, update() {} }
+      ref.current = { unlock() {}, update() {}, fadeOut() {} }
     }
   }, [])
 
