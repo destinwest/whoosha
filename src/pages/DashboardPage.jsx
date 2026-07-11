@@ -58,7 +58,7 @@ export default function DashboardPage() {
               {childName}
             </p>
             <p className="font-body text-sm text-text-sage">
-              Progress tracking coming soon 🌱
+              Progress tracking coming soon
             </p>
           </div>
 

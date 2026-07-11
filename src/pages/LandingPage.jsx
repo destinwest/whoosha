@@ -524,21 +524,17 @@ function FeaturesSection() {
 // ── Pricing Section ───────────────────────────────────────────────────────────
 
 const FREE_FEATURES = [
-  { label: 'Square Breathing game',         included: true  },
+  { label: 'All breathing games',           included: true  },
   { label: '1 child profile',               included: true  },
   { label: 'Session history (last 7 days)', included: true  },
-  { label: 'Infinity, Hexagon & Flower games', included: false },
   { label: 'Full history + progress charts',   included: false },
   { label: 'Up to 5 child profiles',           included: false },
 ]
 
 const PAID_FEATURES = [
-  { label: 'All 4 breathing games',         included: true },
+  { label: 'Everything in Free',            included: true },
   { label: 'Up to 5 child profiles',        included: true },
   { label: 'Full history + progress charts',included: true },
-  { label: 'Session history (last 7 days)', included: true },
-  { label: 'Square Breathing game',         included: true },
-  { label: 'Everything in Free',            included: true },
 ]
 
 function PricingCard({ title, price, priceNote, features, cta, ctaTo, highlight }) {

@@ -30,7 +30,7 @@ function ErrorFallback({ resetError }) {
   return (
     <div className="min-h-screen bg-bg-cream flex flex-col items-center justify-center gap-5 px-6 text-center">
       <p className="font-display text-4xl font-semibold text-text-forest">
-        Something went a little sideways 🌿
+        Something went a little sideways
       </p>
       <p className="font-body text-text-sage max-w-xs">
         Don't worry — let's take a breath and try again.

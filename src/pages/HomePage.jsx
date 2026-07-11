@@ -110,7 +110,7 @@ export default function HomePage() {
       {/* Greeting */}
       <div className="px-6 pt-4 pb-2 flex-shrink-0 text-center">
         <h1 className="font-display text-3xl md:text-4xl font-semibold text-text-forest">
-          {firstName ? `Hi ${firstName} 🌿` : 'Hi there 🌿'}
+          {firstName ? `Hi ${firstName}` : 'Hi there'}
         </h1>
       </div>
 

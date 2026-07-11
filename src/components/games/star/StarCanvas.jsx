@@ -1,131 +1,125 @@
-// ── SquareCanvas.jsx ──────────────────────────────────────────────────────────
-// Canvas drawing component — renders the game canvas, owns the rAF loop,
-// all geometry computation, all per-frame drawing, and all pointer handling.
+// ── StarCanvas.jsx ────────────────────────────────────────────────────────────
+// Star Breathing canvas — mirrors TriangleCanvas in mechanics but draws a
+// rounded five-pointed-star OUTLINE (10 vertices: 5 tips + 5 valleys), traversed
+// clockwise from the valley just before the top tip, with one tip oriented at
+// the top of the screen. Uniform 4s per segment, alternating breathe-in /
+// breathe-out (no holds → 40s cycle). Each edge either ascends valley→tip
+// (breathe in) or descends tip→valley (breathe out):
+//   side 0  V0→V1  valley→top-tip (ascending)  — breathe in
+//   side 1  V1→V2  top-tip→valley (descending) — breathe out
+//   … alternating around all 10 edges (5 in + 5 out).
+//
+// Most of this file is byte-identical to TriangleCanvas / HexagonCanvas (heat
+// gauge, synergy, embers, paint composite, touch bloom, fingerprint, groove
+// tracer, pointer handling, etc.). Shape-specific divergences are flagged with
+// "── STAR-SPECIFIC ──" headers.
+//
+// Because the star outline is CONCAVE, corners alternate between sharp tips
+// (convex) and reflex valleys, so the single exterior-angle / cornerTangent of
+// the convex games becomes a per-vertex SIGNED value. The convex-only
+// `offsetPolygon` helper self-intersects at the sharp tips when offset inward by
+// the track width, so the paint clip is built as a RIBBON from the sampled
+// centerline instead (see applyPaintClip).
 //
 // Props:
-//   strokeModeRef       — { current: 'classic' | 'watercolor' }
-//   onTick(now)         — called each rAF frame; SquareGame drives intro from here
-//   onGameStart()       — called once when the child first drags from the start point
-//   onGameStateTick(s)  — called each rAF frame at end-of-frame, with a snapshot
-//                         { gaugeEffect, gaugeActive, synergyStage, breathPhase, speedRatio }
-//                         consumed by the sound director for adaptive audio modulation
-//   interactive         — boolean; controls pointer events on the canvas element
+//   strokeModeRef  — { current: 'classic' | 'watercolor' }
+//   pacingCanvasRef — ref to the overlay canvas above the saturate wrapper
+//   onTick(now)    — called each rAF frame
+//   onGameStart()  — called once when the child first drags from the start point
+//   interactive    — boolean; controls pointer events on the canvas element
+//
+// No audio this pass (morning-light theme is silent for now — see StarGame).
 //
 // Imperative API (via ref):
 //   reset()        — clears all canvas state and resets all game-state refs
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
-import * as stampStroke   from './strokes/stampStroke'
-import * as layeredWash   from './strokes/layeredWash'
-import { createHeatGauge } from '../_shared/heatGauge'
-import { createSynergy }   from '../_shared/synergy'
+import * as stampStroke   from '../square/strokes/stampStroke'
+import * as layeredWash   from '../square/strokes/layeredWash'
+
+// ── STAR-SPECIFIC: shape + timing ────────────────────────────────────────────
+const SIDES                 = 10   // 5 tips + 5 valleys → 10 traced edges
+// Inner-radius ratio (valley radius ÷ tip radius). The pentagram-exact value is
+// ~0.382; a touch fatter (0.42) gives a friendlier, easier-to-trace star with
+// slightly less-needle tips.
+const STAR_INNER_RATIO      = 0.42
+// Corner-rounding radius. The track is a STROKE of width lw around the
+// centerline, so a corner's inner edge has radius (r − lw/2): if r < lw/2 that
+// goes negative and the inner edge pinches to a SHARP POINT (the same trap the
+// Triangle game documents fixing by raising its corner ratio). So r must clear
+// lw/2 to keep both edges rounded. STAR_CORNER_R_LW is the target as a fraction
+// of lw; STAR_CORNER_MAX_EDGE caps how much of an edge the two corner tangents
+// may consume (the sharp tips are the binding constraint), leaving a positive
+// straight run. At the current slim width this yields r ≈ lw·0.65 → an inner
+// edge radius of ~lw·0.15 (rounded, not a point) and a very round outer edge.
+const STAR_CORNER_R_LW      = 0.90   // non-binding; the edge budget usually wins
+const STAR_CORNER_MAX_EDGE  = 0.88   // both corner tangents together ≤ 88% of an edge
+// Track-width multiplier vs. the shared Square/Hexagon handle. The star's many
+// arms read cramped at full width; a slimmer channel opens gaps between the
+// arms. Everything keyed to lw (pacing circle, bead, bloom, particles, paint
+// width, acceptance zone, corner radius) scales with it, so this stays coherent.
+// Dial to taste — 1.0 = same width as the other games.
+const STAR_TRACK_SLIM       = 0.85   // 15% slimmer
+// Alternating breathe-in / breathe-out, 4s per segment, no holds. 10 × 4s = 40s.
+// The pacing dot advances by constant ARC-LENGTH over CYCLE_MS (see getPacing),
+// so SIDE_DURATIONS_MS[i] is really "4s per breath phase"; the heat gauge reads
+// the per-phase 4s from it. All phases equal, so index choice never matters.
+const SIDE_DURATIONS_MS     = Array(SIDES).fill(4000)
+const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 40_000
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const LAP_COLORS   = ['#7DB89A', '#5B9FAA', '#9B8FC4', '#8BA7C7']
-const CYCLE_MS     = 16_000
-
-// Initial pacing position when the game opens, expressed as a fraction of
-// the 16s breath cycle (0.0 = bottom-left corner, start of breathe-in;
-// 0.25 = start of right-hold; 0.5 = start of breathe-out; 0.75 = start of
-// left-hold).
-//
-// 0.75 places the circle at the top of the left edge — just past the
-// top-left corner, having "just exited" the breathe-out side. The user
-// then gets ~4 s of left-hold (during which the audio is intentionally
-// silent — both inhale and exhale windows are closed) to orient and place
-// a finger, before the breath cycle's first inhale audio fires.
-const START_AT_BREATH_PHASE = 0.75
+// Finger-trail drift palette — the user's "morning's first light" palette (soft
+// pink → lavender → blue → pale-yellow). The palette's yellow (#FCDF6C) is the
+// TRACK color and is omitted here so the paint stays visible against the track.
+const LAP_COLORS = ['#FCCAD2', '#CECFED', '#A7C2F7', '#FCF9DA']
 
 // Time for one full LAP_COLORS cycle in ms of active tracing.
 // 72 000ms = ~72 seconds — roughly four laps at pacing speed.
 const COLOR_CYCLE_MS = 72_000
 
 // ── Tracing core (groove model) ───────────────────────────────────────────────
-// The user circle is a bead constrained to the path. Each frame the finger is
-// projected onto the path by LOCAL search around the bead, then the bead moves
-// to the projection if (a) the finger is within ACCEPTANCE perpendicular of the
-// groove and (b) the projection is within LEASH arc-length of the bead. If
-// either fails the bead is "not attached": it freezes and all game systems
-// (heat gauge, synergy) drain toward default. Both checks are symmetric in
-// direction, which is also what prevents corner-cutting in either winding.
-//
-// LEASH is the heart of the trace UX: how far the finger may lead/lag the bead
-// before the groove lets go. Larger = more forgiving of fast/loose tracing;
-// smaller = stricter, more intentional. ACCEPTANCE is how far sideways off the
-// groove the finger may stray before it counts as off-track.
+// Ported from SquareCanvas. The user circle is a bead constrained to the path.
+// Each frame the finger is projected onto the path by LOCAL search around the
+// bead, then the bead moves to the projection if (a) the finger is within
+// ACCEPTANCE perpendicular of the groove and (b) the projection is within LEASH
+// arc-length of the bead. If either fails the bead is "not attached": it freezes
+// and all game systems (heat gauge, synergy) drain toward default. The local
+// search window is what prevents the bead teleporting to another edge of the
+// shape when the finger strays near a different side.
 const LEASH_TRACK_WIDTHS      = 1.4   // finger↔bead max arc-distance, in track widths
 const ACCEPTANCE_TRACK_WIDTHS = 0.75  // finger↔groove max perpendicular distance, in track widths
 
-// Lap validity: a seam crossing only counts as a lap if, since the last lap,
-// the bead has progressed at least this fraction of the way around the loop
-// (a checkpoint just past the seam-bounce zone). Prevents wiggling across the
-// seam from inflating the lap count. Detected by a forward crossing of the
-// checkpoint fraction, so merely being near the seam can't trip it.
+// Lap validity: a seam crossing only counts as a lap once the bead has
+// progressed at least this fraction of the way around the loop since the last.
 const LAP_MIN_PROGRESS = 0.15   // 15% of a lap
 
 // ── Heat gauge tuning ─────────────────────────────────────────────────────────
-// Consumed by the shared createHeatGauge state machine (see _shared/heatGauge).
-// speedThreshold is also referenced directly by the synergy block below, so
-// it stays a named const.
-const GAUGE_SPEED_THRESHOLD = 1.2   // path rate ratio above which gauge charges
-const GAUGE_CONFIG = {
-  speedThreshold:   GAUGE_SPEED_THRESHOLD,
-  recoverThreshold: 3.0,    // ratio above which the recovery timer resets (true racing)
-  chargeDelayMs:    500,    // sustained too-fast before the gauge starts ramping
-  drainDelayMs:     250,    // sustained good-pace before recovery begins (post-floor)
-  rampUpMs:         2000,   // gauge 0 → 1 ramp duration
-  rampDownMs:       1000,   // gauge 1 → 0 drain duration
-  effectThreshold:  0.3,    // gauge value below which no visible effect appears
-}
+const GAUGE_SPEED_THRESHOLD   = 1.2   // path rate ratio above which gauge charges
+const GAUGE_RECOVER_THRESHOLD = 3.0   // path rate ratio above which recovery timer resets — only true racing blocks recovery
+const GAUGE_CHARGE_DELAY      = 1000  // ms of sustained too-fast before the gauge starts ramping
+const GAUGE_DRAIN_DELAY       = 500   // ms of sustained recoverable-pace before recovery begins
+const GAUGE_EFFECT_THRESHOLD = 0.3    // gauge value below which no visible effect appears
 
 // ── Synergy tuning ────────────────────────────────────────────────────────────
 // Time-based continuous reward. An on-pace accumulator grows while the user
 // stays close + in pace and decays when they drift. Stage 0→4 is mapped
 // directly from the accumulator via piecewise-linear thresholds.
-// SYNERGY_DIST_THRESHOLD_LW stays here — it's combined with lw (geometry) to
-// compute the "close" boolean the synergy machine consumes. The stage timings
-// and drain rate are config for the shared createSynergy machine.
 const SYNERGY_DIST_THRESHOLD_LW = 0.8     // user within lw * 0.8 of pacing counts as close
-const SYNERGY_CONFIG = {
-  // durations (ms) for stages 0→1, 1→2, 2→3, 3→4
-  //   stage 1 — amber grows to pacing size
-  //   stage 2 — pacing fill shifts to amber
-  //   stage 3 — both circles grow to 1.5×
-  //   stage 4 — embers begin radiating
-  stageTimesMs: [4000, 4000, 8000, 16000],
-  returnMs:     3000,   // full drain from max when finger lifts / gauge floors
-}
-
-// ── Encouragement messages ────────────────────────────────────────────────
-// Pool of phrases that may appear on a successful close-tracked lap
-// completion. Selection rules:
-//   1. Normal trigger: random pick from pool, excluding the most recently
-//      shown message (so back-to-back duplicates can't happen).
-//   2. Recovery trigger: if the user fully activated the heat gauge
-//      (gaugeActive = true) and then recovered, the next message is
-//      forced to RECOVERY_MESSAGE, acknowledging the return.
-const ENCOURAGEMENT_MESSAGES = [
-  'Beautiful work',
-  'You\'re doing great',
-  'Breathing well',
-  'That\'s the way',
-  'Lovely breath',
-  'Right on pace',
-  'Peace',
-  'That feels better',
-]
-
-// Specific message shown the next time encouragement fires after the user
-// has fully activated the heat gauge and then recovered. Also in the
-// general pool so it can appear naturally even without prior dysregulation.
-const RECOVERY_MESSAGE = 'That feels better'
-
+const SYNERGY_TIME_0_TO_1_MS    = 4000    // 0 → Stage 1 — amber grows to pacing size
+const SYNERGY_TIME_1_TO_2_MS    = 4000    // Stage 1 → 2 — pacing fill shifts to amber
+const SYNERGY_TIME_2_TO_3_MS    = 8000    // Stage 2 → 3 — both circles grow to 1.5×
+const SYNERGY_TIME_3_TO_4_MS    = 16000   // Stage 3 → 4 — embers begin radiating
+const SYNERGY_MAX_ACCUM_MS      = SYNERGY_TIME_0_TO_1_MS + SYNERGY_TIME_1_TO_2_MS
+                                + SYNERGY_TIME_2_TO_3_MS + SYNERGY_TIME_3_TO_4_MS  // 32s
+const SYNERGY_MAX_STAGE         = 4
+const SYNERGY_RETURN_MS         = 3000                                  // full return-to-start duration from max state
+const SYNERGY_RETURN_RATE       = SYNERGY_MAX_ACCUM_MS / SYNERGY_RETURN_MS  // accum-ms drained per real-ms during return
 const EMBER_PARTICLE_CAP        = 30
 const EMBER_SPAWN_RATE_AT_FULL  = 14      // particles per second at Stage 4.0
 const ALPHA_ACTIVE = 0.75
 const ALPHA_FLOOR  = 0.18
-export const SCALE_ACTIVE = 2.0   // peak label scale as the pacing circle arrives — base is 1.0, so +100% growth
+const SCALE_ACTIVE = 1.5
 const BLEND_MS     = 600
 
 const smoothstep   = t => t * t * (3 - 2 * t)
@@ -144,57 +138,135 @@ function lerpColor(hexA, hexB, t) {
 }
 
 // ── buildGeo ──────────────────────────────────────────────────────────────────
+// ── STAR-SPECIFIC: geometry ──────────────────────────────────────────────────
+// Builds the centerline geometry for a rounded five-pointed-star OUTLINE,
+// traversed clockwise from the valley just before the top tip. The structure
+// mirrors TriangleCanvas's buildGeo (vertex/arc centers, straight-segment
+// endpoints, sampled points, label midpoints), but because the outline is
+// CONCAVE the corner math is generalized to per-vertex SIGNED turn angles:
+//   turn[i] = signed deflection at vertex i (atan2(cross, dot) of the in/out
+//             edge directions). Sharp tips turn one way (large +), reflex
+//             valleys turn the other (smaller −).
+//   Ttan[i] = r·tan(|turn[i]|/2)  — tangent length (always positive).
+//   arc center = incoming tangent point offset by r along the signed normal of
+//                the incoming direction (left for +turn, right for −turn).
+//   arc sweep  = turn[i+1] (signed) — sampling rotates the start radius by it.
+// This is validated to connect every arc end to the next straight start with
+// ~0 gap for both tip and valley corners.
 function buildGeo(rect) {
-  const w    = rect.width
-  const h    = rect.height
-  const sq   = Math.min(w, h) * 0.78
-  const cx   = w / 2
-  const cy   = h / 2
-  const half = sq / 2
-  const r       = sq * 0.22
-  const circleR = sq * 0.0728
-  const lw      = circleR * 2 + 8
+  const w  = rect.width
+  const h  = rect.height
+  const cx = w / 2
+  const cy = h / 2
 
-  const LS = sq - 2 * r
-  const LA = (Math.PI * r) / 2
-  const sf = LS / (LS + LA)
+  // Tip (outer) radius. The star spans 2R wide and up to ~2R tall (one tip up,
+  // two tips down-outward). Fit width/height within bounds like the other games.
+  const R  = Math.min(w * 0.46, h * 0.46)
+  const Ri = R * STAR_INNER_RATIO   // valley (inner) radius
+  // Track width — same 0.0728 coefficient on the shared size handle 2R as the
+  // other games, so lw / bead / pacing circle / bloom / particles all match the
+  // Square/Hexagon/Triangle proportions pixel-for-pixel.
+  const circleR = (2 * R) * 0.0728
+  const lw      = (circleR * 2 + 8) * STAR_TRACK_SLIM
 
-  const arcCenters = [
-    { x: cx + half - r, y: cy + half - r },
-    { x: cx + half - r, y: cy - half + r },
-    { x: cx - half + r, y: cy - half + r },
-    { x: cx - half + r, y: cy + half - r },
-  ]
-  const arcStartAngles = [Math.PI / 2, 0, -Math.PI / 2, Math.PI]
+  // 10 vertices in clockwise traversal order (increasing canvas angle), starting
+  // at the valley just before the top tip so side 0 (valley→tip) is the first
+  // "breathe in". Even index → valley (radius Ri), odd → tip (radius R); index 1
+  // lands exactly on the top tip (angle −90°).
+  const n  = SIDES
+  const A0 = -Math.PI / 2 - Math.PI / 5   // valley before the top tip
+  const verts = []
+  for (let j = 0; j < n; j++) {
+    const ang = A0 + j * (Math.PI / 5)     // +36° per step
+    const rad = (j % 2 === 0) ? Ri : R
+    verts.push({ x: cx + rad * Math.cos(ang), y: cy + rad * Math.sin(ang) })
+  }
 
-  const straightFrom = [
-    { x: cx - half + r, y: cy + half   },
-    { x: cx + half,     y: cy + half - r },
-    { x: cx + half - r, y: cy - half   },
-    { x: cx - half,     y: cy - half + r },
-  ]
-  const straightTo = [
-    { x: cx + half - r, y: cy + half   },
-    { x: cx + half,     y: cy - half + r },
-    { x: cx - half + r, y: cy - half   },
-    { x: cx - half,     y: cy + half - r },
-  ]
+  // Per-vertex in/out unit edge directions + signed turn (deflection) angle.
+  const uOut = []   // unit direction of the edge LEAVING vertex i (= side i)
+  const turn = []   // signed deflection at vertex i; |turn| = exterior angle
+  for (let i = 0; i < n; i++) {
+    const p = verts[(i - 1 + n) % n], v = verts[i], q = verts[(i + 1) % n]
+    let ix = v.x - p.x, iy = v.y - p.y; const il = Math.hypot(ix, iy) || 1; ix /= il; iy /= il
+    let ox = q.x - v.x, oy = q.y - v.y; const ol = Math.hypot(ox, oy) || 1; ox /= ol; oy /= ol
+    uOut.push({ x: ox, y: oy })
+    turn.push(Math.atan2(ix * oy - iy * ox, ix * ox + iy * oy))
+  }
 
-  const N      = 500
+  // Corner radius: STAR_CORNER_R_LW of the track width, clamped so that on the
+  // tightest edge the SUM of its two corner tangents (r·tan(|turn|/2) at each
+  // end — the sharp tip dominates) consumes at most STAR_CORNER_MAX_EDGE of the
+  // edge, leaving a positive straight run. Summing both ends (vs. just the tip)
+  // is what guarantees straightFrom→straightTo never inverts.
+  const edgeLen = Math.hypot(verts[1].x - verts[0].x, verts[1].y - verts[0].y)
+  let maxEdgeTan = 0
+  for (let i = 0; i < n; i++) {
+    const sum = Math.tan(Math.abs(turn[i]) / 2) + Math.tan(Math.abs(turn[(i + 1) % n]) / 2)
+    maxEdgeTan = Math.max(maxEdgeTan, sum)
+  }
+  const r = Math.min(lw * STAR_CORNER_R_LW, (STAR_CORNER_MAX_EDGE * edgeLen) / maxEdgeTan)
+  const Ttan = turn.map(t => r * Math.tan(Math.abs(t) / 2))   // per-vertex tangent length
+
+  // Per-side straight-segment endpoints. straightFrom[i] leaves vertex i;
+  // straightTo[i] enters vertex i+1. Offsets use the per-vertex tangent lengths
+  // (the same edge direction uOut[i] serves both ends of side i).
+  const straightFrom = []
+  const straightTo   = []
+  for (let i = 0; i < n; i++) {
+    const a = verts[i]
+    const b = verts[(i + 1) % n]
+    const u = uOut[i]
+    straightFrom.push({ x: a.x + u.x * Ttan[i],            y: a.y + u.y * Ttan[i] })
+    straightTo.push  ({ x: b.x - u.x * Ttan[(i + 1) % n],  y: b.y - u.y * Ttan[(i + 1) % n] })
+  }
+
+  // Per-side straight fraction: share of the side's 0..1 progress spent on the
+  // straight run vs. its corner arc (the arc at vertex i+1). Keeps the pacing
+  // circle at constant linear speed WITHIN each side.
+  const sfArr = []
+  for (let i = 0; i < n; i++) {
+    const LSi    = Math.hypot(straightTo[i].x - straightFrom[i].x, straightTo[i].y - straightFrom[i].y)
+    const arcLen = r * Math.abs(turn[(i + 1) % n])
+    sfArr.push(LSi / (LSi + arcLen))
+  }
+
+  // Corner arc at vertex i+1 (belongs to side i). Center = incoming tangent
+  // point offset by r along the SIGNED normal of the incoming direction: left of
+  // travel for a +turn (convex tip), right for a −turn (reflex valley). arcSweeps
+  // is the signed turn — sampling rotates the start radius by it.
+  const arcCenters     = []
+  const arcStartAngles = []
+  const arcSweeps      = []
+  for (let i = 0; i < n; i++) {
+    const vNext = (i + 1) % n
+    const u     = uOut[i]                        // incoming direction to the corner
+    const s     = turn[vNext] >= 0 ? 1 : -1
+    const nrm   = s > 0 ? { x: -u.y, y: u.x } : { x: u.y, y: -u.x }
+    const to    = straightTo[i]
+    const center = { x: to.x + nrm.x * r, y: to.y + nrm.y * r }
+    arcCenters.push(center)
+    arcStartAngles.push(Math.atan2(to.y - center.y, to.x - center.x))
+    arcSweeps.push(turn[vNext])
+  }
+
+  // Sample N points along the path, indexed by fraction (0 → SIDES per lap).
+  // Within each side: 0..sf is the straight segment, sf..1 is the corner arc.
+  const N      = SIDES * 100
   const points = []
   for (let i = 0; i <= N; i++) {
-    const frac = (i / N) * 4
-    const si   = Math.min(Math.floor(frac), 3)
+    const frac = (i / N) * SIDES
+    const si   = Math.min(Math.floor(frac), SIDES - 1)
     const s    = frac - si
-    if (s < sf) {
-      const lt = s / sf
+    const sfi  = sfArr[si]
+    if (s < sfi) {
+      const lt = sfi === 0 ? 0 : s / sfi
       const a  = straightFrom[si]
       const b  = straightTo[si]
       points.push({ x: a.x + (b.x - a.x) * lt, y: a.y + (b.y - a.y) * lt })
     } else {
-      const arcT  = (s - sf) / (1 - sf)
+      const arcT  = (s - sfi) / (1 - sfi)                  // 0 → 1 across the arc
       const ac    = arcCenters[si]
-      const angle = arcStartAngles[si] - arcT * Math.PI / 2
+      const angle = arcStartAngles[si] + arcT * arcSweeps[si]   // signed sweep
       points.push({ x: ac.x + r * Math.cos(angle), y: ac.y + r * Math.sin(angle) })
     }
   }
@@ -203,6 +275,15 @@ function buildGeo(rect) {
     x: (a.x + straightTo[i].x) / 2,
     y: (a.y + straightTo[i].y) / 2,
   }))
+
+  // Per-side label rotation: align text to the edge direction, but flip any edge
+  // pointing leftward so labels never render upside-down.
+  const labelAngles = uOut.map((u) => {
+    let ang = Math.atan2(u.y, u.x)
+    if (ang > Math.PI / 2)  ang -= Math.PI
+    if (ang < -Math.PI / 2) ang += Math.PI
+    return ang
+  })
 
   // Cumulative arc-length at each point index (cumLen[0] = 0,
   // cumLen[N] = totalPathLength). The groove tracing core measures
@@ -215,123 +296,135 @@ function buildGeo(rect) {
   }
   const totalPathLength = cumLen[N]
 
+  // Track "size" handle returned for downstream callers that previously used
+  // `sq` (Square's bounding-box side). For the star, use 2R as the analogous
+  // "size" handle (drives label font sizing etc.).
+  const sq = 2 * R
+
+  // Pacing origin — the arc-length of the MIDPOINT of V0's (valley) corner arc.
+  // The pacing circle runs at constant arc-length speed from here, and since
+  // consecutive corner-arc midpoints are exactly totalPathLength/SIDES apart,
+  // every breath boundary (each 1/SIDES of the loop) lands on a corner midpoint:
+  // each inhale ends at a tip (peak), each exhale at a valley (notch). V0's arc
+  // is the loop's last segment (side SIDES-1's corner, ending at the seam s=P),
+  // so its midpoint sits half an arc before the seam.
+  const v0ArcLen        = r * Math.abs(turn[0])
+  const pacingArcOrigin = (totalPathLength - v0ArcLen / 2 + totalPathLength) % totalPathLength
+
   return {
-    cx, cy, sq, half, lw, r, sf,
-    arcCenters, arcStartAngles,
-    straightFrom, straightTo,
-    points, labelMids,
-    cumLen, totalPathLength,
-    sides: 4,
+    cx, cy, sq, R, Ri, r, lw, sfArr,
+    arcCenters, arcStartAngles, arcSweeps,
+    straightFrom, straightTo, verts,
+    points, labelMids, labelAngles,
+    cumLen, totalPathLength, pacingArcOrigin,
+    sides: SIDES,
     w, h,
   }
 }
 
 
-// ── Racetrack draw passes ─────────────────────────────────────────────────────
-// geometry: { left, top, sqW, cr, lw } — all in CSS px, describing the track
-// centerline path. Passed to each pass; all four use the same path geometry.
+// ── Racetrack draw passes (star) ─────────────────────────────────────────────
+// trackGeo: { cx, cy, R, Ri, cornerR, lw, points } — all in CSS px. `points` is
+// the sampled star-outline centerline; each pass strokes that polyline (round
+// join/cap) to build the "raised channel" look. cx/cy/R/Ri drive the radial
+// gradient.
+//
+// NOTE: the convex-only offset passes (inner-wall / highlight) and the
+// offsetPolygon-based paint clip are NOT used for the star — offsetPolygon
+// self-intersects at the sharp tips. The channel reads cleanly from the shadow +
+// gradient-body strokes alone; the paint clip is a ribbon built from the sampled
+// centerline (see applyPaintClip). Track color is the user's #FCDF6C, kept as
+// the base tone with a lighter inner lip + slightly deeper outer edge so the
+// channel still reads as raised.
 
-// Called once per resize — returns a radial gradient for Pass B.
-// Must use the display canvas ctx (the gradient is consumed there each frame).
-function buildTrackGradient(ctx, { left, top, sqW, lw }) {
-  const cx = left + sqW / 2
-  const cy = top  + sqW / 2
-
-  // innerR = inner edge of the straight sides (closest track surface to center).
-  // outerR = beyond corner outer edges (~sqW*0.70 from center) so corners
-  // fall within the gradient range and are not clamped to the darkest stop.
-  const innerR = sqW / 2 - lw / 2
-  const outerR = sqW * 0.75
-
-  // Position stops so the transition spans from straight inner edge (t=0)
-  // through straight outer edge (~t=0.46) to corner outer edges (~t=0.88).
+// Called once per resize — returns a radial gradient for the body pass.
+function buildTrackGradient(ctx, { cx, cy, R, Ri, lw }) {
+  // innerR ≈ the valley radius (minus lw/2); outerR ≈ beyond the tips (R + lw/2)
+  // so the whole track footprint falls within the gradient.
+  const innerR = Math.max(0, Ri - lw / 2)
+  const outerR = R + lw / 2
   const grad = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
-  grad.addColorStop(0,   '#DAC5AD')   // inner edge of straights — lightest warm tan
-  grad.addColorStop(0.4, '#D2BD9D')   // straight outer edge — base warm tan
-  grad.addColorStop(1,   '#C6AE8C')   // corner outer edges — darkest tan
+  grad.addColorStop(0,   '#FEEEA6')   // inner edge — lightest (sunlit lip)
+  grad.addColorStop(0.5, '#FCDF6C')   // base — the requested track yellow
+  grad.addColorStop(1,   '#F2CB48')   // outer edge — slightly deeper gold
   return grad
 }
 
+// Traces the sampled centerline polyline (closed loop). Stroking THIS — rather
+// than roundedPolyPath(verts, r) — guarantees the drawn track follows the exact
+// same rounded, per-corner-arc path the pacing circle and bead do: arcTo would
+// silently clamp the radius at the sharp tips and drift the visible track off
+// the traceable centerline.
+function traceCenterline(ctx, points) {
+  const N = points.length - 1   // points[N] === points[0]
+  ctx.beginPath()
+  ctx.moveTo(points[0].x, points[0].y)
+  for (let i = 1; i < N; i++) ctx.lineTo(points[i].x, points[i].y)
+  ctx.closePath()
+}
+
 // Pass A — outer shadow: bleeds outside track footprint, soft drop shadow.
-function drawTrackShadow(ctx, { left, top, sqW, cr, lw }) {
+function drawTrackShadow(ctx, { points, lw }) {
   ctx.save()
-  ctx.beginPath()
-  ctx.roundRect(left, top, sqW, sqW, cr)
+  traceCenterline(ctx, points)
   ctx.lineWidth   = lw + 7
-  ctx.strokeStyle = 'rgba(78,68,40,0.22)'
+  ctx.lineJoin    = 'round'
+  ctx.strokeStyle = 'rgba(90,70,50,0.20)'
   ctx.stroke()
   ctx.restore()
 }
 
-// Pass B — gradient body: main track surface, lit from above.
-// Falls back to plain base tone if the gradient hasn't been built yet (pre-resize).
-function drawTrackBody(ctx, { left, top, sqW, cr, lw }, trackGradient) {
+// Pass B — gradient body: main track surface.
+function drawTrackBody(ctx, { points, lw }, trackGradient) {
   ctx.save()
-  ctx.beginPath()
-  ctx.roundRect(left, top, sqW, sqW, cr)
+  traceCenterline(ctx, points)
   ctx.lineWidth   = lw
-  ctx.strokeStyle = trackGradient ?? '#D2BD9D'
-  ctx.stroke()
-  ctx.restore()
-}
-
-// Pass C — highlight rim: thin bright sheen on the raised inner lip.
-function drawTrackHighlight(ctx, { left, top, sqW, cr, lw }) {
-  ctx.save()
-  ctx.beginPath()
-  ctx.roundRect(
-    left + lw * 0.5,
-    top  + lw * 0.5,
-    sqW  - lw,
-    sqW  - lw,
-    cr   - lw * 0.5,
-  )
-  ctx.lineWidth   = lw * 0.15
-  ctx.strokeStyle = 'rgba(255,252,245,0.55)'
-  ctx.stroke()
-  ctx.restore()
-}
-
-// Pass D — inner wall shadow: faint dark stroke along the inner boundary.
-// Path at left + lw*0.5 = the actual inner edge of the track stroke.
-// (left + lw would be lw/2 past the inner edge — inside the hole and invisible.)
-function drawTrackInnerWall(ctx, { left, top, sqW, cr, lw }) {
-  ctx.save()
-  ctx.beginPath()
-  ctx.roundRect(
-    left + lw * 0.5,
-    top  + lw * 0.5,
-    sqW  - lw,
-    sqW  - lw,
-    Math.max(0, cr - lw * 0.5),
-  )
-  ctx.lineWidth   = lw * 0.18
-  ctx.strokeStyle = 'rgba(78,68,40,0.14)'
+  ctx.lineJoin    = 'round'
+  ctx.strokeStyle = trackGradient ?? '#FCDF6C'
   ctx.stroke()
   ctx.restore()
 }
 
 // ── applyPaintClip ────────────────────────────────────────────────────────────
-// Applies a permanent annular clip to a canvas context.
-// save() is intentionally never restored — the clip must persist.
-function applyPaintClip(ctx, { left, top, sqW, cr, lw }) {
+// Applies a permanent clip to the paint canvas so painted strokes can never
+// bleed outside the track channel. Because the star outline is concave (the
+// convex-only offsetPolygon self-intersects at the tips), the clip region is a
+// RIBBON built directly from the sampled centerline: for each sample point we
+// offset ±halfW along the local normal, then trace the outer edge forward and
+// the inner edge back into one closed loop. clipArgs carries `points` (device
+// px, the sampled centerline) and `lw` (device px). save() is intentionally
+// never restored — the clip persists.
+function applyPaintClip(ctx, { points, lw }) {
+  const N      = points.length - 1   // points[N] === points[0] (closed loop)
+  const halfW  = lw / 2 + 0.5
+  const outer  = new Array(N)
+  const inner  = new Array(N)
+  for (let i = 0; i < N; i++) {
+    const prev = points[(i - 1 + N) % N]
+    const next = points[(i + 1) % N]
+    let tx = next.x - prev.x, ty = next.y - prev.y
+    const tl = Math.hypot(tx, ty) || 1
+    tx /= tl; ty /= tl
+    const nx = -ty, ny = tx   // left normal
+    outer[i] = { x: points[i].x + nx * halfW, y: points[i].y + ny * halfW }
+    inner[i] = { x: points[i].x - nx * halfW, y: points[i].y - ny * halfW }
+  }
   ctx.save()
   ctx.beginPath()
-  ctx.roundRect(left, top, sqW, sqW, cr)
-  ctx.roundRect(
-    left + lw,
-    top  + lw,
-    sqW  - lw * 2,
-    sqW  - lw * 2,
-    Math.max(0, cr - lw),
-  )
+  ctx.moveTo(outer[0].x, outer[0].y)
+  for (let i = 1; i < N; i++) ctx.lineTo(outer[i].x, outer[i].y)
+  ctx.closePath()
+  ctx.moveTo(inner[0].x, inner[0].y)
+  for (let i = N - 1; i >= 0; i--) ctx.lineTo(inner[i].x, inner[i].y)
+  ctx.closePath()
+  // evenodd → the band between the two offset loops fills; the star's interior
+  // (enclosed by both loops) stays a hole. Winding-direction-independent.
   ctx.clip('evenodd')
 }
 
 // ── Groove tracing core (pure helpers) ────────────────────────────────────────
-// These operate purely on geo (points, cumLen, sides) + scalars — no refs, no
-// canvas. They are the to-be-extracted "module 3" path math, written here first
-// so the new tracing core can be felt-tested on Square before extraction.
+// Ported from SquareCanvas. These operate purely on geo (points, cumLen, sides)
+// + scalars — no refs, no canvas.
 
 // Signed shortest arc distance (px) from index a to index b around the closed
 // loop. Positive = b is forward of a. Indices are floats in [0, N].
@@ -353,6 +446,24 @@ function lerpCumLen(cumLen, idx) {
   return cumLen[i] + (cumLen[i + 1] - cumLen[i]) * t
 }
 
+// Inverse of the cumulative arc-length: the fractional index at arc-length s
+// (px, in [0, totalPathLength]). Binary search over cumLen. Used to drive the
+// pacing circle at CONSTANT arc-length speed (the points[] are sampled by
+// parameter, not uniform arc-length, so equal time-steps ≠ equal distance).
+function indexAtArcLength(cumLen, s) {
+  const N = cumLen.length - 1
+  if (s <= 0) return 0
+  if (s >= cumLen[N]) return N
+  let lo = 0, hi = N
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1
+    if (cumLen[mid] <= s) lo = mid
+    else hi = mid
+  }
+  const seg = cumLen[hi] - cumLen[lo]
+  return lo + (seg > 0 ? (s - cumLen[lo]) / seg : 0)
+}
+
 // Pixel position at a fractional index.
 function pointAt(points, idx) {
   const N = points.length - 1
@@ -369,10 +480,10 @@ function fractionAt(geo, idx) {
   return (idx / N) * geo.sides
 }
 
-// Project (px,py) onto the path, searching ONLY segments whose midpoint is
-// within `windowPx` arc-length of `centerIdx` (local search — required for
-// self-passing paths). Returns { idx, x, y, perpDist } of the nearest point,
-// or null if the window is empty. Handles loop wraparound.
+// Project (px,py) onto the path, searching ONLY segments whose start is within
+// `windowPx` arc-length of `centerIdx` (local search — this is the leash that
+// stops the bead jumping to another side of the shape). Returns
+// { idx, x, y, perpDist } of the nearest point, or null if the window is empty.
 function projectLocal(geo, centerIdx, px, py, windowPx) {
   const { points, cumLen, totalPathLength } = geo
   const N = points.length - 1
@@ -380,7 +491,6 @@ function projectLocal(geo, centerIdx, px, py, windowPx) {
 
   let best = null
   for (let i = 0; i < N; i++) {
-    // Arc distance from centerLen to this segment's start, wrapped.
     let segLen = cumLen[i] - centerLen
     if (segLen >  totalPathLength / 2) segLen -= totalPathLength
     if (segLen < -totalPathLength / 2) segLen += totalPathLength
@@ -400,8 +510,8 @@ function projectLocal(geo, centerIdx, px, py, windowPx) {
   return best
 }
 
-// Global nearest projection (whole path) — used only for the very first touch,
-// where there is no bead yet to search around.
+// Global nearest projection (whole path) — used only for the very first/re-touch,
+// where there is no bead to search around.
 function projectGlobal(geo, px, py) {
   const { points } = geo
   const N = points.length - 1
@@ -421,9 +531,9 @@ function projectGlobal(geo, px, py) {
   return best
 }
 
-// ── SquareCanvas ──────────────────────────────────────────────────────────────
-const SquareCanvas = forwardRef(function SquareCanvas(
-  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onGameStateTick, onResize, interactive },
+// ── StarCanvas ────────────────────────────────────────────────────────────────
+const StarCanvas = forwardRef(function StarCanvas(
+  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onResize, interactive },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -436,28 +546,23 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const clipArgsRef      = useRef(null)
   const trackGeoRef      = useRef(null)   // CSS px track centerline geometry
   const trackGradientRef = useRef(null)   // cached Pass B gradient (rebuilt on resize)
-  const trackTextureImgRef = useRef(null) // dirt-path SVG image, loaded once on mount
-  const trackPatternRef    = useRef(null) // CanvasPattern derived from texture image
 
   // ── Game state refs ────────────────────────────────────────────────────────
   const pacingStartRef       = useRef(null)    // clock for pacing circle — starts at mount
   const gameStartRef         = useRef(null)
   const startedRef           = useRef(false)
-  const touchRef             = useRef(false)    // finger/mouse is down
-  const childPosRef          = useRef(null)     // bead pixel position {x,y,clx,cly,fraction}
-  // ── Groove tracing core state ──
-  const beadIdxRef           = useRef(null)     // bead position as a float index into geo.points
-  const fingerPosRef         = useRef(null)     // latest finger pixel pos {x,y}, set by pointer handlers
-  const tracingRef           = useRef(false)    // bead attached + following this frame (drives gauge/synergy)
+  const touchRef             = useRef(false)
+  const childPosRef          = useRef(null)
   const lapCountRef          = useRef(0)   // laps completed — used only for encouragement gate
   const colorTimeRef         = useRef(0)   // ms of active tracing time — drives color drift
   const prevFracRef          = useRef(null)
+  const beadIdxRef           = useRef(null)     // bead position as a float index into geo.points
+  const fingerPosRef         = useRef(null)     // latest finger pixel pos {x,y}, set by pointer handlers
+  const tracingRef           = useRef(false)    // bead attached + following this frame (drives gauge/synergy)
+  const passedLapCheckpointRef = useRef(false)  // bead crossed LAP_MIN_PROGRESS forward since last lap
   const pacingPosRef         = useRef(null)
-  const lastEncouragementRef        = useRef(-Infinity)
-  const lastEncouragementMessageRef = useRef(null)   // anti-repeat memory — never pick this message twice in a row
-  const encouragementRef            = useRef(null)
-  const passedLapCheckpointRef      = useRef(false)  // bead crossed LAP_MIN_PROGRESS forward since last lap
-  const recoveredFromDysregRef      = useRef(false)  // set true when gaugeActive flips true→false; consumed by next encouragement
+  const lastEncouragementRef = useRef(-Infinity)
+  const encouragementRef     = useRef(null)
   const fpImgRef             = useRef(null)    // loaded Image object
   const fpImgReadyRef        = useRef(false)   // true once image has loaded
   const fingerprintActiveRef = useRef(true)             // true until first touch
@@ -480,23 +585,16 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   const paintPressureRafRef  = useRef(null)             // RAF handle for paint pressure ramp
 
   // ── Heat gauge ────────────────────────────────────────────────────────────
-  // The state machine (value, timers, active flag) lives in the shared
-  // createHeatGauge module. gaugeActiveRef + gaugeEffectRef bridge its
-  // per-frame result out to the draw code and the onGameStateTick snapshot,
-  // which read them in many places.
-  const gaugeMachineRef      = useRef(null)
-  if (!gaugeMachineRef.current) gaugeMachineRef.current = createHeatGauge(GAUGE_CONFIG)
+  const heatGaugeRef         = useRef(0)     // 0.0–1.0, invisible gauge
+  const tooFastTimerRef      = useRef(0)     // ms accumulated above speed threshold
+  const goodPaceTimerRef     = useRef(0)     // ms accumulated at or below speed threshold
   const gaugeActiveRef       = useRef(false) // true once desaturation has fully fired
-  const gaugeEffectRef       = useRef(0)     // eased effect strength, read by draw loop
+  const gaugeEffectRef       = useRef(0)     // computed gFx, written by gauge block, read by draw loop
   const childPathRateRef     = useRef(0)     // path fraction-units/ms, smoothed
   const pacingEmphasisRef    = useRef(0)     // 0–1, eased toward gaugeActive — drives pacing-circle grow + glow
   // ── Synergy reward (time-based continuous progression) ────────────────────
-  // Accumulator + stage curve live in the shared createSynergy module.
-  // synergyStageRef bridges its per-frame result out to the draw code and the
-  // onGameStateTick snapshot.
-  const synergyMachineRef    = useRef(null)
-  if (!synergyMachineRef.current) synergyMachineRef.current = createSynergy(SYNERGY_CONFIG)
-  const synergyStageRef      = useRef(0)     // 0.0 → 4.0, read by draw loop + snapshot
+  const synergyStageRef      = useRef(0)     // 0.0 → 4.0, derived from accumulator each frame
+  const onPaceAccumRef       = useRef(0)     // ms of on-pace time, caps at SYNERGY_MAX_ACCUM_MS
   const emberParticlesRef    = useRef([])    // pooled ember particles (Stage 4)
   const lastEmberSpawnRef    = useRef(0)     // ms timestamp of last ember spawn
 
@@ -525,21 +623,17 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       startedRef.current           = false
       touchRef.current             = false
       childPosRef.current          = null
+      prevFracRef.current          = null
       beadIdxRef.current           = null
       fingerPosRef.current         = null
       tracingRef.current           = false
-      prevFracRef.current          = null
+      passedLapCheckpointRef.current = false
       gameStartRef.current         = null
-      // See START_AT_BREATH_PHASE — shift the reference time back so elapsed
-      // begins at the desired breath-phase fraction rather than at 0.
-      pacingStartRef.current       = performance.now() - START_AT_BREATH_PHASE * CYCLE_MS
+      pacingStartRef.current       = performance.now()
       lapCountRef.current          = 0
       colorTimeRef.current         = 0
-      lastEncouragementRef.current        = -Infinity
-      lastEncouragementMessageRef.current = null
-      encouragementRef.current            = null
-      passedLapCheckpointRef.current      = false
-      recoveredFromDysregRef.current      = false
+      lastEncouragementRef.current = -Infinity
+      encouragementRef.current     = null
 
       // Restore fingerprint; clear bloom
       fingerprintActiveRef.current = true
@@ -559,13 +653,15 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       cancelAnimationFrame(bloomAttackRafRef.current)
       cancelAnimationFrame(paintPressureRafRef.current)
 
-      gaugeMachineRef.current.reset()
+      heatGaugeRef.current        = 0
+      tooFastTimerRef.current     = 0
+      goodPaceTimerRef.current    = 0
       gaugeActiveRef.current      = false
       gaugeEffectRef.current      = 0
       childPathRateRef.current    = 0
       pacingEmphasisRef.current   = 0
-      synergyMachineRef.current.reset()
       synergyStageRef.current     = 0
+      onPaceAccumRef.current      = 0
       emberParticlesRef.current   = []
       lastEmberSpawnRef.current   = 0
       document.documentElement.style.setProperty('--game-saturation', '1')
@@ -583,26 +679,31 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   }
 
   // ── Pacing circle position ─────────────────────────────────────────────────
+  // CONSTANT-SPEED pacing: the star's 10 segments are geometrically UNEQUAL in
+  // length (a tip's corner arc is much longer than a valley's), so giving each
+  // an equal 4s made the dot speed up and slow down. Instead we advance by
+  // constant ARC-LENGTH — the whole loop in CYCLE_MS — so the dot moves at a
+  // single steady rate everywhere. Time is linear in arc-length, and consecutive
+  // corner-arc midpoints are exactly totalPathLength/SIDES apart, so each 4s
+  // breath still lands boundary-to-boundary on the corners: every inhale ends at
+  // a tip (peak), every exhale at a valley (notch). We start from pacingArcOrigin
+  // (the midpoint of V0's valley arc → first inhale ends at the top tip).
+  //
+  // `fraction` is returned as the GEOMETRIC fraction (side index + progress,
+  // derived from the resulting sample index) — the label-proximity pulse and the
+  // heat-gauge/synergy side lookup expect that. The gauge's speed comparison is
+  // unaffected: a child tracking the dot moves at arc-rate P/CYCLE, i.e.
+  // childPathRate (already arc-normalized) = SIDES/CYCLE = pacingRate = 1/4000.
   function getPacing(elapsed) {
     const geo = geoRef.current
     if (!geo) return null
-    const { sf, straightFrom, straightTo, arcCenters, arcStartAngles, r } = geo
+    const { points, cumLen, totalPathLength, pacingArcOrigin } = geo
 
-    const fraction = ((elapsed % CYCLE_MS) / CYCLE_MS) * 4
-    const si       = Math.min(Math.floor(fraction), 3)
-    const s        = fraction - si
-
-    if (s < sf) {
-      const lt = s / sf
-      const a  = straightFrom[si]
-      const b  = straightTo[si]
-      return { x: a.x + (b.x - a.x) * lt, y: a.y + (b.y - a.y) * lt, fraction }
-    } else {
-      const arcT  = (s - sf) / (1 - sf)
-      const ac    = arcCenters[si]
-      const angle = arcStartAngles[si] - arcT * Math.PI / 2
-      return { x: ac.x + r * Math.cos(angle), y: ac.y + r * Math.sin(angle), fraction }
-    }
+    const s   = (pacingArcOrigin + (elapsed % CYCLE_MS) / CYCLE_MS * totalPathLength) % totalPathLength
+    const idx = indexAtArcLength(cumLen, s)
+    const p   = pointAt(points, idx)
+    const fraction = (idx / (points.length - 1)) * SIDES
+    return { x: p.x, y: p.y, fraction }
   }
 
   // ── paintBeadSegment ───────────────────────────────────────────────────────
@@ -618,11 +719,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
 
     const gap = arcGapPx(geo, fromIdx, toIdx)   // signed, short direction
     const dir = gap >= 0 ? 1 : -1
-    // Normalize both ends into [0, N-1]. Math.round(toIdx) can equal N (at the
-    // seam, when toIdx ≥ N-0.5), but the walked index lives in [0, N-1], so an
-    // un-normalized `end === N` never matches → the loop would run all N steps
-    // and paint the ENTIRE track. points[N] === points[0] geometrically, so
-    // mapping N → 0 is correct.
+    // Normalize both ends into [0, N-1]. points[N] === points[0] geometrically,
+    // so mapping N → 0 is correct and avoids painting the entire track at the seam.
     let i     = Math.round(fromIdx) % N
     const end = Math.round(toIdx) % N
     let steps = 0
@@ -642,25 +740,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     const child  = childPosRef.current
     if (pacing && child) {
       const dist = Math.hypot(child.clx - pacing.x, child.cly - pacing.y)
-      if (lapCountRef.current > 1 && dist <= 60 && now - lastEncouragementRef.current > 45_000) {
-        let message
-        if (recoveredFromDysregRef.current) {
-          // Recovery override: the user fully activated the heat gauge and
-          // came back. Acknowledge the return specifically.
-          message = RECOVERY_MESSAGE
-          recoveredFromDysregRef.current = false
-        } else {
-          // Normal pick: random from the pool, excluding the most recently
-          // shown message so back-to-back duplicates can't happen.
-          const last = lastEncouragementMessageRef.current
-          const candidates = last
-            ? ENCOURAGEMENT_MESSAGES.filter((m) => m !== last)
-            : ENCOURAGEMENT_MESSAGES
-          message = candidates[Math.floor(Math.random() * candidates.length)]
-        }
-        encouragementRef.current            = { startTime: now, message }
-        lastEncouragementRef.current        = now
-        lastEncouragementMessageRef.current = message
+      if (lapCountRef.current > 1 && dist <= 60 && now - lastEncouragementRef.current > 30_000) {
+        encouragementRef.current     = { startTime: now }
+        lastEncouragementRef.current = now
       }
     }
   }
@@ -712,13 +794,10 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     return { x: src.clientX - rect.left, y: src.clientY - rect.top }
   }
 
-  // ── Pointer handlers ──────────────────────────────────────────────────────
-  // The handlers only record intent: where the finger is and whether it's down.
-  // ALL bead motion, painting, lap detection, and the gauge/synergy "tracing"
-  // signal are computed once per frame in the bead-update block of the rAF loop
-  // (using the latest finger position), so the feel is frame-rate independent
-  // and decoupled from pointer-event delivery rate.
-
+  // The bead-advance math lives per-frame in the rAF loop (see the tracing block
+  // there). These handlers only place the bead on first/re-touch and record the
+  // latest raw finger position; the leash/acceptance gating is decoupled from
+  // pointer-event delivery rate.
   function onPointerDown(px, py) {
     const geo = geoRef.current
     if (!geo) return
@@ -766,24 +845,20 @@ const SquareCanvas = forwardRef(function SquareCanvas(
 
     } else {
       // Re-touch after a lift. Snap the bead to wherever on the track the finger
-      // lands (global projection, exactly like the first touch) so the user can
-      // resume ANYWHERE on the path — no need to grab the old frozen spot and
-      // race to catch the pacing circle. A touch well off the track is a silent
-      // no-op (same acceptance window as the first touch), so a stray tap won't
-      // yank the circle.
+      // lands (global projection) so the user can resume ANYWHERE on the path. A
+      // touch well off the track is a silent no-op (same acceptance window).
       const proj = projectGlobal(geo, px, py)
       if (!proj || proj.perpDist > geo.lw * ACCEPTANCE_TRACK_WIDTHS) return  // off-track: ignore
 
       // Reposition the bead and reset seam/lap tracking so the jump can't
-      // register a spurious lap: prevFrac starts at the new spot, and the lap
-      // checkpoint must be re-crossed forward from here.
+      // register a spurious lap.
       beadIdxRef.current             = proj.idx
       const frac                     = fractionAt(geo, proj.idx)
       prevFracRef.current            = frac
       passedLapCheckpointRef.current = false
       childPosRef.current            = { x: proj.x, y: proj.y, clx: proj.x, cly: proj.y, fraction: frac }
       lastTouchRef.current           = { x: proj.x, y: proj.y }  // avoids a teleport-sized velocity/particle spike
-      addStrokePoint(proj.x, proj.y, 0)  // pen was lifted on pointerUp → starts a fresh stroke at the new point
+      addStrokePoint(proj.x, proj.y, 0)  // pen was lifted on pointerUp → fresh stroke at the new point
 
       touchRef.current       = true
       startPressureRamp()
@@ -897,15 +972,6 @@ const SquareCanvas = forwardRef(function SquareCanvas(
     const paintCanvas = document.createElement('canvas')
     paintRef.current  = paintCanvas
 
-    // Track dirt-path texture — load once, create pattern when ready.
-    // First frames render without texture; pattern appears when image resolves.
-    const textureImg = new Image()
-    textureImg.onload = () => {
-      trackTextureImgRef.current = textureImg
-      trackPatternRef.current    = ctx.createPattern(textureImg, 'repeat')
-    }
-    textureImg.src = '/textures/track-dirt.svg'
-
     let lastW = 0, lastH = 0
 
     function resize() {
@@ -929,25 +995,38 @@ const SquareCanvas = forwardRef(function SquareCanvas(
         pacingCanvas.height = rect.height * dpr
       }
       geoRef.current     = buildGeo(rect)
-      onResize?.({ labelMids: geoRef.current.labelMids, sq: geoRef.current.sq })
+      onResize?.({
+        labelMids:   geoRef.current.labelMids,
+        labelAngles: geoRef.current.labelAngles,
+        sq:          geoRef.current.sq,
+      })
 
-      const { cx, cy, sq, half, lw, r } = geoRef.current
+      const { cx, cy, R, Ri, r, lw, points } = geoRef.current
       const paintCtx = paintCanvas.getContext('2d')
       paintCtxRef.current = paintCtx
 
+      // Star paint clip — a ribbon built from the sampled centerline (concave-
+      // safe; offsetPolygon self-intersects at the tips). Coordinates are in
+      // device pixels (the paint canvas matches main DPR), so the sampled points
+      // are scaled by dpr.
       const clipArgs = {
-        left: (cx - half - lw / 2) * dpr,
-        top:  (cy - half - lw / 2) * dpr,
-        sqW:  (half * 2 + lw) * dpr,
-        cr:   (r + lw / 2) * dpr,
-        lw:   lw * dpr,
+        points: points.map(p => ({ x: p.x * dpr, y: p.y * dpr })),
+        lw:     lw * dpr,
       }
       clipArgsRef.current = clipArgs
 
       applyPaintClip(paintCtx, clipArgs)
 
-      // Track geometry for the four racetrack draw passes (CSS px, centerline).
-      const trackGeo = { left: cx - half, top: cy - half, sqW: sq, cr: r, lw }
+      // Track geometry for the racetrack draw passes (CSS px). cx/cy/R/Ri drive
+      // the radial track gradient; `points` (the sampled centerline) is what the
+      // shadow/body passes stroke, so the visible track is welded to the exact
+      // path the pacing circle + bead follow.
+      const trackGeo = {
+        cx, cy, R, Ri,
+        cornerR:    r,
+        lw,
+        points,
+      }
       trackGeoRef.current      = trackGeo
       trackGradientRef.current = buildTrackGradient(ctx, trackGeo)
 
@@ -956,9 +1035,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       layeredWash.init({ paintCtx, lw, dpr, color, clipArgs })
     }
 
-    // See START_AT_BREATH_PHASE — same shift as in reset() so the very first
-    // game opening starts the pacing at the top-left, not the bottom-left.
-    pacingStartRef.current = performance.now() - START_AT_BREATH_PHASE * CYCLE_MS
+    pacingStartRef.current = performance.now()
     resize()
     const ro = new ResizeObserver(resize)
     ro.observe(canvas)
@@ -979,7 +1056,8 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       const dpr = dprRef.current
       const W   = canvas.width  / dpr
       const H   = canvas.height / dpr
-      const { cx, cy, sq, half, lw, r } = geo
+      const { cx, cy, sq, lw, r } = geo
+      const half = sq / 2  // legacy alias used by encouragement glow radius
 
       // ── Heat gauge effect — written by gauge block each frame, read here ────
       const gaugeEffect = gaugeEffectRef.current
@@ -988,13 +1066,13 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, W, H)
 
-      // ── 1. Racetrack — four passes ────────────────────────────────────────
+      // ── 1. Racetrack — shadow + gradient body ─────────────────────────────
+      // (The convex-only inner-wall / highlight passes are omitted for the
+      // concave star — see the racetrack draw-pass note above.)
       const trackGeo = trackGeoRef.current
       if (trackGeo) {
         drawTrackShadow(ctx, trackGeo)
         drawTrackBody(ctx, trackGeo, trackGradientRef.current)
-        // drawTrackHighlight(ctx, trackGeo)
-        drawTrackInnerWall(ctx, trackGeo)
       }
 
       // ── 2. Paint layer ────────────────────────────────────────────────────
@@ -1014,33 +1092,20 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       }
       ctx.restore()
 
-      // ── 2b. Track texture ─────────────────────────────────────────────────
-      // Subtle dirt-path texture stroked along the track centerline. Sits above
-      // the paint so it reads as the surface character of the track itself —
-      // visible through both bare cream and painted color. Pattern image is
-      // baked into a GPU texture; per-frame cost is one stroke call.
-      const trackPattern = trackPatternRef.current
-      if (trackPattern && trackGeo) {
-        ctx.save()
-        ctx.strokeStyle = trackPattern
-        ctx.lineWidth   = trackGeo.lw
-        ctx.beginPath()
-        ctx.roundRect(trackGeo.left, trackGeo.top, trackGeo.sqW, trackGeo.sqW, trackGeo.cr)
-        ctx.stroke()
-        ctx.restore()
-      }
-
       // ── Pacing position (computed once, shared by fingerprint + pacing circle) ─
       // Pacing starts at mount — independent of first touch.
       const pacingPos = getPacing(now - pacingStartRef.current)
-      if (pacingPos) pacingPosRef.current = pacingPos
+      if (pacingPos) {
+        pacingPosRef.current = pacingPos
+      }
 
-      // ── Bead tracing core ─────────────────────────────────────────────────
+      // ── Bead tracing (per-frame, leash + acceptance) ──────────────────────
       // Move the bead toward the finger along the groove, or freeze it if the
       // finger has left the leash/acceptance window. tracingRef is the single
-      // "actively tracing" signal the gauge + synergy consume as their
-      // "touching" input: attached → systems evaluate live; detached (lift,
-      // off-track, or leash-snap) → systems drain toward default.
+      // "actively tracing" signal the gauge + synergy consume: attached →
+      // systems evaluate live; detached (lift, off-track, or leash-snap) →
+      // systems drain toward default. The LOCAL search is what stops the bead
+      // teleporting across the shape to a different side.
       tracingRef.current = false
       if (startedRef.current && touchRef.current && fingerPosRef.current && beadIdxRef.current !== null) {
         const fp       = fingerPosRef.current
@@ -1063,18 +1128,14 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           // Paint the groove between old and new bead index (corner-correct).
           paintBeadSegment(geo, prevIdx, newIdx)
 
-          // Commit bead position before lap detection (onLapComplete reads it).
+          // Commit bead position before lap detection.
           beadIdxRef.current  = newIdx
           childPosRef.current = { x: proj.x, y: proj.y, clx: proj.x, cly: proj.y, fraction: newFrac }
 
-          // Lap detection. A seam crossing (high fraction → low fraction)
-          // only counts once the bead has progressed past the lap checkpoint
-          // forward since the previous lap — so wiggling across the seam can't
-          // inflate the count. The checkpoint flag is set by a *forward
-          // crossing* of LAP_MIN_PROGRESS·sides (not by merely being beyond
-          // it, which would be true near the seam too).
-          const prevFrac     = prevFracRef.current
-          const checkpoint   = LAP_MIN_PROGRESS * geo.sides
+          // Lap detection — a seam crossing only counts once the bead has
+          // progressed past the lap checkpoint forward since the previous lap.
+          const prevFrac   = prevFracRef.current
+          const checkpoint = LAP_MIN_PROGRESS * geo.sides
           if (prevFrac !== null && prevFrac < checkpoint && newFrac >= checkpoint) {
             passedLapCheckpointRef.current = true
           }
@@ -1113,7 +1174,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       // ── Color drift ───────────────────────────────────────────────────────
       // Advance timer only while actively tracing; compute color every frame
       // so stamps always use the current drifted value.
-      if (tracingRef.current) {
+      if (startedRef.current && tracingRef.current) {
         colorTimeRef.current += dt
       }
       if (startedRef.current) {
@@ -1123,63 +1184,114 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       }
 
       // ── Heat gauge update ─────────────────────────────────────────────────
-      // State machine lives in the shared createHeatGauge module. Square's
-      // pacing rate is constant (4 fraction-units per lap per CYCLE_MS), so
-      // speedRatio is a simple division. The module returns the frame's
-      // gauge state + two edge-trigger flags handled below.
       if (startedRef.current) {
-        const pacingRate = 4 / CYCLE_MS
+        // ── Speed ratio ────────────────────────────────────────────────────
+        // Local pacing rate = 1 fraction-unit per SIDE_DURATIONS_MS[side] ms.
+        // Uniform (3s) here, but kept per-side so uneven timing needs no change.
+        const pacingSideIdx = pacingPos
+          ? Math.min(SIDES - 1, Math.floor(pacingPos.fraction))
+          : 0
+        const pacingRate = 1 / SIDE_DURATIONS_MS[pacingSideIdx]
         const speedRatio = childPathRateRef.current / pacingRate
 
-        const r = gaugeMachineRef.current.update(dt, {
-          speedRatio,
-          touching: tracingRef.current,   // attached-and-tracing, not merely finger-down
-        })
+        const isTooFast  = tracingRef.current && speedRatio > GAUGE_SPEED_THRESHOLD
+        const isGoodPace = !tracingRef.current || speedRatio <= GAUGE_SPEED_THRESHOLD
 
-        // Bridge the result out to the refs the draw code + snapshot read.
-        gaugeActiveRef.current = r.gaugeActive
-        gaugeEffectRef.current = r.gaugeEffect
+        // ── Charge timer — 1.2× threshold ─────────────────────────────────
+        if (isTooFast) {
+          tooFastTimerRef.current = Math.min(GAUGE_CHARGE_DELAY, tooFastTimerRef.current + dt)
+        } else if (isGoodPace && !gaugeActiveRef.current) {
+          // Slowing before floor — slowly decay the charge timer
+          tooFastTimerRef.current = Math.max(0, tooFastTimerRef.current - dt * 0.5)
+        }
 
-        // justHitFloor → clear the paint canvas permanently (re-clipped).
-        if (r.justHitFloor) {
-          stampStroke.clear()
-          if (paintCtxRef.current && clipArgsRef.current) {
-            applyPaintClip(paintCtxRef.current, clipArgsRef.current)
+        // ── Recovery timer — 3× threshold ─────────────────────────────────
+        // Only genuinely racing (> 3× pacing) resets recovery. Normal variation
+        // and moderate speed above 1.2× doesn't block the recovery window.
+        const isTrulyRacing = tracingRef.current && speedRatio > GAUGE_RECOVER_THRESHOLD
+        if (isTrulyRacing) {
+          goodPaceTimerRef.current = 0
+        } else {
+          goodPaceTimerRef.current = Math.min(GAUGE_DRAIN_DELAY, goodPaceTimerRef.current + dt)
+        }
+
+        // ── Gauge state transitions ────────────────────────────────────────
+        if (isTooFast && !gaugeActiveRef.current && tooFastTimerRef.current >= GAUGE_CHARGE_DELAY) {
+          // Charge delay met, still racing — ramp gauge to 1 over 4s
+          heatGaugeRef.current = Math.min(1, heatGaugeRef.current + dt / 4000)
+          if (heatGaugeRef.current >= 1) {
+            // Floor reached — clear paint canvas permanently. Synergy now
+            // drains gracefully via the synergy block (3-second return rate
+            // engages while gaugeActiveRef.current is true).
+            gaugeActiveRef.current = true
+            stampStroke.clear()
+            if (paintCtxRef.current && clipArgsRef.current) {
+              applyPaintClip(paintCtxRef.current, clipArgsRef.current)
+            }
+          }
+        } else if (isGoodPace && !gaugeActiveRef.current && heatGaugeRef.current > 0) {
+          // Slowing/lifting before floor — drain gauge back over 2s, paint recovers
+          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 2000)
+        } else if (gaugeActiveRef.current && goodPaceTimerRef.current >= GAUGE_DRAIN_DELAY) {
+          // Floor reached; good pace held for 0.5s — drain over 2s, only saturation returns
+          heatGaugeRef.current = Math.max(0, heatGaugeRef.current - dt / 2000)
+          if (heatGaugeRef.current <= 0) {
+            gaugeActiveRef.current   = false
+            goodPaceTimerRef.current = 0
+            // tooFastTimerRef stays at GAUGE_CHARGE_DELAY — re-racing re-triggers immediately
           }
         }
 
-        // justRecovered → flag the next encouragement as "that feels better".
-        if (r.justRecovered) {
-          recoveredFromDysregRef.current = true
-        }
+        heatGaugeRef.current = Math.max(0, Math.min(1, heatGaugeRef.current))
 
+        // ── Apply effects ──────────────────────────────────────────────────
+        const g   = heatGaugeRef.current
+        const gFx = g < GAUGE_EFFECT_THRESHOLD
+          ? 0
+          : Math.pow((g - GAUGE_EFFECT_THRESHOLD) / (1 - GAUGE_EFFECT_THRESHOLD), 2)
+
+        gaugeEffectRef.current = gFx
         // Drain saturation toward grayscale — the color drains from the world.
-        document.documentElement.style.setProperty(
-          '--game-saturation', (1 - r.gaugeEffect * 0.9).toFixed(3),
-        )
+        document.documentElement.style.setProperty('--game-saturation', (1 - gFx * 0.9).toFixed(3))
       }
 
       // ── Synergy update ────────────────────────────────────────────────────
-      // Accumulator + stage curve live in the shared createSynergy module.
-      // The canvas computes the geometry-dependent inputs (close / in-pace /
-      // can-evaluate) and the module returns the continuous stage.
-      {
-        let close = false, inPace = false
-        const canEvaluate = startedRef.current && pacingPos && childPosRef.current
-        if (canEvaluate) {
-          const child      = childPosRef.current
-          const dist       = Math.hypot(child.clx - pacingPos.x, child.cly - pacingPos.y)
-          const speedRatio = childPathRateRef.current / (4 / CYCLE_MS)
-          close  = dist <= lw * SYNERGY_DIST_THRESHOLD_LW
-          inPace = speedRatio <= GAUGE_SPEED_THRESHOLD
+      // Three behaviors:
+      //   - Not tracing (lifted/off-track) OR gauge-floor active → fast return
+      //     to 0 over 3s (from max). Both events should drain the reward.
+      //   - Tracing + on-pace                → accumulator grows at +dt.
+      //   - Tracing + off-pace               → symmetric 1:1 slow decay.
+      if (!tracingRef.current || gaugeActiveRef.current) {
+        onPaceAccumRef.current = Math.max(
+          0, onPaceAccumRef.current - dt * SYNERGY_RETURN_RATE,
+        )
+      } else if (startedRef.current && pacingPos && childPosRef.current) {
+        const child      = childPosRef.current
+        const dist       = Math.hypot(child.clx - pacingPos.x, child.cly - pacingPos.y)
+        // Local pacing rate per current side (uniform, but kept per-side).
+        const pacingSideIdx = Math.min(SIDES - 1, Math.floor(pacingPos.fraction))
+        const speedRatio = childPathRateRef.current * SIDE_DURATIONS_MS[pacingSideIdx]
+        const close      = dist <= lw * SYNERGY_DIST_THRESHOLD_LW
+        const inPace     = speedRatio <= GAUGE_SPEED_THRESHOLD
+        if (close && inPace) {
+          onPaceAccumRef.current = Math.min(SYNERGY_MAX_ACCUM_MS, onPaceAccumRef.current + dt)
+        } else {
+          onPaceAccumRef.current = Math.max(0, onPaceAccumRef.current - dt)
         }
-        synergyStageRef.current = synergyMachineRef.current.update(dt, {
-          touching:    tracingRef.current,   // attached-and-tracing, not merely finger-down
-          gaugeActive: gaugeActiveRef.current,
-          canEvaluate,
-          close,
-          inPace,
-        })
+      }
+
+      // Map accumulator → continuous stage (piecewise linear)
+      {
+        const a = onPaceAccumRef.current
+        const t1 = SYNERGY_TIME_0_TO_1_MS
+        const t2 = t1 + SYNERGY_TIME_1_TO_2_MS
+        const t3 = t2 + SYNERGY_TIME_2_TO_3_MS
+        const t4 = t3 + SYNERGY_TIME_3_TO_4_MS
+        if      (a >= t4) synergyStageRef.current = 4
+        else if (a >= t3) synergyStageRef.current = 3 + (a - t3) / SYNERGY_TIME_3_TO_4_MS
+        else if (a >= t2) synergyStageRef.current = 2 + (a - t2) / SYNERGY_TIME_2_TO_3_MS
+        else if (a >= t1) synergyStageRef.current = 1 + (a - t1) / SYNERGY_TIME_1_TO_2_MS
+        else              synergyStageRef.current = a / SYNERGY_TIME_0_TO_1_MS
       }
 
       // Derived stage values for visual mapping
@@ -1387,14 +1499,9 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       // ── 7. Encouragement moment ───────────────────────────────────────────
       const enc = encouragementRef.current
       if (enc) {
-        const t = (now - enc.startTime) / 2_600   // total lifetime (ms)
+        const t = (now - enc.startTime) / 2_000
         if (t < 1) {
-          // Envelope: ease in (0→18%), hold (18→35%), ease out (35→100%).
-          // smoothstep on each ramp keeps the bloom gentle at both ends.
-          let alpha
-          if      (t < 0.18) alpha = smoothstep(t / 0.18)
-          else if (t < 0.35) alpha = 1
-          else               alpha = smoothstep(1 - (t - 0.35) / 0.65)
+          const alpha = 1 - t
           const glowR = half * 1.2
           const grad  = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
           grad.addColorStop(0, `rgba(212,160,86,${(alpha * 0.3).toFixed(3)})`)
@@ -1412,7 +1519,7 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           ctx.shadowBlur   = 8
           ctx.shadowColor  = 'rgba(255,255,255,0.6)'
           ctx.fillStyle    = `rgba(255,255,255,${(alpha * 0.92).toFixed(3)})`
-          ctx.fillText(enc.message, cx, cy)
+          ctx.fillText('Beautiful work', cx, cy)
           ctx.restore()
         } else {
           encouragementRef.current = null
@@ -1422,22 +1529,30 @@ const SquareCanvas = forwardRef(function SquareCanvas(
       ctx.restore()
 
       // ── Label proximity — write CSS vars for DOM overlay ──────────────────
-      {
-        const { sf } = geo
-        const lpFrac  = (((now - pacingStartRef.current) % CYCLE_MS) / CYCLE_MS) * 4
+      // Driven by the pacing circle's ACTUAL fraction (from getPacing). Each
+      // label grows as the dot rounds the corner arc into its side, holds full
+      // while the dot crosses the label, then fades. Straight-fractions are
+      // per-side: sfi is the label's own side; sfp is the previous side, whose
+      // corner arc carries the approach. All three sides are equal here, so the
+      // grow-in takes the same time on every side.
+      if (pacingPos) {
+        const { sfArr } = geo
         const lpBlend = smoothstep(startedRef.current
           ? Math.min(1, (now - gameStartRef.current) / BLEND_MS)
           : 0)
 
-        for (let i = 0; i < 4; i++) {
-          const localFrac = ((lpFrac - i) % 4 + 4) % 4
+        for (let i = 0; i < SIDES; i++) {
+          const sfi = sfArr[i]
+          const sfp = sfArr[(i - 1 + SIDES) % SIDES]
+          const localFrac = ((pacingPos.fraction - i) % SIDES + SIDES) % SIDES
           let proximity
-          if (localFrac >= 3 + sf) {
-            proximity = smoothstep((localFrac - (3 + sf)) / (1 - sf))
-          } else if (localFrac <= sf / 1.5) {
+          if (localFrac >= (SIDES - 1) + sfp) {
+            // Approaching on the previous side's corner arc — grow in.
+            proximity = smoothstep((localFrac - ((SIDES - 1) + sfp)) / (1 - sfp))
+          } else if (localFrac <= sfi / 1.5) {
             proximity = 1
-          } else if (localFrac <= sf) {
-            proximity = smoothstep(1 - (localFrac - sf / 1.5) / (sf - sf / 1.5))
+          } else if (localFrac <= sfi) {
+            proximity = smoothstep(1 - (localFrac - sfi / 1.5) / (sfi - sfi / 1.5))
           } else {
             proximity = 0
           }
@@ -1448,21 +1563,6 @@ const SquareCanvas = forwardRef(function SquareCanvas(
           document.documentElement.style.setProperty(`--label-${i}-alpha`, alpha.toFixed(3))
           document.documentElement.style.setProperty(`--label-${i}-scale`, scale.toFixed(3))
         }
-      }
-
-      // ── External state subscription (sound director, etc.) ───────────────
-      // Single per-frame snapshot fired after all state has been finalized.
-      // Cost: one object allocation per frame; the consumer is expected to
-      // be a no-op or cheap modulation. Skipped silently when no observer.
-      if (onGameStateTick) {
-        const pacingRate = 4 / CYCLE_MS
-        onGameStateTick({
-          gaugeEffect:  gaugeEffectRef.current,
-          gaugeActive:  gaugeActiveRef.current,
-          synergyStage: synergyStageRef.current,
-          breathPhase:  ((now - pacingStartRef.current) % CYCLE_MS) / CYCLE_MS,
-          speedRatio:   childPathRateRef.current / pacingRate,
-        })
       }
     }
 
@@ -1496,4 +1596,4 @@ const SquareCanvas = forwardRef(function SquareCanvas(
   )
 })
 
-export default SquareCanvas
+export default StarCanvas

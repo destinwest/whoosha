@@ -141,9 +141,15 @@ export default function InfinityGame({ onExit }) {
         background: 'radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(0,0,0,0.45) 100%)',
       }} />
 
-      {/* Completion overlay */}
+      {/* Completion overlay — time shown first, then the trailing phrase, per
+          user-preference-testing variant. */}
       {phase === 'completion' && (
-        <CompletionScreen durationSeconds={completionSeconds} onDismiss={handleCompletionDismiss} />
+        <CompletionScreen
+          durationSeconds={completionSeconds}
+          onDismiss={handleCompletionDismiss}
+          leadText=""
+          trailText="of connecting your body and mind"
+        />
       )}
     </div>
   )

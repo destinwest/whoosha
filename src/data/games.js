@@ -3,9 +3,9 @@
 // determines fan position. Square is at index 3 so it's the default center
 // card on first load.
 //
-// Locked is currently hardcoded — Square and Infinity are free, everything
-// else paid/coming-soon. When the paid tier is wired up, derive `locked` from
-// the user's profiles.tier.
+// Locked is currently hardcoded — Square, Infinity, Hexagon, and Triangle are
+// free; only the "more breath soon" placeholders are locked (coming-soon). When
+// the paid tier is wired up, derive `locked` from the user's profiles.tier.
 
 export const HOME_GAMES = [
   { id: 'p1',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
@@ -13,8 +13,8 @@ export const HOME_GAMES = [
   { id: 'infinity', name: 'Infinity Breathing', tagline: 'Trace the infinity', route: '/games/infinity', gameKey: 'infinity',    shape: 'infinity', locked: false, placeholder: false },
   { id: 'square',   name: 'Square Breathing',   tagline: 'Trace the square',   route: '/games/square',   gameKey: 'square',      shape: 'square',   locked: false, placeholder: false },
   { id: 'hexagon',  name: 'Hexagon Breathing',  tagline: '',                   route: '/games/hexagon',  gameKey: 'hexagon',     shape: 'hexagon',  locked: false, placeholder: false },
-  { id: 'flower',   name: 'Flower Breathing',   tagline: 'Trace the flower',   route: '/games/flower',   gameKey: 'flower',      shape: 'flower',   locked: true,  placeholder: false },
-  { id: 'p3',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
+  { id: 'triangle', name: 'Triangle Breathing',  tagline: 'Trace the triangle', route: '/games/triangle', gameKey: 'triangle',    shape: 'triangle', locked: false, placeholder: false },
+  { id: 'star',     name: 'Star Breathing',      tagline: 'Trace the star',     route: '/games/star',     gameKey: 'star',        shape: 'star',     locked: false, placeholder: false },
   { id: 'p4',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
 ]
 
@@ -26,6 +26,7 @@ export const GAME_GRADIENTS = {
   square:      'linear-gradient(160deg, #C8E0CD, #A0C8B0)',
   hexagon:     'linear-gradient(160deg, #E4B48C, #C77E5A)',
   infinity:    'linear-gradient(160deg, #D2C9E5, #B0A3D0)',
-  flower:      'linear-gradient(160deg, #EBD4A8, #D6B27C)',
+  triangle:    'linear-gradient(160deg, #CAD8DD, #8FB8CE)',
+  star:        'linear-gradient(160deg, #FCF6DB, #A7C2F7)',
   placeholder: 'linear-gradient(160deg, #E0E8DF, #BFCEC1)',
 }
