@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { roundedPolyPath } from '../_shared/roundedPolyPath'
+import { bboxOf, fitWithMargin, fitCenter, SHAPE_VISUAL_WEIGHT } from '../_shared/cardLayout'
 
 // ── TriangleCardPreview ─────────────────────────────────────────────────────
 // The Triangle counterpart to Square/Hexagon CardPreview: a soft, muted render
@@ -11,13 +12,25 @@ import { roundedPolyPath } from '../_shared/roundedPolyPath'
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — a point-up equilateral triangle with the same
 // corner ratio and track width — so the card reads as the real triangle track,
-// just softened and quiet. The track is vertically centered in the region
-// between the card's top edge and the title (title center ≈ 0.86 of card
-// height in GameCarousel), so REGION_CENTER = (0 + 0.86)/2 ≈ 0.43.
+// just softened and quiet. Size/position come from the shared cardLayout
+// module: buildVerts(1, 0, 0)'s real bounding box (apex R above center, base
+// R/2 below — asymmetric) drives both the fit and the vertical centering, no
+// manual offset needed.
 
-const REGION_CENTER   = 0.43
 const TRI_CORNER_RATIO = 0.28   // matches TriangleCanvas — see its own comment for the inner-margin math
 const TRACK_COLOR     = '#93A4B2'   // the game track's base slate (drawTrackBody base stop)
+
+// Pure function of R (circumradius-ish) and center — point-up equilateral
+// triangle. Used both for the unit (R=1) bounding box and the final verts.
+function buildVerts(R, cx, cyc) {
+  const hx = R * Math.cos(Math.PI / 6)   // half-width (= R·√3/2)
+  const hy = R * 0.5                      // base sits R/2 below the centroid
+  return [
+    { x: cx - hx, y: cyc + hy },   // V0 bottom-left (start)
+    { x: cx,      y: cyc - R  },   // V1 apex
+    { x: cx + hx, y: cyc + hy },   // V2 bottom-right
+  ]
+}
 
 function drawScene(ctx, w, h) {
   // Sky gradient — matches the game's baked alpine sky (photo-sampled hazy
@@ -31,21 +44,13 @@ function drawScene(ctx, w, h) {
   ctx.fillRect(0, 0, w, h)
 
   // ── Triangle geometry — mirrors TriangleCanvas buildGeo (point-up) ──────────
-  // Coefficients are the original 0.36/0.30 scaled up 15% (per user request).
-  const R  = Math.min(w * 0.414, h * 0.345)
-  const cx = w / 2
-  // Place the centroid so the triangle's bounding box (apex R above, base R/2
-  // below the centroid) centers on the region between the card top and title.
-  const cyc = h * REGION_CENTER + R / 4
+  const unitBBox = bboxOf(buildVerts(1, 0, 0))
+  // lw = (2R)·0.0728·2 + 8 = R·0.2912 + 8 — see circleR/lw below.
+  const R  = fitWithMargin(w, h, unitBBox.w, unitBBox.h, 0.2912, 8, SHAPE_VISUAL_WEIGHT.triangle)
+  const { cx, cy: cyc } = fitCenter(w, h, unitBBox, R)
   const r   = R * TRI_CORNER_RATIO
 
-  const hx = R * Math.cos(Math.PI / 6)   // half-width (= R·√3/2)
-  const hy = R * 0.5                      // base sits R/2 below the centroid
-  const verts = [
-    { x: cx - hx, y: cyc + hy },   // V0 bottom-left (start)
-    { x: cx,      y: cyc - R  },   // V1 apex
-    { x: cx + hx, y: cyc + hy },   // V2 bottom-right
-  ]
+  const verts = buildVerts(R, cx, cyc)
 
   const circleR = (2 * R) * 0.0728
   const lw      = circleR * 2 + 8

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { roundedPolyPath } from '../_shared/roundedPolyPath'
+import { bboxOf, fitWithMargin, fitCenter, SHAPE_VISUAL_WEIGHT } from '../_shared/cardLayout'
 
 // ── StarCardPreview ─────────────────────────────────────────────────────────
 // The Star counterpart to Square/Hexagon/Triangle CardPreview: a soft, muted
@@ -11,15 +12,28 @@ import { roundedPolyPath } from '../_shared/roundedPolyPath'
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — a five-pointed star OUTLINE (10 vertices, one
 // tip up) with the same inner ratio and a proportional corner radius — so the
-// card reads as the real star track, just softened and quiet. Track is centered
-// in the region between the card's top edge and the title (title center ≈ 0.86
-// of card height in GameCarousel), so REGION_CENTER ≈ 0.43.
+// card reads as the real star track, just softened and quiet. Size/position
+// come from the shared cardLayout module — see its header for the fit/weight
+// logic (the star's slim points get a perceptual-size boost there).
 //
 // Colors mirror StarGame / StarCanvas: morning-light sky + the #FCDF6C track.
 
-const REGION_CENTER    = 0.43
 const STAR_INNER_RATIO = 0.42        // matches StarCanvas
 const TRACK_COLOR      = '#FCDF6C'   // matches the game track base
+
+// Pure function of outer radius R and center — 10-vertex star outline, one
+// tip up. Used both for the unit (R=1) bounding box and the final verts.
+function buildVerts(R, cx, cyc) {
+  const Ri = R * STAR_INNER_RATIO
+  const A0 = -Math.PI / 2 - Math.PI / 5
+  const verts = []
+  for (let j = 0; j < 10; j++) {
+    const ang = A0 + j * (Math.PI / 5)
+    const rad = (j % 2 === 0) ? Ri : R
+    verts.push({ x: cx + rad * Math.cos(ang), y: cyc + rad * Math.sin(ang) })
+  }
+  return verts
+}
 
 function drawScene(ctx, w, h) {
   // Sky gradient — matches StarGame's morning sky (softened sunrise stops).
@@ -33,19 +47,13 @@ function drawScene(ctx, w, h) {
   ctx.fillRect(0, 0, w, h)
 
   // ── Star-outline geometry — mirrors StarCanvas buildGeo (one tip up) ────────
-  const R   = Math.min(w * 0.34, h * 0.30)
-  const Ri  = R * STAR_INNER_RATIO
-  const cx  = w / 2
-  const cyc = h * REGION_CENTER
+  const unitBBox = bboxOf(buildVerts(1, 0, 0))
+  // lw = ((2R)·0.0728·2 + 8)·0.85 = R·0.24752 + 6.8 (STAR_TRACK_SLIM applied) — see below.
+  const R   = fitWithMargin(w, h, unitBBox.w, unitBBox.h, 0.24752, 6.8, SHAPE_VISUAL_WEIGHT.star)
+  const { cx, cy: cyc } = fitCenter(w, h, unitBBox, R)
 
   // 10 vertices, valley before the top tip first (index 1 = top tip).
-  const A0 = -Math.PI / 2 - Math.PI / 5
-  const verts = []
-  for (let j = 0; j < 10; j++) {
-    const ang = A0 + j * (Math.PI / 5)
-    const rad = (j % 2 === 0) ? Ri : R
-    verts.push({ x: cx + rad * Math.cos(ang), y: cyc + rad * Math.sin(ang) })
-  }
+  const verts = buildVerts(R, cx, cyc)
 
   const circleR = (2 * R) * 0.0728
   const lw      = (circleR * 2 + 8) * 0.85   // matches StarCanvas STAR_TRACK_SLIM

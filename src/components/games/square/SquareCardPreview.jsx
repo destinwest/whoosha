@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { fitWithMargin, REGION_CENTER_RATIO, SHAPE_VISUAL_WEIGHT } from '../_shared/cardLayout'
 
 // ── SquareCardPreview ───────────────────────────────────────────────────────
 // A soft, muted render of the Square game for the home carousel card — a calm,
@@ -10,15 +11,12 @@ import { useEffect, useRef } from 'react'
 // a flat track (no shadow or inner-wall shading), and a quiet pale pacing dot.
 // No breathing labels.
 //
-// Drawn ONCE per mount/resize (no rAF loop), DPR-aware.
+// Drawn ONCE per mount/resize (no rAF loop), DPR-aware. Size/position come
+// from the shared cardLayout module (see its header) — square's own bounding
+// box is trivially {w:1, h:1} at sq=1.
 
-const SIZE_RATIO   = 0.70     // sq / min(w, h)
 const RADIUS_RATIO = 0.22     // corner radius / sq
 const CIRCLE_RATIO = 0.0728   // track width = 2·(sq·CIRCLE_RATIO) + 8
-const CY_RATIO     = 0.43     // track vertical center — shifted up from dead-center (0.50)
-                              // so the track sits centered in the space between the card's
-                              // top edge and the title text (title center ≈ 0.86 of card
-                              // height in GameCarousel's CarouselCard, so (0 + 0.86)/2 ≈ 0.43).
 
 function drawScene(ctx, w, h) {
   // Dark teal background, sampled from the game's own meadow-bg gradient
@@ -35,10 +33,10 @@ function drawScene(ctx, w, h) {
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
 
-  const sq      = Math.min(w, h) * SIZE_RATIO
+  const sq      = fitWithMargin(w, h, 1, 1, CIRCLE_RATIO * 2, 8, SHAPE_VISUAL_WEIGHT.square)
   const half    = sq / 2
   const cx      = w / 2
-  const cy      = h * CY_RATIO
+  const cy      = h * REGION_CENTER_RATIO
   const cornerR = sq * RADIUS_RATIO
   const lw      = sq * CIRCLE_RATIO * 2 + 8
   const left    = cx - half

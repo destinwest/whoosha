@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { fitWithMargin, REGION_CENTER_RATIO, SHAPE_VISUAL_WEIGHT } from '../_shared/cardLayout'
 
 // ── InfinityCardPreview ─────────────────────────────────────────────────────
 // The Infinity counterpart to Square/HexagonCardPreview: a soft, muted render of
@@ -13,14 +14,17 @@ import { useEffect, useRef } from 'react'
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — the same vertical lemniscate + track-width
-// handle — so the card reads as the real infinity track, just softened and sized
-// to sit above the card title.
+// handle — so the card reads as the real infinity track, just softened and
+// sized to sit above the card title. Size/position come from the shared
+// cardLayout module: unlike the polygon shapes, the lemniscate's unit (widthC
+// = 1) bounding box is exact by construction (RAW is the curve's true max
+// |x|, and the vertical lobes reach exactly ±ASPECT/2 — see pt()) rather than
+// numerically derived, so it's passed straight to fitWithMargin instead of
+// via bboxOf/buildVerts. Track thickness (lw) is computed independently of
+// widthC — see its own comment below for why.
 
 const ASPECT = 2.2                    // figure height:width — matches the game
 const RAW    = 1 / (2 * Math.SQRT2)   // max |x| of the raw lemniscate
-const VFILL  = 0.74                   // card-tuned: leave room for the bottom title
-const WFILL  = 0.80
-const CY     = 0.43                   // track vertical center, nudged up off the title
 
 function drawScene(ctx, w, h) {
   // Soft night gradient — the game's palette, dimmed and calmed (no band/nebulae).
@@ -32,7 +36,8 @@ function drawScene(ctx, w, h) {
   ctx.fillRect(0, 0, w, h)
 
   // Faint central violet glow.
-  const glow = ctx.createRadialGradient(w / 2, h * CY, 0, w / 2, h * CY, Math.max(w, h) * 0.55)
+  const cy = h * REGION_CENTER_RATIO
+  const glow = ctx.createRadialGradient(w / 2, cy, 0, w / 2, cy, Math.max(w, h) * 0.55)
   glow.addColorStop(0, 'rgba(120,95,190,0.18)')
   glow.addColorStop(1, 'rgba(120,95,190,0)')
   ctx.fillStyle = glow
@@ -40,12 +45,24 @@ function drawScene(ctx, w, h) {
 
   // ── Figure-8 geometry — mirrors InfinityCanvas buildGeo (card-tuned fit) ────
   const cx = w / 2
-  const cy = h * CY
+  // Track thickness is sized off the card's own scale — independent of
+  // widthC — mirroring the game's own buildGeo. (An earlier version tied lw
+  // to widthC directly; since this fit is usually height-bound — the tall
+  // ASPECT lemniscate hits the vertical margin before the horizontal one —
+  // that made widthC, and so the track, thinner than the card's actual
+  // horizontal budget allowed.)
   const sizeHandle = Math.min(w, h) * 0.78
   const lw = sizeHandle * 0.0728 * 2 + 8
-  const widthC = Math.max(16, Math.min(w * WFILL - lw, (h * VFILL - lw) / ASPECT))
+
+  // Unit (widthC = 1) bounding box is exact: width 1, height ASPECT. lw is a
+  // fixed constant here (not a function of widthC), so m = 0.
+  const widthC = fitWithMargin(w, h, 1, ASPECT, 0, lw, SHAPE_VISUAL_WEIGHT.infinity)
   const scaleX = widthC / (2 * RAW)
-  const scaleY = (ASPECT * widthC) / 2
+  // V_COMPRESS pulls the top/bottom lobes in toward the middle without
+  // touching widthC's own fit above, so the card gets more clearance from
+  // its top edge and the title without changing the track's width or margin.
+  const V_COMPRESS = 0.85
+  const scaleY = (ASPECT * widthC * V_COMPRESS) / 2
 
   // Vertical lemniscate, starting at the center (s=0), top lobe first.
   const N = 260

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { roundedPolyPath } from '../_shared/roundedPolyPath'
+import { bboxOf, fitWithMargin, fitCenter, SHAPE_VISUAL_WEIGHT } from '../_shared/cardLayout'
 
 // ── HexagonCardPreview ──────────────────────────────────────────────────────
 // The Hexagon counterpart to SquareCardPreview: a soft, muted render of the
@@ -12,28 +13,14 @@ import { roundedPolyPath } from '../_shared/roundedPolyPath'
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — the same circumradius/corner ratios and the
 // shortened vertical "hold" sides — so the card reads as the real hexagon
-// track, just softened.
+// track, just softened. Size/position come from the shared cardLayout module:
+// buildVerts(1, 0, 0) gives the unit shape, whose real bounding box (not a
+// guessed ratio) drives the fit.
 
-const CY_RATIO = 0.43   // track vertical center — shifted up from dead-center (0.50),
-                        // same as SquareCardPreview: centers the track between the
-                        // card's top edge and the title (title center ≈ 0.86 of card
-                        // height in GameCarousel's CarouselCard, so (0 + 0.86)/2 ≈ 0.43).
-
-function drawScene(ctx, w, h) {
-  // Soft sandstone background — the card's warm gradient, none of the game's
-  // strata / grain / raking sun.
-  const bg = ctx.createLinearGradient(0, 0, w * 0.5, h)
-  bg.addColorStop(0, '#E4B48C')
-  bg.addColorStop(1, '#C77E5A')
-  ctx.fillStyle = bg
-  ctx.fillRect(0, 0, w, h)
-
-  // ── Hexagon geometry — mirrors HexagonCanvas buildGeo ──────────────────────
-  const R  = Math.min(w * 0.39, h * 0.45)
-  const cx = w / 2
-  const cy = h * CY_RATIO
-  const r  = R * 0.30
-
+// Pure function of R (circumradius) and center — used both to get the unit
+// (R=1) bounding box and to build the final, scaled+centered vertex list.
+function buildVerts(R, cx, cy) {
+  const r = R * 0.30
   const interior      = (6 - 2) * Math.PI / 6          // 120°
   const exterior      = Math.PI - interior             // 60°
   const cornerTangent = r / Math.tan(interior / 2)
@@ -51,7 +38,7 @@ function drawScene(ctx, w, h) {
   const a  = R * Math.cos(Math.PI / 6)
   const by = R * 0.5
   const hh = holdLen / 2
-  const verts = [
+  return [
     { x: cx - a, y: cy - hh      },   // V0 upper-left
     { x: cx,     y: cy - hh - by  },  // V1 top
     { x: cx + a, y: cy - hh      },   // V2 upper-right
@@ -59,6 +46,29 @@ function drawScene(ctx, w, h) {
     { x: cx,     y: cy + hh + by  },  // V4 bottom
     { x: cx - a, y: cy + hh      },   // V5 lower-left
   ]
+}
+
+function drawScene(ctx, w, h) {
+  // Soft sandstone background — the card's warm gradient, none of the game's
+  // strata / grain / raking sun.
+  const bg = ctx.createLinearGradient(0, 0, w * 0.5, h)
+  bg.addColorStop(0, '#E4B48C')
+  bg.addColorStop(1, '#C77E5A')
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, w, h)
+
+  // ── Hexagon geometry — mirrors HexagonCanvas buildGeo ──────────────────────
+  const unitBBox = bboxOf(buildVerts(1, 0, 0))
+  // lw = (2R)·0.0728·2 + 8 = R·0.2912 + 8 — see circleR/lw below.
+  const R  = fitWithMargin(w, h, unitBBox.w, unitBBox.h, 0.2912, 8, SHAPE_VISUAL_WEIGHT.hexagon)
+  const { cx, cy } = fitCenter(w, h, unitBBox, R)
+  const r  = R * 0.30
+
+  const interior      = (6 - 2) * Math.PI / 6          // 120°
+  const exterior      = Math.PI - interior             // 60°
+  const cornerTangent = r / Math.tan(interior / 2)
+
+  const verts = buildVerts(R, cx, cy)
 
   const circleR = (2 * R) * 0.0728
   const lw      = circleR * 2 + 8
