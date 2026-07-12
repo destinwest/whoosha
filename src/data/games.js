@@ -3,19 +3,20 @@
 // determines fan position. Square is at index 3 so it's the default center
 // card on first load.
 //
-// Locked is currently hardcoded — Square, Infinity, Hexagon, and Triangle are
-// free; only the "more breath soon" placeholders are locked (coming-soon). When
-// the paid tier is wired up, derive `locked` from the user's profiles.tier.
+// Locked is currently hardcoded — Square, Infinity, Hexagon, Triangle, and Star
+// are free; Heart, Rainbow, and Flower are named future games (locked,
+// coming-soon) with no game folder yet. When the paid tier is wired up,
+// derive `locked` from the user's profiles.tier.
 
 export const HOME_GAMES = [
-  { id: 'p1',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
-  { id: 'p2',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
+  { id: 'heart',    name: 'Heart Breathing',   tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'heart',    locked: true,  placeholder: false },
+  { id: 'rainbow',  name: 'Rainbow Breathing', tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'rainbow',  locked: true,  placeholder: false },
   { id: 'infinity', name: 'Infinity Breathing', tagline: 'Trace the infinity', route: '/games/infinity', gameKey: 'infinity',    shape: 'infinity', locked: false, placeholder: false },
   { id: 'square',   name: 'Square Breathing',   tagline: 'Trace the square',   route: '/games/square',   gameKey: 'square',      shape: 'square',   locked: false, placeholder: false },
   { id: 'hexagon',  name: 'Hexagon Breathing',  tagline: '',                   route: '/games/hexagon',  gameKey: 'hexagon',     shape: 'hexagon',  locked: false, placeholder: false },
   { id: 'triangle', name: 'Triangle Breathing',  tagline: 'Trace the triangle', route: '/games/triangle', gameKey: 'triangle',    shape: 'triangle', locked: false, placeholder: false },
   { id: 'star',     name: 'Star Breathing',      tagline: 'Trace the star',     route: '/games/star',     gameKey: 'star',        shape: 'star',     locked: false, placeholder: false },
-  { id: 'p4',       name: 'more breath soon',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'mystery',  locked: true,  placeholder: true  },
+  { id: 'flower',   name: 'Flower Breathing',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'flower',   locked: true,  placeholder: false },
 ]
 
 // Index of the card that starts in the center on first load (Square).

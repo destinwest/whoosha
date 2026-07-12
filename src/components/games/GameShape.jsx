@@ -52,6 +52,37 @@ export default function GameShape({ kind, className = '' }) {
         </svg>
       )
 
+    case 'heart':
+      return (
+        <svg viewBox="0 0 100 100" fill="none" aria-hidden="true" className={className}>
+          <path
+            d="M50 88 C50 88 14 62 14 36 C14 20 26 12 38 12 C44 12 48 15 50 20 C52 15 56 12 62 12 C74 12 86 20 86 36 C86 62 50 88 50 88 Z"
+            stroke={STROKE} strokeWidth={SW} strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+      )
+
+    case 'rainbow':
+      return (
+        <svg viewBox="0 0 100 100" fill="none" aria-hidden="true" className={className}>
+          <path d="M10 82 C10 42 28 12 50 12 C72 12 90 42 90 82"
+            stroke={STROKE} strokeWidth={SW} strokeLinecap="round" />
+          <path d="M28 82 C28 52 37 30 50 30 C63 30 72 52 72 82"
+            stroke={STROKE} strokeWidth={SW} strokeLinecap="round" />
+        </svg>
+      )
+
+    case 'flower':
+      return (
+        <svg viewBox="0 0 100 100" fill="none" aria-hidden="true" className={className}>
+          <circle cx="50" cy="30" r="16" stroke={STROKE} strokeWidth={SW} />
+          <circle cx="72" cy="43" r="16" stroke={STROKE} strokeWidth={SW} />
+          <circle cx="64" cy="68" r="16" stroke={STROKE} strokeWidth={SW} />
+          <circle cx="36" cy="68" r="16" stroke={STROKE} strokeWidth={SW} />
+          <circle cx="28" cy="43" r="16" stroke={STROKE} strokeWidth={SW} />
+          <circle cx="50" cy="50" r="10" stroke={STROKE} strokeWidth={SW} />
+        </svg>
+      )
+
     case 'mystery':
     default:
       // Three small dots — "more to come" without implying a question
