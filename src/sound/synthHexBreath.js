@@ -54,9 +54,16 @@ export const HEX_BREATH_MODE = 'deepBreath'   // 'deepBreath' | 'breeze'
 //   lfoDepth      : LFO depth as a fraction of the mid cutoff (0.1–0.2)
 //   peakGain      : bell-envelope peak amplitude (linear). Keep it quiet.
 const HEX_BREATH_PARAMS = {
+  // peakGain bumped 0.16 → 0.26 and cutoff ceiling opened slightly (560/520 →
+  // 700/650): low-passed brown noise is intrinsically quieter to the ear than
+  // a broadband sampled ambient bed at "comparable" linear gain (equal-
+  // loudness contours — low-frequency content needs more level headroom to
+  // read at the same perceived loudness). First-pass correction after the
+  // breath was reported inaudible once the ambient bed was added; character
+  // (deep, brown-noise, low body-peak) unchanged, just louder/slightly wider.
   deepBreath: {
-    inhale: { source: 'brown', cutoffStartHz: 320, cutoffEndHz: 560, cutoffQ: 0.8, bodyHz: 260, bodyQ: 1.4, bodyGainDb: 4, lfoHz: 0,    lfoDepth: 0,    peakGain: 0.16 },
-    exhale: { source: 'brown', cutoffStartHz: 520, cutoffEndHz: 300, cutoffQ: 0.8, bodyHz: 220, bodyQ: 1.4, bodyGainDb: 4, lfoHz: 0,    lfoDepth: 0,    peakGain: 0.16 },
+    inhale: { source: 'brown', cutoffStartHz: 320, cutoffEndHz: 700, cutoffQ: 0.8, bodyHz: 260, bodyQ: 1.4, bodyGainDb: 5, lfoHz: 0,    lfoDepth: 0,    peakGain: 0.26 },
+    exhale: { source: 'brown', cutoffStartHz: 650, cutoffEndHz: 300, cutoffQ: 0.8, bodyHz: 220, bodyQ: 1.4, bodyGainDb: 5, lfoHz: 0,    lfoDepth: 0,    peakGain: 0.26 },
   },
   breeze: {
     inhale: { source: 'pink',  cutoffStartHz: 380, cutoffEndHz: 620, cutoffQ: 0.6, bodyHz: 300, bodyQ: 0.8, bodyGainDb: 3, lfoHz: 0.08, lfoDepth: 0.18, peakGain: 0.12 },
@@ -189,27 +196,36 @@ export function createHexBreath(ctx, buffers) {
   // `fraction` — hexagon pacing position in [0,6) (one unit per side), from
   // HexagonCanvas getPacing. Inhale swells on sides 0 & 3, exhale on 1 & 4,
   // holds (2 & 5) stay silent.
+  //
+  // Returns the current breath PRESENCE — the raw bell value 0..1 (the max of
+  // the inhale/exhale envelopes, NOT scaled by peakGain) — so a caller can
+  // sidechain-duck other layers (e.g. the ambient bed) while the breath is
+  // audible, without needing to know this module's internal gain tuning.
   function update(fraction) {
     const now = ctx.currentTime
     const f    = ((fraction % 6) + 6) % 6
     const side = Math.floor(f)
     const sp   = f - side   // 0..1 progress within the current side
 
-    const ip = INHALE_SIDES.has(side) ? sp : null
-    const ig = (ip === null ? 0 : evaluateAsymmetricBell(ip, ENVELOPE_PEAK_AT)) * params.inhale.peakGain
+    const ip     = INHALE_SIDES.has(side) ? sp : null
+    const ipBell = ip === null ? 0 : evaluateAsymmetricBell(ip, ENVELOPE_PEAK_AT)
+    const ig     = ipBell * params.inhale.peakGain
     if (Math.abs(ig - lastInhaleGain) > RESCHEDULE_EPS) {
       inhaleChain.envGain.gain.setTargetAtTime(ig, now, TC_ENV)
       lastInhaleGain = ig
     }
     inhaleChain.onProgress(ip, now)
 
-    const xp = EXHALE_SIDES.has(side) ? sp : null
-    const xg = (xp === null ? 0 : evaluateAsymmetricBell(xp, ENVELOPE_PEAK_AT)) * params.exhale.peakGain
+    const xp     = EXHALE_SIDES.has(side) ? sp : null
+    const xpBell = xp === null ? 0 : evaluateAsymmetricBell(xp, ENVELOPE_PEAK_AT)
+    const xg     = xpBell * params.exhale.peakGain
     if (Math.abs(xg - lastExhaleGain) > RESCHEDULE_EPS) {
       exhaleChain.envGain.gain.setTargetAtTime(xg, now, TC_ENV)
       lastExhaleGain = xg
     }
     exhaleChain.onProgress(xp, now)
+
+    return Math.max(ipBell, xpBell)
   }
 
   function dispose() {

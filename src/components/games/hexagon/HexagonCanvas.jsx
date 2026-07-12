@@ -497,7 +497,7 @@ function projectGlobal(geo, px, py) {
 
 // ── HexagonCanvas ─────────────────────────────────────────────────────────────
 const HexagonCanvas = forwardRef(function HexagonCanvas(
-  { strokeModeRef, pacingCanvasRef, onTick, onBreath, onGameStart, onResize, interactive },
+  { strokeModeRef, pacingCanvasRef, onTick, onBreath, onGameStateTick, onGameStart, onResize, interactive },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -1248,6 +1248,9 @@ const HexagonCanvas = forwardRef(function HexagonCanvas(
         gaugeEffectRef.current = gFx
         // Drain saturation toward grayscale — the color drains from the world.
         document.documentElement.style.setProperty('--game-saturation', (1 - gFx * 0.9).toFixed(3))
+
+        // Forward the gauge effect to the audio layer (ambient-bed ducking).
+        onGameStateTick?.({ gaugeEffect: gFx })
       }
 
       // ── Synergy update ────────────────────────────────────────────────────

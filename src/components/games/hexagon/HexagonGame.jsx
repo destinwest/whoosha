@@ -179,12 +179,14 @@ export default function HexagonGame({ onExit }) {
   const bgCanvasRef     = useRef(null)
   const pacingCanvasRef = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
 
-  // ── Breath audio (audition) ─────────────────────────────────────────────────
-  // Minimal breath-only audio path for synthHexBreath. Stable callbacks so the
-  // canvas frame loop (captured once at mount) always reaches the live graph.
-  const breathRef   = useHexBreath()
-  const emitBreath  = useRef((fraction) => breathRef.current.update(fraction)).current
-  const unlockAudio = useRef(() => breathRef.current.unlock()).current
+  // ── Breath + ambient audio ──────────────────────────────────────────────────
+  // Breath (synthHexBreath) + ambient bed (synthHexAmbient), the bed ducking
+  // toward silence as the heat gauge climbs. Stable callbacks so the canvas
+  // frame loop (captured once at mount) always reaches the live graph.
+  const breathRef     = useHexBreath()
+  const emitBreath    = useRef((fraction) => breathRef.current.update(fraction)).current
+  const emitGameState = useRef((snapshot) => breathRef.current.updateGauge(snapshot.gaugeEffect)).current
+  const unlockAudio   = useRef(() => breathRef.current.unlock()).current
 
   // ── Desert background — baked once per resize ──────────────────────────────
   useEffect(() => {
@@ -281,6 +283,7 @@ export default function HexagonGame({ onExit }) {
             onGameStart={() => { sessionStartRef.current = Date.now() }}
             onResize={setLabelGeo}
             onBreath={emitBreath}
+            onGameStateTick={emitGameState}
             interactive={phase === 'game'}
           />
         </div>
