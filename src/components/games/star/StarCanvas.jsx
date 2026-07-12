@@ -2,8 +2,8 @@
 // Star Breathing canvas — mirrors TriangleCanvas in mechanics but draws a
 // rounded five-pointed-star OUTLINE (10 vertices: 5 tips + 5 valleys), traversed
 // clockwise from the valley just before the top tip, with one tip oriented at
-// the top of the screen. Uniform 4s per segment, alternating breathe-in /
-// breathe-out (no holds → 40s cycle). Each edge either ascends valley→tip
+// the top of the screen. Uniform 5s per segment, alternating breathe-in /
+// breathe-out (no holds → 50s cycle). Each edge either ascends valley→tip
 // (breathe in) or descends tip→valley (breathe out):
 //   side 0  V0→V1  valley→top-tip (ascending)  — breathe in
 //   side 1  V1→V2  top-tip→valley (descending) — breathe out
@@ -25,10 +25,18 @@
 //   strokeModeRef  — { current: 'classic' | 'watercolor' }
 //   pacingCanvasRef — ref to the overlay canvas above the saturate wrapper
 //   onTick(now)    — called each rAF frame
+//   onBreath(fraction) — called each rAF frame with a TIME-based fraction
+//                        [0, SIDES), linear in elapsed time (NOT the geometric
+//                        pacingPos.fraction — see the note above getPacing).
+//                        StarGame edge-detects phase changes off this to fire
+//                        the voice cues on an exact, even cadence (mirrors
+//                        HexagonCanvas's onBreath shape, different semantics).
 //   onGameStart()  — called once when the child first drags from the start point
 //   interactive    — boolean; controls pointer events on the canvas element
 //
-// No audio this pass (morning-light theme is silent for now — see StarGame).
+// Voice cues ("breathe in" / "breathe out") are owned by StarGame via
+// useStarVoice, driven off onBreath — see the comment there. No other audio
+// this pass (no ambient bed).
 //
 // Imperative API (via ref):
 //   reset()        — clears all canvas state and resets all game-state refs
@@ -61,12 +69,17 @@ const STAR_CORNER_MAX_EDGE  = 0.88   // both corner tangents together ≤ 88% of
 // width, acceptance zone, corner radius) scales with it, so this stays coherent.
 // Dial to taste — 1.0 = same width as the other games.
 const STAR_TRACK_SLIM       = 0.85   // 15% slimmer
-// Alternating breathe-in / breathe-out, 4s per segment, no holds. 10 × 4s = 40s.
+// Alternating breathe-in / breathe-out, 5s per segment, no holds. 10 × 5s = 50s.
 // The pacing dot advances by constant ARC-LENGTH over CYCLE_MS (see getPacing),
-// so SIDE_DURATIONS_MS[i] is really "4s per breath phase"; the heat gauge reads
-// the per-phase 4s from it. All phases equal, so index choice never matters.
-const SIDE_DURATIONS_MS     = Array(SIDES).fill(4000)
-const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 40_000
+// so SIDE_DURATIONS_MS[i] is really "5s per breath phase"; the heat gauge reads
+// the per-phase 5s from it. All phases equal, so index choice never matters.
+const SIDE_DURATIONS_MS     = Array(SIDES).fill(5000)
+const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 50_000
+// Voice-cue phase duration — same value as each SIDE_DURATIONS_MS entry (all
+// equal), named separately because it drives the audio trigger's own TIME-based
+// clock (see the onBreath call site), which is intentionally independent of the
+// geometry-driven pacing fraction.
+const VOICE_PHASE_MS        = CYCLE_MS / SIDES
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // Finger-trail drift palette — the user's "morning's first light" palette (soft
@@ -117,12 +130,7 @@ const SYNERGY_RETURN_MS         = 3000                                  // full 
 const SYNERGY_RETURN_RATE       = SYNERGY_MAX_ACCUM_MS / SYNERGY_RETURN_MS  // accum-ms drained per real-ms during return
 const EMBER_PARTICLE_CAP        = 30
 const EMBER_SPAWN_RATE_AT_FULL  = 14      // particles per second at Stage 4.0
-const ALPHA_ACTIVE = 0.75
-const ALPHA_FLOOR  = 0.18
-const SCALE_ACTIVE = 1.5
-const BLEND_MS     = 600
 
-const smoothstep   = t => t * t * (3 - 2 * t)
 const easeIn       = t => t * t * t
 const easeOutSoft  = t => 1 - Math.pow(1 - t, 2)
 
@@ -142,8 +150,8 @@ function lerpColor(hexA, hexB, t) {
 // Builds the centerline geometry for a rounded five-pointed-star OUTLINE,
 // traversed clockwise from the valley just before the top tip. The structure
 // mirrors TriangleCanvas's buildGeo (vertex/arc centers, straight-segment
-// endpoints, sampled points, label midpoints), but because the outline is
-// CONCAVE the corner math is generalized to per-vertex SIGNED turn angles:
+// endpoints, sampled points), but because the outline is CONCAVE the corner
+// math is generalized to per-vertex SIGNED turn angles:
 //   turn[i] = signed deflection at vertex i (atan2(cross, dot) of the in/out
 //             edge directions). Sharp tips turn one way (large +), reflex
 //             valleys turn the other (smaller −).
@@ -271,20 +279,6 @@ function buildGeo(rect) {
     }
   }
 
-  const labelMids = straightFrom.map((a, i) => ({
-    x: (a.x + straightTo[i].x) / 2,
-    y: (a.y + straightTo[i].y) / 2,
-  }))
-
-  // Per-side label rotation: align text to the edge direction, but flip any edge
-  // pointing leftward so labels never render upside-down.
-  const labelAngles = uOut.map((u) => {
-    let ang = Math.atan2(u.y, u.x)
-    if (ang > Math.PI / 2)  ang -= Math.PI
-    if (ang < -Math.PI / 2) ang += Math.PI
-    return ang
-  })
-
   // Cumulative arc-length at each point index (cumLen[0] = 0,
   // cumLen[N] = totalPathLength). The groove tracing core measures
   // finger-to-bead distance ALONG the path, and points are sampled by
@@ -315,7 +309,7 @@ function buildGeo(rect) {
     cx, cy, sq, R, Ri, r, lw, sfArr,
     arcCenters, arcStartAngles, arcSweeps,
     straightFrom, straightTo, verts,
-    points, labelMids, labelAngles,
+    points,
     cumLen, totalPathLength, pacingArcOrigin,
     sides: SIDES,
     w, h,
@@ -533,7 +527,7 @@ function projectGlobal(geo, px, py) {
 
 // ── StarCanvas ────────────────────────────────────────────────────────────────
 const StarCanvas = forwardRef(function StarCanvas(
-  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onResize, interactive },
+  { strokeModeRef, pacingCanvasRef, onTick, onBreath, onGameStart, interactive },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -681,19 +675,26 @@ const StarCanvas = forwardRef(function StarCanvas(
   // ── Pacing circle position ─────────────────────────────────────────────────
   // CONSTANT-SPEED pacing: the star's 10 segments are geometrically UNEQUAL in
   // length (a tip's corner arc is much longer than a valley's), so giving each
-  // an equal 4s made the dot speed up and slow down. Instead we advance by
+  // an equal 5s made the dot speed up and slow down. Instead we advance by
   // constant ARC-LENGTH — the whole loop in CYCLE_MS — so the dot moves at a
   // single steady rate everywhere. Time is linear in arc-length, and consecutive
-  // corner-arc midpoints are exactly totalPathLength/SIDES apart, so each 4s
+  // corner-arc midpoints are exactly totalPathLength/SIDES apart, so each 5s
   // breath still lands boundary-to-boundary on the corners: every inhale ends at
   // a tip (peak), every exhale at a valley (notch). We start from pacingArcOrigin
   // (the midpoint of V0's valley arc → first inhale ends at the top tip).
   //
   // `fraction` is returned as the GEOMETRIC fraction (side index + progress,
-  // derived from the resulting sample index) — the label-proximity pulse and the
-  // heat-gauge/synergy side lookup expect that. The gauge's speed comparison is
-  // unaffected: a child tracking the dot moves at arc-rate P/CYCLE, i.e.
-  // childPathRate (already arc-normalized) = SIDES/CYCLE = pacingRate = 1/4000.
+  // derived from the resulting sample index) — the heat-gauge/synergy side
+  // lookup expects that. The gauge's speed comparison is unaffected: a child
+  // tracking the dot moves at arc-rate P/CYCLE, i.e. childPathRate (already
+  // arc-normalized) = SIDES/CYCLE = pacingRate = 1/5000.
+  //
+  // IMPORTANT: the voice-cue trigger does NOT use this fraction (see the
+  // onBreath call site below) — `fraction` flips side-index at the END of each
+  // corner arc (a fixed SAMPLE-INDEX boundary), and since tip arcs are ~2× the
+  // length of valley arcs, that flip is NOT evenly spaced in time even though
+  // the dot's motion is constant-speed. Using it for audio produced alternating
+  // ~2.9s / ~5.1s segments instead of a clean 5s/5s (bug, fixed 2026-07-11).
   function getPacing(elapsed) {
     const geo = geoRef.current
     if (!geo) return null
@@ -995,11 +996,6 @@ const StarCanvas = forwardRef(function StarCanvas(
         pacingCanvas.height = rect.height * dpr
       }
       geoRef.current     = buildGeo(rect)
-      onResize?.({
-        labelMids:   geoRef.current.labelMids,
-        labelAngles: geoRef.current.labelAngles,
-        sq:          geoRef.current.sq,
-      })
 
       const { cx, cy, R, Ri, r, lw, points } = geoRef.current
       const paintCtx = paintCanvas.getContext('2d')
@@ -1094,10 +1090,22 @@ const StarCanvas = forwardRef(function StarCanvas(
 
       // ── Pacing position (computed once, shared by fingerprint + pacing circle) ─
       // Pacing starts at mount — independent of first touch.
-      const pacingPos = getPacing(now - pacingStartRef.current)
+      const elapsedPacing = now - pacingStartRef.current
+      const pacingPos = getPacing(elapsedPacing)
       if (pacingPos) {
         pacingPosRef.current = pacingPos
       }
+
+      // Drive the voice-cue trigger off a TIME-based fraction, NOT
+      // pacingPos.fraction — see the "IMPORTANT" note above getPacing for why
+      // the geometric fraction flips unevenly. This fraction increases exactly
+      // linearly with elapsed time, so Math.floor() of it (in StarGame) crosses
+      // every VOICE_PHASE_MS, no more, no less. It shares pacingArcOrigin's
+      // modular origin (both keyed off elapsed % CYCLE_MS), so integer
+      // crossings still land at the same instant the dot passes each corner's
+      // midpoint (a tip or valley) — the visual alignment holds "for free"
+      // without being the source of truth for timing.
+      onBreath?.((elapsedPacing % CYCLE_MS) / VOICE_PHASE_MS)
 
       // ── Bead tracing (per-frame, leash + acceptance) ──────────────────────
       // Move the bead toward the finger along the groove, or freeze it if the
@@ -1527,43 +1535,6 @@ const StarCanvas = forwardRef(function StarCanvas(
       }
 
       ctx.restore()
-
-      // ── Label proximity — write CSS vars for DOM overlay ──────────────────
-      // Driven by the pacing circle's ACTUAL fraction (from getPacing). Each
-      // label grows as the dot rounds the corner arc into its side, holds full
-      // while the dot crosses the label, then fades. Straight-fractions are
-      // per-side: sfi is the label's own side; sfp is the previous side, whose
-      // corner arc carries the approach. All three sides are equal here, so the
-      // grow-in takes the same time on every side.
-      if (pacingPos) {
-        const { sfArr } = geo
-        const lpBlend = smoothstep(startedRef.current
-          ? Math.min(1, (now - gameStartRef.current) / BLEND_MS)
-          : 0)
-
-        for (let i = 0; i < SIDES; i++) {
-          const sfi = sfArr[i]
-          const sfp = sfArr[(i - 1 + SIDES) % SIDES]
-          const localFrac = ((pacingPos.fraction - i) % SIDES + SIDES) % SIDES
-          let proximity
-          if (localFrac >= (SIDES - 1) + sfp) {
-            // Approaching on the previous side's corner arc — grow in.
-            proximity = smoothstep((localFrac - ((SIDES - 1) + sfp)) / (1 - sfp))
-          } else if (localFrac <= sfi / 1.5) {
-            proximity = 1
-          } else if (localFrac <= sfi) {
-            proximity = smoothstep(1 - (localFrac - sfi / 1.5) / (sfi - sfi / 1.5))
-          } else {
-            proximity = 0
-          }
-          const alphaProx = ALPHA_FLOOR + (ALPHA_ACTIVE - ALPHA_FLOOR) * proximity
-          const scaleProx = 1.0 + (SCALE_ACTIVE - 1.0) * proximity
-          const alpha     = ALPHA_ACTIVE + (alphaProx - ALPHA_ACTIVE) * lpBlend
-          const scale     = 1.0 + (scaleProx - 1.0) * lpBlend
-          document.documentElement.style.setProperty(`--label-${i}-alpha`, alpha.toFixed(3))
-          document.documentElement.style.setProperty(`--label-${i}-scale`, scale.toFixed(3))
-        }
-      }
     }
 
     rafRef.current = requestAnimationFrame(frame)

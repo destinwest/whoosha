@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import StrokeSelector from '../square/StrokeSelector'   // shared until refactor
 import StarCanvas from './StarCanvas'
 import CompletionScreen from '../square/CompletionScreen'
+import MuteButton from '../../ui/MuteButton'
+import { useStarVoice } from '../../../hooks/useStarVoice'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
 // StrokeSelector component, but each toggles its visibility independently.
@@ -43,16 +45,15 @@ function buildMorningBg(w, h, dpr) {
   return oc
 }
 
-// 10-segment label sequence, traversed clockwise from the valley before the top
-// tip. Segments strictly alternate: even sides ascend valley→tip (breathe in),
-// odd sides descend tip→valley (breathe out). Rotation for each label comes from
-// the geometry (labelAngles), so no hard-coded angle array is needed.
-const LABEL_TEXT = (i) => (i % 2 === 0 ? 'breathe in' : 'breathe out')
-
 // ── StarGame ──────────────────────────────────────────────────────────────────
-// Phase manager — owns game phase, stroke selection, session timing, exit, and
-// the baked (placeholder) morning background. All canvas drawing, geometry, and
-// pointer handling live in StarCanvas. No audio this pass.
+// Phase manager — owns game phase, stroke selection, session timing, exit, the
+// baked (placeholder) morning background, and the voice cues. All canvas
+// drawing, geometry, and pointer handling live in StarCanvas.
+//
+// No on-screen breathing labels — voice-only instruction (spoken "breathe in" /
+// "breathe out" cues via useStarVoice), testing whether voice-only reads better
+// than text for this game. The star's 10 arms made the old text labels feel
+// cramped regardless of layout tuning; removed rather than fought.
 export default function StarGame({ onExit }) {
 
   // Mount straight into play — no in-game intro (same as Hexagon / Infinity /
@@ -60,7 +61,6 @@ export default function StarGame({ onExit }) {
   const [phase, setPhase]               = useState('game')   // 'game' | 'completion'
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
-  const [labelGeo, setLabelGeo]         = useState(null)   // { labelMids, labelAngles, sq }
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef  = useRef(null)
@@ -68,6 +68,33 @@ export default function StarGame({ onExit }) {
   const starCanvasRef    = useRef(null)
   const bgCanvasRef      = useRef(null)
   const pacingCanvasRef  = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
+
+  // ── Voice cues ───────────────────────────────────────────────────────────
+  // Minimal, non-SoundDirector audio path (mirrors Hexagon's useHexBreath) —
+  // just the two spoken clips, no ambient bed. `phaseRef` mirrors `phase` into
+  // a ref so the STABLE `emitBreath` callback (identity fixed via useRef, so
+  // StarCanvas doesn't get a new prop every render) can gate on the latest
+  // phase without going stale — `emitBreath` is created once, so closing over
+  // `phase` directly would freeze it at its first-render value.
+  const voiceRef   = useStarVoice()
+  const phaseRef   = useRef(phase)
+  phaseRef.current = phase
+
+  const lastBreathPhaseRef = useRef(-1)
+  // Edge-detects breath-phase transitions from StarCanvas's per-frame, TIME-
+  // based fraction [0, 10) (evenly spaced — see the note above getPacing in
+  // StarCanvas for why it's NOT the geometric pacing fraction) and fires
+  // exactly one voice cue per transition, every 5s — mirrors HexagonCanvas's
+  // onBreath shape, but this consumer is event-driven (a one-shot clip per
+  // phase change) rather than continuous synth modulation.
+  const emitBreath = useRef((fraction) => {
+    if (phaseRef.current !== 'game') return   // no new cues once completion begins
+    const phaseIdx = Math.floor(fraction)
+    if (phaseIdx === lastBreathPhaseRef.current) return
+    lastBreathPhaseRef.current = phaseIdx
+    voiceRef.current?.play(phaseIdx % 2 === 0 ? 'in' : 'out')
+  }).current
+  const unlockAudio = useRef(() => voiceRef.current?.unlock()).current
 
   // ── Morning background — baked once per resize ──────────────────────────────
   useEffect(() => {
@@ -105,6 +132,7 @@ export default function StarGame({ onExit }) {
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
     setPhase('completion')
+    voiceRef.current?.stop()   // silence any in-flight cue rather than let it linger under the card
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }
 
@@ -112,6 +140,7 @@ export default function StarGame({ onExit }) {
     <div
       className="absolute inset-0 overflow-hidden select-none"
       style={{ touchAction: 'none', background: BG_SOLID }}
+      onPointerDown={unlockAudio}   // resume the AudioContext on the first gesture (iOS)
     >
       {/* back button */}
       <button
@@ -124,6 +153,8 @@ export default function StarGame({ onExit }) {
           <path d="M19 12H5M12 5l-7 7 7 7" />
         </svg>
       </button>
+
+      <MuteButton className="absolute top-4 right-4 z-20" />
 
       {/* game canvas — always mounted; blur/scale driven by CSS custom properties.
           Dims (doesn't vanish) once completion phase begins, same treatment as
@@ -157,7 +188,7 @@ export default function StarGame({ onExit }) {
             strokeModeRef={strokeModeRef}
             pacingCanvasRef={pacingCanvasRef}
             onGameStart={() => { sessionStartRef.current = Date.now() }}
-            onResize={setLabelGeo}
+            onBreath={emitBreath}
             interactive={phase === 'game'}
           />
         </div>
@@ -170,36 +201,6 @@ export default function StarGame({ onExit }) {
           ref={pacingCanvasRef}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
         />
-
-        {/* label overlay — DOM text, positioned + rotated from canvas geometry.
-            10 labels alternating breathe in / breathe out around the star. */}
-        {labelGeo && (() => {
-          const fs = Math.max(11, labelGeo.sq * 0.040)
-          return (
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-              {labelGeo.labelMids.map((mid, i) => (
-                <div
-                  key={i}
-                  style={{
-                    position:   'absolute',
-                    left:       mid.x,
-                    top:        mid.y,
-                    transform:  `translate(-50%, -50%) rotate(${labelGeo.labelAngles[i]}rad) scale(var(--label-${i}-scale, 1))`,
-                    opacity:    `var(--label-${i}-alpha, 0.7)`,
-                    fontFamily: "'Nunito', sans-serif",
-                    fontWeight: 700,
-                    fontSize:   `${fs}px`,
-                    color:      'rgba(94,90,134,1)',   // muted lavender-slate — legible on yellow track + pastel sky
-                    whiteSpace: 'nowrap',
-                    willChange: 'transform, opacity',
-                  }}
-                >
-                  {LABEL_TEXT(i)}
-                </div>
-              ))}
-            </div>
-          )
-        })()}
       </div>
 
       {/* Vignette — a gentle cool lavender darkening at the edges (light, so the
