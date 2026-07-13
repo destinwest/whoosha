@@ -11,118 +11,215 @@ const STROKE_SELECTOR_ENABLED = false
 // behind the completion card without vanishing entirely (matches Infinity).
 const COMPLETION_CANVAS_OPACITY = 0.25
 
-// ── buildAlpineBg ──────────────────────────────────────────────────────────────
+// ── buildSkyBg ────────────────────────────────────────────────────────────────
 // Bakes the entire static background into a single offscreen canvas at
-// device-pixel resolution. A smooth, hazy blue sky — no wisp/streak shapes at
-// all, just soft atmospheric variation, matching a reference photo pixel-
-// sampled directly (see SKY_STOPS below). Built from two layers: an 11-stop
-// vertical gradient carrying the photo's light→deep→light banding, then a
-// scattering of large, soft, overlapping round blobs (two scales: broad "mass"
-// blobs for the big soft shape, smaller "detail" blobs for finer variation) to
-// fake the photo's gentle local luminance drift. This replaces the earlier
-// wispy-cirrus/hero-sweep technique entirely — the reference has no directional
-// shapes to draw. The slate triangle "mountain" (drawn by TriangleCanvas) sits
-// in front. No CSS blend layers, no runtime SVG filters, and — critically —
-// no `getImageData`/per-pixel JS (locked anti-pattern, POLISH-STRATEGY.md):
-// every blob is a plain radial-gradient fill, GPU-composited. Baked once per
-// resize; per-frame cost is zero.
+// device-pixel resolution. Design brief (2026-07-13): the child is looking
+// across a vast hazy mountain chain toward a bright expansive sky — so the
+// vertical gradient is INVERTED from a typical sky photo: darker, grayer,
+// LESS saturated gray-periwinkle at the bottom (the hazy horizon), rising to
+// a lighter, bluer, MORE saturated top. Cloud forms are flat, crisp-edged,
+// abstract poster shapes — one flat fill per mass, no interior shading and no
+// scallop detailing — tonal (low contrast) against the local gradient. The
+// slate triangle "mountain" (drawn by TriangleCanvas) is the foreground peak.
+//
+// ROUND-1 EXPLORATION: four candidate compositions live side by side behind a
+// dev-only tap switcher (DEV_SKY_SWITCHER below) for on-device comparison.
+// The losing variants and the switcher get stripped once a direction is picked.
+//
+// Every shape is a flat multi-subpath fill (unioned circles — overlapping
+// subpaths inside one fill() don't double-darken, so each mass reads as one
+// crisp silhouette). No CSS blend layers, no runtime SVG filters, and no
+// `getImageData`/per-pixel JS (locked anti-pattern, POLISH-STRATEGY.md).
+// Baked once per resize (and per switcher tap); per-frame cost is zero.
 
-// Vertical gradient stops, sampled directly from the reference photo (11-point
-// row-average scan): light at the top and bottom, a deeper blue-teal band
-// centered around 40% of the height.
+// Show the round-1 variant-cycling button. Strip (with the losing paint
+// functions) once a sky direction is chosen.
+const DEV_SKY_SWITCHER = true
+
+// Vertical gradient stops, top → bottom: light saturated blue up high, sinking
+// through periwinkle into a darker, grayer, desaturated horizon band.
 const SKY_STOPS = [
-  { t: 0.00, color: '#CAD8DD' },
-  { t: 0.10, color: '#B9CFD9' },
-  { t: 0.20, color: '#A9C6D4' },
-  { t: 0.30, color: '#99BED1' },
-  { t: 0.42, color: '#8FB8CE' },
-  { t: 0.55, color: '#97BED2' },
-  { t: 0.65, color: '#9BC0D3' },
-  { t: 0.75, color: '#A6C7D8' },
-  { t: 0.85, color: '#AFCDDB' },
-  { t: 0.93, color: '#BDD5DF' },
-  { t: 1.00, color: '#CCDEE4' },
+  { t: 0.00, color: '#98BCE4' },
+  { t: 0.22, color: '#A0BCDC' },
+  { t: 0.45, color: '#A6B3CE' },
+  { t: 0.68, color: '#9DA3BC' },
+  { t: 0.86, color: '#9095A9' },
+  { t: 1.00, color: '#888C9E' },
 ]
-// Blob tones — a touch lighter and a touch deeper than the local gradient
-// value, sampled from the photo's per-row min/max range (~±15 RGB units).
-const BLOB_LIGHT = '214,228,232'   // #D6E4E8 — soft highlight patch
-const BLOB_SHADE = '139,181,203'   // #8BB5CB — soft deeper patch
 
-function buildAlpineBg(w, h, dpr) {
+function buildSkyBg(w, h, dpr, variant) {
   const oc = document.createElement('canvas')
   oc.width  = w * dpr
   oc.height = h * dpr
   const ctx = oc.getContext('2d')
   ctx.scale(dpr, dpr)
 
-  // Base sky — the photo's sampled vertical banding.
   const sky = ctx.createLinearGradient(0, 0, 0, h)
   for (const stop of SKY_STOPS) sky.addColorStop(stop.t, stop.color)
   ctx.fillStyle = sky
   ctx.fillRect(0, 0, w, h)
 
-  // Soft atmospheric variation — large overlapping blobs, no defined shapes.
-  paintClouds(ctx, w, h)
-
+  SKY_VARIANTS[variant].paint(ctx, w, h)
   return oc
 }
 
-// ── paintClouds / blobs ───────────────────────────────────────────────────────
-// Two scales of soft round blobs, both drawn with the same radial-gradient
-// primitive (opaque-ish core fading fully to transparent at the edge — no hard
-// rim). MASS_BLOBS are large and low-alpha, building the big soft shape seen in
-// the photo; DETAIL_BLOBS are smaller and add finer local variation on top.
-// Positions/sizes are fractions of (w, h) so the sky scales; each blob's seed
-// only matters for reproducibility here (there's no per-blob jitter beyond the
-// authored values — the irregularity comes from many overlapping soft shapes,
-// not randomness).
-const MASS_BLOBS = [
-  { cx: 0.20, cy: 0.15, rx: 0.42, ry: 0.36, tone: BLOB_LIGHT, alpha: 0.14 },
-  { cx: 0.68, cy: 0.10, rx: 0.36, ry: 0.30, tone: BLOB_LIGHT, alpha: 0.12 },
-  { cx: 0.42, cy: 0.36, rx: 0.50, ry: 0.34, tone: BLOB_SHADE, alpha: 0.16 },
-  { cx: 0.82, cy: 0.42, rx: 0.34, ry: 0.30, tone: BLOB_SHADE, alpha: 0.14 },
-  { cx: 0.08, cy: 0.55, rx: 0.30, ry: 0.32, tone: BLOB_LIGHT, alpha: 0.11 },
-  { cx: 0.55, cy: 0.62, rx: 0.38, ry: 0.32, tone: BLOB_SHADE, alpha: 0.10 },
-  { cx: 0.88, cy: 0.76, rx: 0.32, ry: 0.30, tone: BLOB_LIGHT, alpha: 0.12 },
-  { cx: 0.28, cy: 0.86, rx: 0.36, ry: 0.30, tone: BLOB_LIGHT, alpha: 0.10 },
-]
-const DETAIL_BLOBS = [
-  { cx: 0.12, cy: 0.08, rx: 0.14, ry: 0.10, tone: BLOB_LIGHT, alpha: 0.10 },
-  { cx: 0.38, cy: 0.06, rx: 0.12, ry: 0.09, tone: BLOB_SHADE, alpha: 0.08 },
-  { cx: 0.58, cy: 0.22, rx: 0.16, ry: 0.11, tone: BLOB_SHADE, alpha: 0.10 },
-  { cx: 0.30, cy: 0.28, rx: 0.13, ry: 0.10, tone: BLOB_LIGHT, alpha: 0.08 },
-  { cx: 0.75, cy: 0.30, rx: 0.14, ry: 0.10, tone: BLOB_LIGHT, alpha: 0.09 },
-  { cx: 0.95, cy: 0.20, rx: 0.12, ry: 0.09, tone: BLOB_SHADE, alpha: 0.07 },
-  { cx: 0.18, cy: 0.46, rx: 0.14, ry: 0.10, tone: BLOB_SHADE, alpha: 0.08 },
-  { cx: 0.48, cy: 0.50, rx: 0.15, ry: 0.11, tone: BLOB_LIGHT, alpha: 0.09 },
-  { cx: 0.68, cy: 0.58, rx: 0.13, ry: 0.10, tone: BLOB_SHADE, alpha: 0.07 },
-  { cx: 0.92, cy: 0.60, rx: 0.12, ry: 0.09, tone: BLOB_LIGHT, alpha: 0.08 },
-  { cx: 0.10, cy: 0.72, rx: 0.13, ry: 0.10, tone: BLOB_LIGHT, alpha: 0.07 },
-  { cx: 0.60, cy: 0.80, rx: 0.14, ry: 0.10, tone: BLOB_SHADE, alpha: 0.08 },
-]
+// ── flat-shape primitives ─────────────────────────────────────────────────────
+// All positions are fractions of (w, h); radii are fractions of w so shapes
+// keep their aspect as the sky scales. Colors are rgba with alpha well below 1
+// so every shape tints with the gradient behind it — that's what keeps the
+// contrast tonal without hand-matching a color per altitude.
 
-// One soft round blob — a radial gradient squashed slightly into an ellipse,
-// opaque-ish at its center and fully feathered to transparent at its edge.
-// Overlapping many of these is what builds the photo's smooth local variation.
-function blob(ctx, cx, cy, rx, ry, rgb, alpha) {
-  ctx.save()
-  ctx.translate(cx, cy)
-  ctx.scale(1, ry / rx)
-  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx)
-  g.addColorStop(0,   `rgba(${rgb},${alpha.toFixed(3)})`)
-  g.addColorStop(0.6, `rgba(${rgb},${(alpha * 0.55).toFixed(3)})`)
-  g.addColorStop(1,   `rgba(${rgb},0)`)
-  ctx.fillStyle = g
+// One flat cloud mass — circles unioned into a single path, filled once.
+// lobes: [x, y, r][]
+function flatMass(ctx, w, h, color, lobes) {
+  ctx.fillStyle = color
   ctx.beginPath()
-  ctx.arc(0, 0, rx, 0, Math.PI * 2)
+  for (const [fx, fy, fr] of lobes) {
+    const r = fr * w
+    ctx.moveTo(fx * w + r, fy * h)
+    ctx.arc(fx * w, fy * h, r, 0, Math.PI * 2)
+  }
   ctx.fill()
-  ctx.restore()
 }
 
-function paintClouds(ctx, w, h) {
-  for (const b of MASS_BLOBS)   blob(ctx, b.cx * w, b.cy * h, b.rx * w, b.ry * h, b.tone, b.alpha)
-  for (const b of DETAIL_BLOBS) blob(ctx, b.cx * w, b.cy * h, b.rx * w, b.ry * h, b.tone, b.alpha)
+// A cloud bank — scalloped lobes joined by a base rectangle running from yBase
+// past the bottom edge, so the mass reads as a solid billowing wall.
+function bank(ctx, w, h, color, yBase, lobes) {
+  ctx.fillStyle = color
+  ctx.beginPath()
+  for (const [fx, fy, fr] of lobes) {
+    const r = fr * w
+    ctx.moveTo(fx * w + r, fy * h)
+    ctx.arc(fx * w, fy * h, r, 0, Math.PI * 2)
+  }
+  ctx.rect(-0.05 * w, yBase * h, 1.1 * w, (1.1 - yBase) * h)
+  ctx.fill()
 }
+
+// A ridgeline silhouette — smooth rolling curve through pts (midpoint
+// quadratics), closed past the bottom edge. pts: [x, y][]
+function ridge(ctx, w, h, color, pts) {
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.moveTo(-0.05 * w, pts[0][1] * h)
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x1, y1] = pts[i]
+    const [x2, y2] = pts[i + 1]
+    ctx.quadraticCurveTo(x1 * w, y1 * h, ((x1 + x2) / 2) * w, ((y1 + y2) / 2) * h)
+  }
+  const [lx, ly] = pts[pts.length - 1]
+  ctx.quadraticCurveTo(lx * w, ly * h, 1.05 * w, ly * h)
+  ctx.lineTo(1.05 * w, 1.1 * h)
+  ctx.lineTo(-0.05 * w, 1.1 * h)
+  ctx.closePath()
+  ctx.fill()
+}
+
+// ── round-1 candidate compositions ───────────────────────────────────────────
+
+// A — "cloud sea": layered billowing banks across the bottom, the back bank
+// rising to the right (inspiration image 1's composition, flattened to poster
+// shapes); two small drifters in the open upper sky.
+function paintCloudSea(ctx, w, h) {
+  // back bank — darker haze, highest on the right
+  bank(ctx, w, h, 'rgba(150,158,182,0.30)', 0.86, [
+    [0.05, 0.83, 0.10], [0.24, 0.80, 0.12], [0.46, 0.82, 0.10],
+    [0.66, 0.77, 0.13], [0.88, 0.72, 0.15], [1.02, 0.70, 0.13],
+  ])
+  // mid bank — lighter, lower
+  bank(ctx, w, h, 'rgba(188,197,218,0.32)', 0.92, [
+    [0.00, 0.90, 0.09], [0.18, 0.88, 0.11], [0.40, 0.90, 0.09],
+    [0.60, 0.86, 0.12], [0.83, 0.84, 0.11], [1.00, 0.86, 0.10],
+  ])
+  // front bank — lightest rim hugging the bottom edge
+  bank(ctx, w, h, 'rgba(208,216,233,0.38)', 0.97, [
+    [0.08, 0.965, 0.08], [0.30, 0.955, 0.10], [0.52, 0.965, 0.08],
+    [0.74, 0.95, 0.11], [0.94, 0.96, 0.09],
+  ])
+  // drifters
+  flatMass(ctx, w, h, 'rgba(198,211,232,0.42)', [
+    [0.20, 0.155, 0.055], [0.27, 0.145, 0.07], [0.35, 0.16, 0.05],
+  ])
+  flatMass(ctx, w, h, 'rgba(198,211,232,0.34)', [
+    [0.60, 0.075, 0.04], [0.66, 0.07, 0.05], [0.72, 0.08, 0.035],
+  ])
+}
+
+// B — "quiet strata": long flat elongated wisps (inspiration image 2's
+// shapes), light and sparse up top, denser and darker toward the horizon.
+function paintStrata(ctx, w, h) {
+  // big upper wisp
+  flatMass(ctx, w, h, 'rgba(202,214,234,0.38)', [
+    [0.18, 0.12, 0.07], [0.34, 0.105, 0.10], [0.55, 0.115, 0.09], [0.72, 0.13, 0.06],
+  ])
+  // mid-left wisp
+  flatMass(ctx, w, h, 'rgba(196,207,228,0.30)', [
+    [0.02, 0.34, 0.05], [0.14, 0.335, 0.07], [0.27, 0.345, 0.05],
+  ])
+  // small right accent
+  flatMass(ctx, w, h, 'rgba(186,196,218,0.26)', [
+    [0.78, 0.47, 0.04], [0.87, 0.465, 0.055], [0.95, 0.475, 0.04],
+  ])
+  // low strata — darker than the local gradient, hugging the horizon
+  flatMass(ctx, w, h, 'rgba(118,124,146,0.20)', [
+    [0.10, 0.78, 0.06], [0.28, 0.775, 0.09], [0.50, 0.785, 0.07], [0.68, 0.78, 0.08],
+  ])
+  flatMass(ctx, w, h, 'rgba(108,113,136,0.24)', [
+    [0.30, 0.885, 0.07], [0.52, 0.88, 0.10], [0.76, 0.89, 0.08], [0.95, 0.885, 0.06],
+  ])
+}
+
+// C — "diagonal channel": one big mass descending from the lower-left, one
+// corner mass upper-right (inspiration image 1's diagonal sweep), and a clean
+// open channel of bare gradient between them.
+function paintDiagonal(ctx, w, h) {
+  // lower-left mass, sinking toward the lower-right
+  bank(ctx, w, h, 'rgba(196,205,226,0.34)', 0.90, [
+    [-0.02, 0.72, 0.14], [0.16, 0.68, 0.15], [0.34, 0.72, 0.12],
+    [0.50, 0.79, 0.11], [0.68, 0.87, 0.10], [0.90, 0.93, 0.09],
+  ])
+  // upper-right corner mass
+  flatMass(ctx, w, h, 'rgba(200,212,233,0.36)', [
+    [0.78, 0.05, 0.10], [0.92, 0.09, 0.13], [1.04, 0.03, 0.12], [0.88, -0.02, 0.10],
+  ])
+  // drifters in the channel
+  flatMass(ctx, w, h, 'rgba(196,209,230,0.30)', [
+    [0.30, 0.30, 0.045], [0.37, 0.295, 0.055], [0.44, 0.305, 0.04],
+  ])
+  // faint low echo, right side
+  flatMass(ctx, w, h, 'rgba(150,158,182,0.24)', [
+    [0.72, 0.60, 0.05], [0.82, 0.595, 0.065], [0.91, 0.605, 0.05],
+  ])
+}
+
+// D — "ridge haze": two overlapping ridgeline silhouettes hint at the distant
+// mountain chain (very low contrast — abstract, not literal peaks); sparse
+// flat wisps in the sky above.
+function paintRidges(ctx, w, h) {
+  flatMass(ctx, w, h, 'rgba(202,214,234,0.36)', [
+    [0.55, 0.10, 0.06], [0.67, 0.09, 0.08], [0.80, 0.105, 0.06],
+  ])
+  flatMass(ctx, w, h, 'rgba(194,205,227,0.28)', [
+    [0.10, 0.30, 0.04], [0.19, 0.295, 0.055], [0.28, 0.305, 0.04],
+  ])
+  // far ridge
+  ridge(ctx, w, h, 'rgba(125,130,152,0.30)', [
+    [0.00, 0.845], [0.14, 0.815], [0.30, 0.845], [0.48, 0.805],
+    [0.66, 0.84], [0.84, 0.81], [1.00, 0.835],
+  ])
+  // near ridge
+  ridge(ctx, w, h, 'rgba(104,109,132,0.32)', [
+    [0.00, 0.90], [0.18, 0.925], [0.38, 0.885], [0.58, 0.92],
+    [0.78, 0.89], [1.00, 0.915],
+  ])
+}
+
+const SKY_VARIANTS = [
+  { name: 'cloud sea',        paint: paintCloudSea },
+  { name: 'quiet strata',     paint: paintStrata },
+  { name: 'diagonal channel', paint: paintDiagonal },
+  { name: 'ridge haze',       paint: paintRidges },
+]
 
 // 3-side label sequence, traversed clockwise from the bottom-left vertex:
 //   side 0  left face  (ascending)  — breathe in   → text tilts +up the face
@@ -135,7 +232,7 @@ const LABEL_ANGLES = [-Math.PI / 3, Math.PI / 3, 0]
 
 // ── TriangleGame ──────────────────────────────────────────────────────────────
 // Phase manager — owns game phase, stroke selection, session timing, exit, and
-// the baked alpine-sky background. All canvas drawing, geometry, and pointer
+// the baked mountain-sky background. All canvas drawing, geometry, and pointer
 // handling live in TriangleCanvas. No audio this pass (silent alpine theme).
 export default function TriangleGame({ onExit }) {
 
@@ -144,6 +241,7 @@ export default function TriangleGame({ onExit }) {
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
   const [labelGeo, setLabelGeo]         = useState(null)   // { labelMids, sq }
+  const [skyVariant, setSkyVariant]     = useState(0)      // round-1 dev switcher index
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef  = useRef(null)
@@ -152,7 +250,7 @@ export default function TriangleGame({ onExit }) {
   const bgCanvasRef      = useRef(null)
   const pacingCanvasRef  = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
 
-  // ── Alpine-sky background — baked once per resize ───────────────────────────
+  // ── Mountain-sky background — baked once per resize (and per variant tap) ───
   useEffect(() => {
     const el = bgCanvasRef.current
     if (!el) return
@@ -164,14 +262,14 @@ export default function TriangleGame({ onExit }) {
       const dpr = window.devicePixelRatio || 1
       el.width  = w * dpr
       el.height = h * dpr
-      el.getContext('2d').drawImage(buildAlpineBg(w, h, dpr), 0, 0)
+      el.getContext('2d').drawImage(buildSkyBg(w, h, dpr, skyVariant), 0, 0)
     }
 
     draw()
     const ro = new ResizeObserver(draw)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [skyVariant])
 
   // ── Stroke selection ────────────────────────────────────────────────────────
   function handleStrokeSelect(newStroke) {
@@ -194,7 +292,7 @@ export default function TriangleGame({ onExit }) {
   return (
     <div
       className="absolute inset-0 overflow-hidden select-none"
-      style={{ touchAction: 'none', background: '#A6C7D8' }}
+      style={{ touchAction: 'none', background: '#A6B3CE' }}
     >
       {/* back button */}
       <button
@@ -229,7 +327,7 @@ export default function TriangleGame({ onExit }) {
           filter: 'saturate(var(--game-saturation, 1))',
           willChange: 'filter',
         }}>
-          {/* Alpine sky — baked at resize; all texture/lighting composited in canvas-land */}
+          {/* Mountain sky — baked at resize; all texture/lighting composited in canvas-land */}
           <canvas
             ref={bgCanvasRef}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
@@ -293,6 +391,18 @@ export default function TriangleGame({ onExit }) {
         pointerEvents: 'none',
         zIndex: 15,
       }} />
+
+      {/* round-1 sky variant switcher — dev only, stripped once a direction is
+          picked. Sits above the vignette (z-15) so it stays tappable. */}
+      {DEV_SKY_SWITCHER && phase === 'game' && (
+        <button
+          onClick={() => setSkyVariant((skyVariant + 1) % SKY_VARIANTS.length)}
+          className="absolute bottom-4 right-4 z-20 h-9 px-3 flex items-center rounded-2xl bg-slate-700/15 text-slate-700 text-sm font-semibold hover:bg-slate-700/25 active:bg-slate-700/30 transition-colors"
+          style={{ fontFamily: "'Nunito', sans-serif" }}
+        >
+          sky {skyVariant + 1}/{SKY_VARIANTS.length} — {SKY_VARIANTS[skyVariant].name}
+        </button>
+      )}
 
       {/* stroke selector — game phase only. Currently disabled. */}
       {STROKE_SELECTOR_ENABLED && phase === 'game' && (
