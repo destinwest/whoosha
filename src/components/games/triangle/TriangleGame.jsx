@@ -24,32 +24,59 @@ const COMPLETION_CANVAS_OPACITY = 0.25
 // ridges receding into haze. The slate triangle "mountain" (drawn by
 // TriangleCanvas) is the foreground peak.
 //
-// ROUND-2 EXPLORATION (2026-07-13 follow-up): four ridge-count/spacing
-// variants live behind the dev-only tap switcher (DEV_SKY_SWITCHER below)
-// for on-device comparison — 2-3 ridges packed tight near the bottom
-// (nearest, most opaque), 2-5 more ridges spreading apart with growing,
-// irregular gaps toward the top (farthest, faintest — atmospheric
-// perspective). Strip the switcher and losing variants once a spacing
-// pattern is picked.
+// Ridge count/spacing is now locked to round 2's winning pick, "2+3
+// scattered" (RIDGE_YS below) — 2 ridges packed tight near the bottom, 3
+// more climbing upward with irregular gaps.
+//
+// ROUND-3 EXPLORATION (2026-07-13 follow-up): composition is fixed; only
+// color intensity varies now. Four palette variants live behind the same
+// dev-only tap switcher (DEV_SKY_SWITCHER below), spanning muted → vibrant.
+// Every stop in the sky gradient and every ridge color is authored once as
+// HSL and scaled by one shared (saturation multiplier, lightness shift) pair
+// per variant — bg and ridges shift together as one cohesive palette instead
+// of being tuned separately. Strip the switcher once a palette is picked.
 //
 // Every ridge is one flat filled path — no CSS blend layers, no runtime SVG
 // filters, and no `getImageData`/per-pixel JS (locked anti-pattern,
 // POLISH-STRATEGY.md). Baked once per resize (and per switcher tap);
 // per-frame cost is zero.
 
-// Show the round-1 variant-cycling button. Strip (with the losing paint
-// functions) once a sky direction is chosen.
+// Show the variant-cycling button. Strip once a sky direction is chosen.
 const DEV_SKY_SWITCHER = true
 
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+// Scales one HSL(+alpha) color by a palette's saturation multiplier and
+// lightness shift — the single knob every muted/vibrant variant turns.
+function paletteColor(h, s, l, pal, alpha) {
+  const ss = clamp(s * pal.satMul, 0, 100)
+  const ll = clamp(l + pal.lightShift, 0, 100)
+  return alpha === undefined
+    ? `hsl(${h.toFixed(1)},${ss.toFixed(1)}%,${ll.toFixed(1)}%)`
+    : `hsla(${h.toFixed(1)},${ss.toFixed(1)}%,${ll.toFixed(1)}%,${alpha})`
+}
+
 // Vertical gradient stops, top → bottom: light saturated blue up high, sinking
-// through periwinkle into a darker, grayer, desaturated horizon band.
+// through periwinkle into a darker, grayer, desaturated horizon band. Authored
+// as HSL (sampled from the approved round-2 gradient) so palette variants can
+// scale saturation/lightness uniformly via paletteColor().
 const SKY_STOPS = [
-  { t: 0.00, color: '#98BCE4' },
-  { t: 0.22, color: '#A0BCDC' },
-  { t: 0.45, color: '#A6B3CE' },
-  { t: 0.68, color: '#9DA3BC' },
-  { t: 0.86, color: '#9095A9' },
-  { t: 1.00, color: '#888C9E' },
+  { t: 0.00, h: 211, s: 58.0, l: 74.5 },
+  { t: 0.22, h: 212, s: 46.0, l: 74.5 },
+  { t: 0.45, h: 220, s: 29.0, l: 73.0 },
+  { t: 0.68, h: 228, s: 19.0, l: 67.6 },
+  { t: 0.86, h: 228, s: 12.7, l: 61.4 },
+  { t: 1.00, h: 229, s: 10.2, l: 57.7 },
+]
+
+// Muted → vibrant: saturation multiplier climbs, lightness shift falls (more
+// saturated reads muddy without also deepening slightly — vibrant leans
+// richer/darker, muted leans flatter/lighter, matching how those words read
+// in a photo, not just a raw saturation slider).
+const PALETTE_VARIANTS = [
+  { name: 'muted',   satMul: 0.50, lightShift:  3.5 },
+  { name: 'soft',    satMul: 0.85, lightShift:  1.5 },
+  { name: 'rich',    satMul: 1.25, lightShift: -1.0 },
+  { name: 'vibrant', satMul: 1.60, lightShift: -3.0 },
 ]
 
 function buildSkyBg(w, h, dpr, variant) {
@@ -58,13 +85,14 @@ function buildSkyBg(w, h, dpr, variant) {
   oc.height = h * dpr
   const ctx = oc.getContext('2d')
   ctx.scale(dpr, dpr)
+  const pal = PALETTE_VARIANTS[variant]
 
   const sky = ctx.createLinearGradient(0, 0, 0, h)
-  for (const stop of SKY_STOPS) sky.addColorStop(stop.t, stop.color)
+  for (const stop of SKY_STOPS) sky.addColorStop(stop.t, paletteColor(stop.h, stop.s, stop.l, pal))
   ctx.fillStyle = sky
   ctx.fillRect(0, 0, w, h)
 
-  SKY_VARIANTS[variant].paint(ctx, w, h)
+  paintRidgeStack(ctx, w, h, RIDGE_YS, 0.7, pal)
   return oc
 }
 
@@ -101,58 +129,43 @@ function wavyRidge(ctx, w, h, color, { yBase, amp, wavelen, phase, amp2, wavelen
   ctx.fill()
 }
 
-const lerp    = (a, b, t) => a + (b - a) * t
-const lerpRgb = (a, b, t) => [0, 1, 2].map(i => Math.round(lerp(a[i], b[i], t)))
+const lerp = (a, b, t) => a + (b - a) * t
 
 // Far ridges: subtle amplitude, long lazy wavelength, faint pale-periwinkle —
 // read as distant and hazy. Near ridges: more amplitude, tighter wavelength,
 // darker/more opaque gray — read as close and solid. Every layer in between
 // interpolates, so a stack automatically reads as receding into the distance
-// regardless of how many layers or how they're spaced.
-const RIDGE_FAR  = { amp: 0.010, wavelen: 0.60, alpha: 0.15, rgb: [150, 164, 190] }
-const RIDGE_NEAR = { amp: 0.022, wavelen: 0.24, alpha: 0.36, rgb: [96, 100, 124] }
+// regardless of how many layers or how they're spaced. Authored as HSL for
+// the same reason as SKY_STOPS above.
+const RIDGE_FAR  = { amp: 0.010, wavelen: 0.60, alpha: 0.15, h: 219, s: 23.5, l: 66.7 }
+const RIDGE_NEAR = { amp: 0.022, wavelen: 0.24, alpha: 0.36, h: 231, s: 12.7, l: 43.1 }
+
+// 2 tight + 3 sparse (5 total), the winning round-2 spacing: 2 ridges packed
+// close to the bottom edge, 3 more climbing up with irregular gaps.
+const RIDGE_YS = [0.15, 0.46, 0.72, 0.91, 0.96]
 
 // Paints one ridge stack from a list of yBase positions given farthest-first
 // (smallest y, highest on screen) to nearest-last (largest y, lowest on
-// screen) — draw order doubles as depth order. `seed` just varies wave phase
-// between variants that happen to reuse similar y-spacing.
-function paintRidgeStack(ctx, w, h, ys, seed) {
+// screen) — draw order doubles as depth order. `seed` varies wave phase so
+// ridges don't look like parallel copies; `pal` applies the same
+// muted/vibrant scaling as the sky gradient.
+function paintRidgeStack(ctx, w, h, ys, seed, pal) {
   const n = ys.length
   ys.forEach((yBase, i) => {
-    const t     = n === 1 ? 0 : i / (n - 1)
-    const amp   = lerp(RIDGE_FAR.amp, RIDGE_NEAR.amp, t)
+    const t       = n === 1 ? 0 : i / (n - 1)
+    const amp     = lerp(RIDGE_FAR.amp, RIDGE_NEAR.amp, t)
     const wavelen = lerp(RIDGE_FAR.wavelen, RIDGE_NEAR.wavelen, t)
-    const alpha = lerp(RIDGE_FAR.alpha, RIDGE_NEAR.alpha, t)
-    const rgb   = lerpRgb(RIDGE_FAR.rgb, RIDGE_NEAR.rgb, t)
-    const phase = seed + i * 0.9
-    wavyRidge(ctx, w, h, `rgba(${rgb.join(',')},${alpha.toFixed(3)})`, {
+    const alpha   = lerp(RIDGE_FAR.alpha, RIDGE_NEAR.alpha, t)
+    const hue     = lerp(RIDGE_FAR.h, RIDGE_NEAR.h, t)
+    const sat     = lerp(RIDGE_FAR.s, RIDGE_NEAR.s, t)
+    const light   = lerp(RIDGE_FAR.l, RIDGE_NEAR.l, t)
+    const phase   = seed + i * 0.9
+    wavyRidge(ctx, w, h, paletteColor(hue, sat, light, pal, alpha), {
       yBase, amp, wavelen, phase,
       amp2: amp * 0.35, wavelen2: wavelen * 0.4, phase2: phase * 1.7 + 1,
     })
   })
 }
-
-// ── round-2 candidate spacings ────────────────────────────────────────────────
-// Each variant is just a list of yBase positions, farthest (top) to nearest
-// (bottom): 2-3 packed tight near the bottom edge, then 2-5 more climbing
-// upward with growing, irregular gaps. Counts/patterns vary across the four
-// so they can be compared side by side.
-
-// 3 tight + 2 sparse (5 total) — moderate spread, gaps roughly doubling
-const RIDGE_YS_A = [0.30, 0.62, 0.90, 0.945, 0.985]
-// 2 tight + 4 sparse (6 total) — busier upper climb, gaps growing steadily
-const RIDGE_YS_B = [0.10, 0.30, 0.52, 0.76, 0.92, 0.97]
-// 3 tight + 5 sparse (8 total) — densest, most ridges visible top to bottom
-const RIDGE_YS_C = [0.06, 0.20, 0.36, 0.54, 0.74, 0.88, 0.93, 0.97]
-// 2 tight + 3 sparse (5 total) — most irregular gap sizes, least mechanical
-const RIDGE_YS_D = [0.15, 0.46, 0.72, 0.91, 0.96]
-
-const SKY_VARIANTS = [
-  { name: '3+2 climb',      paint: (ctx, w, h) => paintRidgeStack(ctx, w, h, RIDGE_YS_A, 0.4) },
-  { name: '2+4 climb',      paint: (ctx, w, h) => paintRidgeStack(ctx, w, h, RIDGE_YS_B, 1.1) },
-  { name: '3+5 dense',      paint: (ctx, w, h) => paintRidgeStack(ctx, w, h, RIDGE_YS_C, 2.0) },
-  { name: '2+3 scattered',  paint: (ctx, w, h) => paintRidgeStack(ctx, w, h, RIDGE_YS_D, 0.7) },
-]
 
 // 3-side label sequence, traversed clockwise from the bottom-left vertex:
 //   side 0  left face  (ascending)  — breathe in   → text tilts +up the face
@@ -325,15 +338,15 @@ export default function TriangleGame({ onExit }) {
         zIndex: 15,
       }} />
 
-      {/* round-1 sky variant switcher — dev only, stripped once a direction is
-          picked. Sits above the vignette (z-15) so it stays tappable. */}
+      {/* sky palette switcher — dev only, stripped once a direction is picked.
+          Sits above the vignette (z-15) so it stays tappable. */}
       {DEV_SKY_SWITCHER && phase === 'game' && (
         <button
-          onClick={() => setSkyVariant((skyVariant + 1) % SKY_VARIANTS.length)}
+          onClick={() => setSkyVariant((skyVariant + 1) % PALETTE_VARIANTS.length)}
           className="absolute bottom-4 right-4 z-20 h-9 px-3 flex items-center rounded-2xl bg-slate-700/15 text-slate-700 text-sm font-semibold hover:bg-slate-700/25 active:bg-slate-700/30 transition-colors"
           style={{ fontFamily: "'Nunito', sans-serif" }}
         >
-          sky {skyVariant + 1}/{SKY_VARIANTS.length} — {SKY_VARIANTS[skyVariant].name}
+          sky {skyVariant + 1}/{PALETTE_VARIANTS.length} — {PALETTE_VARIANTS[skyVariant].name}
         </button>
       )}
 
