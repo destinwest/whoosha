@@ -17,20 +17,25 @@ const COMPLETION_CANVAS_OPACITY = 0.25
 // across a vast hazy mountain chain toward a bright expansive sky — so the
 // vertical gradient is INVERTED from a typical sky photo: darker, grayer,
 // LESS saturated gray-periwinkle at the bottom (the hazy horizon), rising to
-// a lighter, bluer, MORE saturated top. Cloud forms are flat, crisp-edged,
-// abstract poster shapes — one flat fill per mass, no interior shading and no
-// scallop detailing — tonal (low contrast) against the local gradient. The
-// slate triangle "mountain" (drawn by TriangleCanvas) is the foreground peak.
+// a lighter, bluer, MORE saturated top. The scenery is a stack of wavy,
+// low-contrast ridgeline silhouettes (round-1's "ridge haze" direction,
+// chosen over three flat-cloud-mass alternatives — see git history for the
+// losing variants) — no cloud shapes at all now, just distant mountain
+// ridges receding into haze. The slate triangle "mountain" (drawn by
+// TriangleCanvas) is the foreground peak.
 //
-// ROUND-1 EXPLORATION: four candidate compositions live side by side behind a
-// dev-only tap switcher (DEV_SKY_SWITCHER below) for on-device comparison.
-// The losing variants and the switcher get stripped once a direction is picked.
+// ROUND-2 EXPLORATION (2026-07-13 follow-up): four ridge-count/spacing
+// variants live behind the dev-only tap switcher (DEV_SKY_SWITCHER below)
+// for on-device comparison — 2-3 ridges packed tight near the bottom
+// (nearest, most opaque), 2-5 more ridges spreading apart with growing,
+// irregular gaps toward the top (farthest, faintest — atmospheric
+// perspective). Strip the switcher and losing variants once a spacing
+// pattern is picked.
 //
-// Every shape is a flat multi-subpath fill (unioned circles — overlapping
-// subpaths inside one fill() don't double-darken, so each mass reads as one
-// crisp silhouette). No CSS blend layers, no runtime SVG filters, and no
-// `getImageData`/per-pixel JS (locked anti-pattern, POLISH-STRATEGY.md).
-// Baked once per resize (and per switcher tap); per-frame cost is zero.
+// Every ridge is one flat filled path — no CSS blend layers, no runtime SVG
+// filters, and no `getImageData`/per-pixel JS (locked anti-pattern,
+// POLISH-STRATEGY.md). Baked once per resize (and per switcher tap);
+// per-frame cost is zero.
 
 // Show the round-1 variant-cycling button. Strip (with the losing paint
 // functions) once a sky direction is chosen.
@@ -63,162 +68,90 @@ function buildSkyBg(w, h, dpr, variant) {
   return oc
 }
 
-// ── flat-shape primitives ─────────────────────────────────────────────────────
-// All positions are fractions of (w, h); radii are fractions of w so shapes
-// keep their aspect as the sky scales. Colors are rgba with alpha well below 1
-// so every shape tints with the gradient behind it — that's what keeps the
-// contrast tonal without hand-matching a color per altitude.
-
-// One flat cloud mass — circles unioned into a single path, filled once.
-// lobes: [x, y, r][]
-function flatMass(ctx, w, h, color, lobes) {
-  ctx.fillStyle = color
-  ctx.beginPath()
-  for (const [fx, fy, fr] of lobes) {
-    const r = fr * w
-    ctx.moveTo(fx * w + r, fy * h)
-    ctx.arc(fx * w, fy * h, r, 0, Math.PI * 2)
+// ── wavy ridge primitive ──────────────────────────────────────────────────────
+// A single ridgeline silhouette: a smooth wavy curve (sum of two sines — a
+// broad primary wave plus a smaller secondary one for organic irregularity,
+// not a mechanical single sine) filled from the curve down past the bottom
+// edge. Later ridges are drawn on top of earlier ones, so painting a stack
+// farthest-first/nearest-last gives correct front-to-back occlusion for free.
+// All position/size args are fractions of (w, h) so the sky scales cleanly.
+function wavyRidge(ctx, w, h, color, { yBase, amp, wavelen, phase, amp2, wavelen2, phase2 }) {
+  const STEPS = 22
+  const pts = []
+  for (let i = 0; i <= STEPS; i++) {
+    const fx = -0.05 + (1.10 * i) / STEPS
+    const fy = yBase
+      + amp  * Math.sin((2 * Math.PI * fx) / wavelen  + phase)
+      + amp2 * Math.sin((2 * Math.PI * fx) / wavelen2 + phase2)
+    pts.push([fx, fy])
   }
-  ctx.fill()
-}
-
-// A cloud bank — scalloped lobes joined by a base rectangle running from yBase
-// past the bottom edge, so the mass reads as a solid billowing wall.
-function bank(ctx, w, h, color, yBase, lobes) {
   ctx.fillStyle = color
   ctx.beginPath()
-  for (const [fx, fy, fr] of lobes) {
-    const r = fr * w
-    ctx.moveTo(fx * w + r, fy * h)
-    ctx.arc(fx * w, fy * h, r, 0, Math.PI * 2)
-  }
-  ctx.rect(-0.05 * w, yBase * h, 1.1 * w, (1.1 - yBase) * h)
-  ctx.fill()
-}
-
-// A ridgeline silhouette — smooth rolling curve through pts (midpoint
-// quadratics), closed past the bottom edge. pts: [x, y][]
-function ridge(ctx, w, h, color, pts) {
-  ctx.fillStyle = color
-  ctx.beginPath()
-  ctx.moveTo(-0.05 * w, pts[0][1] * h)
+  ctx.moveTo(pts[0][0] * w, pts[0][1] * h)
   for (let i = 0; i < pts.length - 1; i++) {
     const [x1, y1] = pts[i]
     const [x2, y2] = pts[i + 1]
     ctx.quadraticCurveTo(x1 * w, y1 * h, ((x1 + x2) / 2) * w, ((y1 + y2) / 2) * h)
   }
   const [lx, ly] = pts[pts.length - 1]
-  ctx.quadraticCurveTo(lx * w, ly * h, 1.05 * w, ly * h)
+  ctx.lineTo(lx * w, ly * h)
   ctx.lineTo(1.05 * w, 1.1 * h)
   ctx.lineTo(-0.05 * w, 1.1 * h)
   ctx.closePath()
   ctx.fill()
 }
 
-// ── round-1 candidate compositions ───────────────────────────────────────────
+const lerp    = (a, b, t) => a + (b - a) * t
+const lerpRgb = (a, b, t) => [0, 1, 2].map(i => Math.round(lerp(a[i], b[i], t)))
 
-// A — "cloud sea": layered billowing banks across the bottom, the back bank
-// rising to the right (inspiration image 1's composition, flattened to poster
-// shapes); two small drifters in the open upper sky.
-function paintCloudSea(ctx, w, h) {
-  // back bank — darker haze, highest on the right
-  bank(ctx, w, h, 'rgba(150,158,182,0.30)', 0.86, [
-    [0.05, 0.83, 0.10], [0.24, 0.80, 0.12], [0.46, 0.82, 0.10],
-    [0.66, 0.77, 0.13], [0.88, 0.72, 0.15], [1.02, 0.70, 0.13],
-  ])
-  // mid bank — lighter, lower
-  bank(ctx, w, h, 'rgba(188,197,218,0.32)', 0.92, [
-    [0.00, 0.90, 0.09], [0.18, 0.88, 0.11], [0.40, 0.90, 0.09],
-    [0.60, 0.86, 0.12], [0.83, 0.84, 0.11], [1.00, 0.86, 0.10],
-  ])
-  // front bank — lightest rim hugging the bottom edge
-  bank(ctx, w, h, 'rgba(208,216,233,0.38)', 0.97, [
-    [0.08, 0.965, 0.08], [0.30, 0.955, 0.10], [0.52, 0.965, 0.08],
-    [0.74, 0.95, 0.11], [0.94, 0.96, 0.09],
-  ])
-  // drifters
-  flatMass(ctx, w, h, 'rgba(198,211,232,0.42)', [
-    [0.20, 0.155, 0.055], [0.27, 0.145, 0.07], [0.35, 0.16, 0.05],
-  ])
-  flatMass(ctx, w, h, 'rgba(198,211,232,0.34)', [
-    [0.60, 0.075, 0.04], [0.66, 0.07, 0.05], [0.72, 0.08, 0.035],
-  ])
+// Far ridges: subtle amplitude, long lazy wavelength, faint pale-periwinkle —
+// read as distant and hazy. Near ridges: more amplitude, tighter wavelength,
+// darker/more opaque gray — read as close and solid. Every layer in between
+// interpolates, so a stack automatically reads as receding into the distance
+// regardless of how many layers or how they're spaced.
+const RIDGE_FAR  = { amp: 0.010, wavelen: 0.60, alpha: 0.15, rgb: [150, 164, 190] }
+const RIDGE_NEAR = { amp: 0.022, wavelen: 0.24, alpha: 0.36, rgb: [96, 100, 124] }
+
+// Paints one ridge stack from a list of yBase positions given farthest-first
+// (smallest y, highest on screen) to nearest-last (largest y, lowest on
+// screen) — draw order doubles as depth order. `seed` just varies wave phase
+// between variants that happen to reuse similar y-spacing.
+function paintRidgeStack(ctx, w, h, ys, seed) {
+  const n = ys.length
+  ys.forEach((yBase, i) => {
+    const t     = n === 1 ? 0 : i / (n - 1)
+    const amp   = lerp(RIDGE_FAR.amp, RIDGE_NEAR.amp, t)
+    const wavelen = lerp(RIDGE_FAR.wavelen, RIDGE_NEAR.wavelen, t)
+    const alpha = lerp(RIDGE_FAR.alpha, RIDGE_NEAR.alpha, t)
+    const rgb   = lerpRgb(RIDGE_FAR.rgb, RIDGE_NEAR.rgb, t)
+    const phase = seed + i * 0.9
+    wavyRidge(ctx, w, h, `rgba(${rgb.join(',')},${alpha.toFixed(3)})`, {
+      yBase, amp, wavelen, phase,
+      amp2: amp * 0.35, wavelen2: wavelen * 0.4, phase2: phase * 1.7 + 1,
+    })
+  })
 }
 
-// B — "quiet strata": long flat elongated wisps (inspiration image 2's
-// shapes), light and sparse up top, denser and darker toward the horizon.
-function paintStrata(ctx, w, h) {
-  // big upper wisp
-  flatMass(ctx, w, h, 'rgba(202,214,234,0.38)', [
-    [0.18, 0.12, 0.07], [0.34, 0.105, 0.10], [0.55, 0.115, 0.09], [0.72, 0.13, 0.06],
-  ])
-  // mid-left wisp
-  flatMass(ctx, w, h, 'rgba(196,207,228,0.30)', [
-    [0.02, 0.34, 0.05], [0.14, 0.335, 0.07], [0.27, 0.345, 0.05],
-  ])
-  // small right accent
-  flatMass(ctx, w, h, 'rgba(186,196,218,0.26)', [
-    [0.78, 0.47, 0.04], [0.87, 0.465, 0.055], [0.95, 0.475, 0.04],
-  ])
-  // low strata — darker than the local gradient, hugging the horizon
-  flatMass(ctx, w, h, 'rgba(118,124,146,0.20)', [
-    [0.10, 0.78, 0.06], [0.28, 0.775, 0.09], [0.50, 0.785, 0.07], [0.68, 0.78, 0.08],
-  ])
-  flatMass(ctx, w, h, 'rgba(108,113,136,0.24)', [
-    [0.30, 0.885, 0.07], [0.52, 0.88, 0.10], [0.76, 0.89, 0.08], [0.95, 0.885, 0.06],
-  ])
-}
+// ── round-2 candidate spacings ────────────────────────────────────────────────
+// Each variant is just a list of yBase positions, farthest (top) to nearest
+// (bottom): 2-3 packed tight near the bottom edge, then 2-5 more climbing
+// upward with growing, irregular gaps. Counts/patterns vary across the four
+// so they can be compared side by side.
 
-// C — "diagonal channel": one big mass descending from the lower-left, one
-// corner mass upper-right (inspiration image 1's diagonal sweep), and a clean
-// open channel of bare gradient between them.
-function paintDiagonal(ctx, w, h) {
-  // lower-left mass, sinking toward the lower-right
-  bank(ctx, w, h, 'rgba(196,205,226,0.34)', 0.90, [
-    [-0.02, 0.72, 0.14], [0.16, 0.68, 0.15], [0.34, 0.72, 0.12],
-    [0.50, 0.79, 0.11], [0.68, 0.87, 0.10], [0.90, 0.93, 0.09],
-  ])
-  // upper-right corner mass
-  flatMass(ctx, w, h, 'rgba(200,212,233,0.36)', [
-    [0.78, 0.05, 0.10], [0.92, 0.09, 0.13], [1.04, 0.03, 0.12], [0.88, -0.02, 0.10],
-  ])
-  // drifters in the channel
-  flatMass(ctx, w, h, 'rgba(196,209,230,0.30)', [
-    [0.30, 0.30, 0.045], [0.37, 0.295, 0.055], [0.44, 0.305, 0.04],
-  ])
-  // faint low echo, right side
-  flatMass(ctx, w, h, 'rgba(150,158,182,0.24)', [
-    [0.72, 0.60, 0.05], [0.82, 0.595, 0.065], [0.91, 0.605, 0.05],
-  ])
-}
-
-// D — "ridge haze": two overlapping ridgeline silhouettes hint at the distant
-// mountain chain (very low contrast — abstract, not literal peaks); sparse
-// flat wisps in the sky above.
-function paintRidges(ctx, w, h) {
-  flatMass(ctx, w, h, 'rgba(202,214,234,0.36)', [
-    [0.55, 0.10, 0.06], [0.67, 0.09, 0.08], [0.80, 0.105, 0.06],
-  ])
-  flatMass(ctx, w, h, 'rgba(194,205,227,0.28)', [
-    [0.10, 0.30, 0.04], [0.19, 0.295, 0.055], [0.28, 0.305, 0.04],
-  ])
-  // far ridge
-  ridge(ctx, w, h, 'rgba(125,130,152,0.30)', [
-    [0.00, 0.845], [0.14, 0.815], [0.30, 0.845], [0.48, 0.805],
-    [0.66, 0.84], [0.84, 0.81], [1.00, 0.835],
-  ])
-  // near ridge
-  ridge(ctx, w, h, 'rgba(104,109,132,0.32)', [
-    [0.00, 0.90], [0.18, 0.925], [0.38, 0.885], [0.58, 0.92],
-    [0.78, 0.89], [1.00, 0.915],
-  ])
-}
+// 3 tight + 2 sparse (5 total) — moderate spread, gaps roughly doubling
+const RIDGE_YS_A = [0.30, 0.62, 0.90, 0.945, 0.985]
+// 2 tight + 4 sparse (6 total) — busier upper climb, gaps growing steadily
+const RIDGE_YS_B = [0.10, 0.30, 0.52, 0.76, 0.92, 0.97]
+// 3 tight + 5 sparse (8 total) — densest, most ridges visible top to bottom
+const RIDGE_YS_C = [0.06, 0.20, 0.36, 0.54, 0.74, 0.88, 0.93, 0.97]
+// 2 tight + 3 sparse (5 total) — most irregular gap sizes, least mechanical
+const RIDGE_YS_D = [0.15, 0.46, 0.72, 0.91, 0.96]
 
 const SKY_VARIANTS = [
-  { name: 'cloud sea',        paint: paintCloudSea },
-  { name: 'quiet strata',     paint: paintStrata },
-  { name: 'diagonal channel', paint: paintDiagonal },
-  { name: 'ridge haze',       paint: paintRidges },
+  { name: '3+2 climb',      paint: (ctx, w, h) => paintRidgeStack(ctx, w, h, RIDGE_YS_A, 0.4) },
+  { name: '2+4 climb',      paint: (ctx, w, h) => paintRidgeStack(ctx, w, h, RIDGE_YS_B, 1.1) },
+  { name: '3+5 dense',      paint: (ctx, w, h) => paintRidgeStack(ctx, w, h, RIDGE_YS_C, 2.0) },
+  { name: '2+3 scattered',  paint: (ctx, w, h) => paintRidgeStack(ctx, w, h, RIDGE_YS_D, 0.7) },
 ]
 
 // 3-side label sequence, traversed clockwise from the bottom-left vertex:
