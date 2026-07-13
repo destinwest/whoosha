@@ -4,8 +4,9 @@ import { bboxOf, fitWithMargin, fitCenter, SHAPE_VISUAL_WEIGHT } from '../_share
 
 // ── TriangleCardPreview ─────────────────────────────────────────────────────
 // The Triangle counterpart to Square/Hexagon CardPreview: a soft, muted render
-// of the Triangle game for the home carousel card. A calm "resting" state — an
-// alpine-sky gradient (no clouds, no scenery, just the gradient) with the slate
+// of the Triangle game for the home carousel card. A calm "resting" state — a
+// simple two-stop sky-blue gradient (no ridges/scenery, just the gradient —
+// same treatment as HexagonCardPreview's sandstone gradient) with the slate
 // mountain track in its bare base colour, and a quiet pale pacing dot at the
 // start vertex. No breathing labels.
 //
@@ -33,13 +34,14 @@ function buildVerts(R, cx, cyc) {
 }
 
 function drawScene(ctx, w, h) {
-  // Sky gradient — matches the game's baked alpine sky (photo-sampled hazy
-  // blue: light → a deeper blue-teal band around 40% → light again). No
-  // blobs/clouds on the card, just the gradient.
-  const sky = ctx.createLinearGradient(0, 0, 0, h)
-  sky.addColorStop(0,    '#CAD8DD')
-  sky.addColorStop(0.42, '#8FB8CE')
-  sky.addColorStop(1,    '#CCDEE4')
+  // Sky gradient — a single hue pulled from the game's vibrant sky-blue (its
+  // brightest, most saturated point), light → rich, matching
+  // HexagonCardPreview's `createLinearGradient(0,0,w*0.5,h)` two-stop pattern
+  // so the two cards read as the same family. No ridges/scenery on the card,
+  // just the gradient.
+  const sky = ctx.createLinearGradient(0, 0, w * 0.5, h)
+  sky.addColorStop(0, '#8BB8E4')
+  sky.addColorStop(1, '#5C91C7')
   ctx.fillStyle = sky
   ctx.fillRect(0, 0, w, h)
 
