@@ -24,29 +24,22 @@ const COMPLETION_CANVAS_OPACITY = 0.25
 // ridges receding into haze. The slate triangle "mountain" (drawn by
 // TriangleCanvas) is the foreground peak.
 //
-// Ridge count/spacing is now locked to round 2's winning pick, "2+3
-// scattered" (RIDGE_YS below) — 2 ridges packed tight near the bottom, 3
-// more climbing upward with irregular gaps.
-//
-// ROUND-3 EXPLORATION (2026-07-13 follow-up): composition is fixed; only
-// color intensity varies now. Four palette variants live behind the same
-// dev-only tap switcher (DEV_SKY_SWITCHER below), spanning muted → vibrant.
-// Every stop in the sky gradient and every ridge color is authored once as
-// HSL and scaled by one shared (saturation multiplier, lightness shift) pair
-// per variant — bg and ridges shift together as one cohesive palette instead
-// of being tuned separately. Strip the switcher once a palette is picked.
+// Ridge count/spacing is locked to round 2's winning pick, "2+3 scattered"
+// (RIDGE_YS below) — 2 ridges packed tight near the bottom, 3 more climbing
+// upward with irregular gaps. Palette is locked to round 3's winning pick,
+// "vibrant" (VIBRANT_PALETTE below) — the most saturated, richest option
+// compared. Every stop in the sky gradient and every ridge color is
+// authored once as HSL and scaled by one shared (saturation multiplier,
+// lightness shift) pair, so the bg and ridges read as one cohesive palette
+// rather than being tuned separately.
 //
 // Every ridge is one flat filled path — no CSS blend layers, no runtime SVG
 // filters, and no `getImageData`/per-pixel JS (locked anti-pattern,
-// POLISH-STRATEGY.md). Baked once per resize (and per switcher tap);
-// per-frame cost is zero.
-
-// Show the variant-cycling button. Strip once a sky direction is chosen.
-const DEV_SKY_SWITCHER = true
+// POLISH-STRATEGY.md). Baked once per resize; per-frame cost is zero.
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
-// Scales one HSL(+alpha) color by a palette's saturation multiplier and
-// lightness shift — the single knob every muted/vibrant variant turns.
+// Scales one HSL(+alpha) color by the palette's saturation multiplier and
+// lightness shift.
 function paletteColor(h, s, l, pal, alpha) {
   const ss = clamp(s * pal.satMul, 0, 100)
   const ll = clamp(l + pal.lightShift, 0, 100)
@@ -57,8 +50,8 @@ function paletteColor(h, s, l, pal, alpha) {
 
 // Vertical gradient stops, top → bottom: light saturated blue up high, sinking
 // through periwinkle into a darker, grayer, desaturated horizon band. Authored
-// as HSL (sampled from the approved round-2 gradient) so palette variants can
-// scale saturation/lightness uniformly via paletteColor().
+// as HSL so the palette scale can apply saturation/lightness uniformly via
+// paletteColor().
 const SKY_STOPS = [
   { t: 0.00, h: 211, s: 58.0, l: 74.5 },
   { t: 0.22, h: 212, s: 46.0, l: 74.5 },
@@ -68,31 +61,24 @@ const SKY_STOPS = [
   { t: 1.00, h: 229, s: 10.2, l: 57.7 },
 ]
 
-// Muted → vibrant: saturation multiplier climbs, lightness shift falls (more
-// saturated reads muddy without also deepening slightly — vibrant leans
-// richer/darker, muted leans flatter/lighter, matching how those words read
-// in a photo, not just a raw saturation slider).
-const PALETTE_VARIANTS = [
-  { name: 'muted',   satMul: 0.50, lightShift:  3.5 },
-  { name: 'soft',    satMul: 0.85, lightShift:  1.5 },
-  { name: 'rich',    satMul: 1.25, lightShift: -1.0 },
-  { name: 'vibrant', satMul: 1.60, lightShift: -3.0 },
-]
+// Saturation climbs and lightness dips together (richer/deeper, not just
+// more saturated/washed) — the most intense point on the muted→vibrant range
+// compared in round 3.
+const VIBRANT_PALETTE = { satMul: 1.60, lightShift: -3.0 }
 
-function buildSkyBg(w, h, dpr, variant) {
+function buildSkyBg(w, h, dpr) {
   const oc = document.createElement('canvas')
   oc.width  = w * dpr
   oc.height = h * dpr
   const ctx = oc.getContext('2d')
   ctx.scale(dpr, dpr)
-  const pal = PALETTE_VARIANTS[variant]
 
   const sky = ctx.createLinearGradient(0, 0, 0, h)
-  for (const stop of SKY_STOPS) sky.addColorStop(stop.t, paletteColor(stop.h, stop.s, stop.l, pal))
+  for (const stop of SKY_STOPS) sky.addColorStop(stop.t, paletteColor(stop.h, stop.s, stop.l, VIBRANT_PALETTE))
   ctx.fillStyle = sky
   ctx.fillRect(0, 0, w, h)
 
-  paintRidgeStack(ctx, w, h, RIDGE_YS, 0.7, pal)
+  paintRidgeStack(ctx, w, h, RIDGE_YS, 0.7, VIBRANT_PALETTE)
   return oc
 }
 
@@ -187,7 +173,6 @@ export default function TriangleGame({ onExit }) {
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
   const [labelGeo, setLabelGeo]         = useState(null)   // { labelMids, sq }
-  const [skyVariant, setSkyVariant]     = useState(0)      // round-1 dev switcher index
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef  = useRef(null)
@@ -196,7 +181,7 @@ export default function TriangleGame({ onExit }) {
   const bgCanvasRef      = useRef(null)
   const pacingCanvasRef  = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
 
-  // ── Mountain-sky background — baked once per resize (and per variant tap) ───
+  // ── Mountain-sky background — baked once per resize ──────────────────────────
   useEffect(() => {
     const el = bgCanvasRef.current
     if (!el) return
@@ -208,14 +193,14 @@ export default function TriangleGame({ onExit }) {
       const dpr = window.devicePixelRatio || 1
       el.width  = w * dpr
       el.height = h * dpr
-      el.getContext('2d').drawImage(buildSkyBg(w, h, dpr, skyVariant), 0, 0)
+      el.getContext('2d').drawImage(buildSkyBg(w, h, dpr), 0, 0)
     }
 
     draw()
     const ro = new ResizeObserver(draw)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [skyVariant])
+  }, [])
 
   // ── Stroke selection ────────────────────────────────────────────────────────
   function handleStrokeSelect(newStroke) {
@@ -338,17 +323,6 @@ export default function TriangleGame({ onExit }) {
         zIndex: 15,
       }} />
 
-      {/* sky palette switcher — dev only, stripped once a direction is picked.
-          Sits above the vignette (z-15) so it stays tappable. */}
-      {DEV_SKY_SWITCHER && phase === 'game' && (
-        <button
-          onClick={() => setSkyVariant((skyVariant + 1) % PALETTE_VARIANTS.length)}
-          className="absolute bottom-4 right-4 z-20 h-9 px-3 flex items-center rounded-2xl bg-slate-700/15 text-slate-700 text-sm font-semibold hover:bg-slate-700/25 active:bg-slate-700/30 transition-colors"
-          style={{ fontFamily: "'Nunito', sans-serif" }}
-        >
-          sky {skyVariant + 1}/{PALETTE_VARIANTS.length} — {PALETTE_VARIANTS[skyVariant].name}
-        </button>
-      )}
 
       {/* stroke selector — game phase only. Currently disabled. */}
       {STROKE_SELECTOR_ENABLED && phase === 'game' && (

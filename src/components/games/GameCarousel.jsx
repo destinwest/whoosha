@@ -119,7 +119,7 @@ function CarouselCard({ game, distance }) {
               : isInfinity
                 ? '#1B1F4D'
                 : isTriangle
-                  ? '#A6C7D8'
+                  ? '#74A5D6'
                   : isStar
                     ? '#ECD5E4'
                     : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),

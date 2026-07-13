@@ -27,7 +27,7 @@ export const GAME_GRADIENTS = {
   square:      'linear-gradient(160deg, #C8E0CD, #A0C8B0)',
   hexagon:     'linear-gradient(160deg, #E4B48C, #C77E5A)',
   infinity:    'linear-gradient(160deg, #D2C9E5, #B0A3D0)',
-  triangle:    'linear-gradient(160deg, #CAD8DD, #8FB8CE)',
+  triangle:    'linear-gradient(160deg, #8BB8E4, #5C91C7)',
   star:        'linear-gradient(160deg, #FCF6DB, #A7C2F7)',
   placeholder: 'linear-gradient(160deg, #E0E8DF, #BFCEC1)',
 }
