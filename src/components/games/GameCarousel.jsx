@@ -8,6 +8,7 @@ import HexagonCardPreview from './hexagon/HexagonCardPreview'
 import InfinityCardPreview from './infinity/InfinityCardPreview'
 import TriangleCardPreview from './triangle/TriangleCardPreview'
 import StarCardPreview from './star/StarCardPreview'
+import RainbowCardPreview from './rainbow/RainbowCardPreview'
 
 // ── Tunable layout constants ──────────────────────────────────────────────────
 const CARD_W       = 200    // px
@@ -95,7 +96,8 @@ function CarouselCard({ game, distance }) {
   const isInfinity = game.gameKey === 'infinity'
   const isTriangle = game.gameKey === 'triangle'
   const isStar     = game.gameKey === 'star'
-  const hasPreview = isSquare || isHexagon || isInfinity || isTriangle || isStar   // full-bleed track render + bottom title
+  const isRainbow  = game.gameKey === 'rainbow'
+  const hasPreview = isSquare || isHexagon || isInfinity || isTriangle || isStar || isRainbow   // full-bleed track render + bottom title
   // Title colour matched to each preview's palette (light on the dark square/
   // infinity cards — square's matches its pacing dot — dark on the light
   // hexagon / triangle / star cards).
@@ -103,6 +105,7 @@ function CarouselCard({ game, distance }) {
     : isHexagon ? '#5C2E1C'
     : isTriangle ? '#33465A'
     : isStar ? '#5E5A86'
+    : isRainbow ? '#8A6A2F'
     : '#E8E3F8'
   return (
     <div data-card-index="" style={cardStyle(distance)}>
@@ -122,7 +125,9 @@ function CarouselCard({ game, distance }) {
                   ? '#A6C7D8'
                   : isStar
                     ? '#ECD5E4'
-                    : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
+                    : isRainbow
+                      ? '#FBF0CC'
+                      : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
           boxShadow: '0 12px 32px rgba(62, 94, 82, 0.22), 0 2px 6px rgba(62, 94, 82, 0.12)',
           filter: game.placeholder
             ? 'blur(1.5px) saturate(0.4)'
@@ -144,7 +149,9 @@ function CarouselCard({ game, distance }) {
                   ? <InfinityCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
                   : isTriangle
                     ? <TriangleCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
-                    : <StarCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />}
+                    : isStar
+                      ? <StarCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
+                      : <RainbowCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />}
             <div
               className="absolute inset-x-0 px-3 text-center pointer-events-none font-display text-[18px] leading-tight font-semibold"
               style={{ top: '86%', transform: 'translateY(-50%)', color: titleColor }}
