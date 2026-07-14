@@ -25,15 +25,16 @@
 //   strokeModeRef  — { current: 'classic' | 'watercolor' }
 //   pacingCanvasRef — ref to the overlay canvas above the saturate wrapper
 //   onTick(now)    — called each rAF frame
-//   onBreath(fraction) — called each rAF frame ONCE THE GAME HAS STARTED (see
-//                        its call site) with a TIME-based fraction [0, SIDES),
-//                        linear in elapsed time SINCE GAME START (NOT the
-//                        geometric pacingPos.fraction, and NOT mount-relative
-//                        — see the notes above getPacing and at the call
-//                        site). StarGame edge-detects phase changes off this
-//                        to fire the voice cues on an exact, even cadence
-//                        (mirrors HexagonCanvas's onBreath shape, different
-//                        semantics).
+//   onBreath(fraction) — called each rAF frame UNCONDITIONALLY from mount (like
+//                        onTick) with a TIME-based fraction [0, SIDES), linear
+//                        in elapsed time SINCE MOUNT (NOT the geometric
+//                        pacingPos.fraction — see the note above getPacing for
+//                        why). StarGame edge-detects phase changes off this to
+//                        fire the voice cues on an exact, even cadence, audible
+//                        as soon as the first touch unlocks audio (mirrors
+//                        HexagonCanvas's onBreath shape and anchor, different
+//                        consumer semantics — event-driven one-shot clips
+//                        rather than continuous synth modulation).
 //   onGameStart()  — called once when the child first drags from the start point
 //   interactive    — boolean; controls pointer events on the canvas element
 //
@@ -309,10 +310,12 @@ function buildGeo(rect) {
   // cumLen[N / SIDES] marks that boundary; back off half the arc's own length
   // to land on its midpoint.
   //
-  // NOTE: this only controls the DOT's geometric position/motion. It does NOT
-  // control when the voice cues fire — see the onBreath call site, which is
-  // anchored to game-start (first touch), not mount, for a separate reason
-  // (the audio can't play before the child touches anyway; see its comment).
+  // NOTE: this controls the DOT's geometric position/motion. The voice-cue
+  // clock (see the onBreath call site) shares this SAME mount origin — both
+  // start counting at elapsed=0 — but is computed from a separate TIME-based
+  // fraction rather than this arc-length one, since sampling this fraction
+  // directly for voice would flip unevenly (see the "IMPORTANT" note above
+  // getPacing).
   const v1ArcLen        = r * Math.abs(turn[1])
   const pacingArcOrigin = cumLen[N / SIDES] - v1ArcLen / 2
 
@@ -554,7 +557,6 @@ const StarCanvas = forwardRef(function StarCanvas(
 
   // ── Game state refs ────────────────────────────────────────────────────────
   const pacingStartRef       = useRef(null)    // clock for pacing circle — starts at mount
-  const gameStartRef         = useRef(null)
   const startedRef           = useRef(false)
   const touchRef             = useRef(false)
   const childPosRef          = useRef(null)
@@ -633,7 +635,6 @@ const StarCanvas = forwardRef(function StarCanvas(
       fingerPosRef.current         = null
       tracingRef.current           = false
       passedLapCheckpointRef.current = false
-      gameStartRef.current         = null
       pacingStartRef.current       = performance.now()
       lapCountRef.current          = 0
       colorTimeRef.current         = 0
@@ -689,10 +690,12 @@ const StarCanvas = forwardRef(function StarCanvas(
   // an equal 5s made the dot speed up and slow down. Instead we advance by
   // constant ARC-LENGTH — the whole loop in CYCLE_MS — so the dot moves at a
   // single steady rate everywhere. Time is linear in arc-length, and consecutive
-  // corner-arc midpoints are exactly totalPathLength/SIDES apart, so each 5s
-  // breath still lands boundary-to-boundary on the corners: every inhale ends at
-  // a tip (peak), every exhale at a valley (notch). We start from pacingArcOrigin
-  // (the midpoint of V0's valley arc → first inhale ends at the top tip).
+  // corner-arc midpoints are exactly totalPathLength/SIDES apart, so every 5s
+  // breath boundary lands on a corner (a tip or a valley). We start from
+  // pacingArcOrigin (the midpoint of V1's — the TOP TIP's — corner arc), so at
+  // mount (elapsed=0) the dot sits at the top and its first full segment is a
+  // DESCENT toward the next valley (side 0 = out, not in — see the onBreath
+  // call site below, which maps phase parity to match).
   //
   // `fraction` is returned as the GEOMETRIC fraction (side index + progress,
   // derived from the resulting sample index) — the heat-gauge/synergy side
@@ -823,7 +826,6 @@ const StarCanvas = forwardRef(function StarCanvas(
       if (!proj || proj.perpDist > geo.lw * ACCEPTANCE_TRACK_WIDTHS) return  // silent reject
 
       startedRef.current   = true
-      gameStartRef.current = performance.now()
       touchRef.current     = true
       onGameStart?.()
 
@@ -1111,28 +1113,28 @@ const StarCanvas = forwardRef(function StarCanvas(
       // pacingPos.fraction — see the "IMPORTANT" note above getPacing for why
       // the geometric fraction flips unevenly. This fraction increases exactly
       // linearly with elapsed time, so Math.floor() of it (in StarGame) crosses
-      // every VOICE_PHASE_MS, no more, no less.
+      // every VOICE_PHASE_MS, no more, no less. It shares pacingArcOrigin's
+      // modular origin (both keyed off elapsed % CYCLE_MS), so integer
+      // crossings still land at the same instant the dot passes each corner's
+      // midpoint (a tip or valley).
       //
-      // Anchored to GAME START (gameStartRef, set at first touch), NOT mount
-      // (pacingStartRef) — and gated on startedRef so it's never called before
-      // then. Audio can't play until the browser unlocks it on first touch, but
-      // the pacing clock (and the old mount-anchored voice clock) starts
-      // immediately at mount — so the phase-0 "breathe in" edge fired-and-was-
-      // silently-dropped within the first frame, often 1-2+ seconds before the
-      // child could actually hear it. By the time they touched, the clock had
-      // already moved on to an arbitrary point in the cycle, so the first
-      // audible cue was effectively random and could take up to ~5s to arrive
-      // (bug, fixed 2026-07-11). Anchoring to gameStartRef instead guarantees
-      // phase 0 = "breathe in" starts counting the instant the child begins —
-      // it can no longer be missed, and it's the very first thing they hear.
-      // This intentionally decouples voice timing from the dot's geometric
-      // position (which stays mount-anchored, continuous, matching the other
-      // games) — per the user's own earlier guidance that exact visual sync
-      // isn't required, only that the timing itself be right.
-      if (startedRef.current) {
-        const elapsedVoice = now - gameStartRef.current
-        onBreath?.((elapsedVoice % CYCLE_MS) / VOICE_PHASE_MS)
-      }
+      // MOUNT-anchored (pacingStartRef) and UNCONDITIONAL — called every frame
+      // regardless of startedRef, exactly mirroring HexagonCanvas's onBreath
+      // and SquareCanvas's onGameStateTick (both mount-anchored, both
+      // unconditional) and Star's own onTick-driven intro trigger above. A
+      // prior version of this gated the call on startedRef and anchored to
+      // gameStartRef (first successful ON-TRACK touch) specifically to
+      // guarantee a deterministic first "breathe in" — but that gate doesn't
+      // exist anywhere else in this codebase, and it meant in/out never even
+      // ATTEMPTED to play until the child traced successfully, which is a much
+      // stricter bar than "any touch unlocks audio" — so the intro (gated only
+      // on unlock) would play but the breath cues silently wouldn't, if the
+      // child's first touch missed the track (very plausible on a shape this
+      // spread out). Reverted 2026-07-14 (user report, confirmed by diffing
+      // against Hexagon/Square) so in/out autoplay exactly like every other
+      // audio in this app: attempts from mount, becomes audible on first
+      // unlock, whatever phase happens to be live plays first.
+      onBreath?.((elapsedPacing % CYCLE_MS) / VOICE_PHASE_MS)
 
       // ── Bead tracing (per-frame, leash + acceptance) ──────────────────────
       // Move the bead toward the finger along the groove, or freeze it if the

@@ -87,48 +87,68 @@ export default function StarGame({ onExit }) {
 
   const lastBreathPhaseRef = useRef(-1)
   // Edge-detects breath-phase transitions from StarCanvas's per-frame, TIME-
-  // based fraction [0, 10), counted from GAME START not mount (evenly spaced,
-  // guaranteed to begin at phase 0 = "in" — see the onBreath call site in
-  // StarCanvas for the full story) and fires one voice cue per transition,
-  // every 5s — mirrors HexagonCanvas's onBreath shape, but this consumer is
-  // event-driven (a one-shot clip per phase change) rather than continuous
-  // synth modulation.
+  // based fraction [0, 10), counted from MOUNT (evenly spaced — see the
+  // onBreath call site in StarCanvas for why a plain geometric fraction won't
+  // do) and fires one voice cue per transition, every 5s — mirrors
+  // HexagonCanvas's onBreath shape, but this consumer is event-driven (a
+  // one-shot clip per phase change) rather than continuous synth modulation.
+  // Called UNCONDITIONALLY every frame from mount, same as Hexagon's — no
+  // startedRef gate (see StarCanvas's onBreath call site for why an earlier
+  // version had one, and why it was wrong).
+  //
+  // Phase parity: pacingArcOrigin anchors the dot at the TOP TIP at mount, so
+  // its first full segment (phase 0) is a DESCENT — "out", not "in". Even
+  // phases are out, odd are in (the reverse of the pre-2026-07-14 mapping,
+  // which matched the old valley-anchored origin).
   //
   // lastBreathPhaseRef only advances when play() reports it actually started
   // (see useStarVoice) — if the AudioContext's resume() from unlock() hasn't
-  // resolved yet on this exact frame (a possible few-ms gap right at game
-  // start), the SAME phaseIdx is retried on the next frame instead of the
+  // resolved yet on this exact frame (a possible few-ms gap right at
+  // unlock), the SAME phaseIdx is retried on the next frame instead of the
   // cue being silently lost until the next phase boundary.
   const emitBreath = useRef((fraction) => {
     if (phaseRef.current !== 'game') return   // no new cues once completion begins
     const phaseIdx = Math.floor(fraction)
     if (phaseIdx === lastBreathPhaseRef.current) return
-    const played = voiceRef.current?.play(phaseIdx % 2 === 0 ? 'in' : 'out')
+    const played = voiceRef.current?.play(phaseIdx % 2 === 0 ? 'out' : 'in')
     if (played) lastBreathPhaseRef.current = phaseIdx
   }).current
   const unlockAudio = useRef(() => voiceRef.current?.unlock()).current
 
   const introPlayedRef = useRef(false)
-  // Reset the intro flag whenever the voice-session effect tears down. With
-  // the shared AudioContext already running at mount (card-tap unlock),
+  // Reset the intro flag whenever the voice-session effect tears down.
   // StrictMode's dev-only mount→cleanup→remount would otherwise let the
   // FIRST, instantly-disposed voice instance claim the intro (play() succeeds
   // for a few ms, then dispose silences it) and the surviving instance would
   // never replay it. In production this cleanup only runs at real unmount.
+  // (Genuinely true as of 2026-07-13: useStarVoice runs on the app's shared
+  // AudioContext — see sharedContext.js — unlocked synchronously by the home
+  // carousel's card-tap handler, so it's typically ALREADY 'running' by the
+  // time this component mounts. A note here briefly, incorrectly claimed this
+  // wasn't true — corrected 2026-07-14 after re-checking against sharedContext.js
+  // and GameCarousel.jsx directly, not just this file's own unlockAudio, which
+  // is a real but now-secondary fallback for direct URL loads that skip the
+  // carousel entirely — see its own comment below.)
   useEffect(() => () => { introPlayedRef.current = false }, [])
   // Plays the intro clip once, as early as technically possible — "the
-  // opening of the game" (mount), NOT gated on game-start like the in/out
-  // cues (this is a one-shot scene-setter, not a repeating breath cue).
-  // Retried every frame via onTick — which, unlike onBreath, fires
-  // unconditionally from mount regardless of startedRef — until play()
-  // reports success, since audio can't actually sound until the browser
-  // unlocks the AudioContext on the child's first touch anywhere on the
-  // screen (unlockAudio, below). There's currently no way to start it any
-  // earlier than that first touch without moving where/when the AudioContext
-  // itself is created (e.g. unlocking from the home-carousel card tap, before
-  // the route transition) — a bigger change, not done here. Exact timing
-  // against the first "breathe in"/"breathe out" cue is explicitly deferred
-  // per the user — for now the two can overlap.
+  // opening of the game" (mount) — a one-shot scene-setter, not a repeating
+  // breath cue. Retried every frame via onTick until play() reports success.
+  // In the normal flow (home → tap a card → game) the shared AudioContext is
+  // typically already running by mount (see the note above), so this is
+  // usually audible within a frame or two of mount, no touch required. The
+  // retry only matters for the fallback path — a direct URL load, where
+  // unlockAudio (this component's own onPointerDown, below) is what
+  // eventually flips the context to 'running'.
+  //
+  // emitBreath (in/out, above) follows the exact same shape — mount-anchored,
+  // unconditional, audible on first unlock, whichever path provided it — so
+  // intro and the breath cues behave consistently; no more gating divergence
+  // between them. Sequencing intro against the first breath cue is still not
+  // explicitly orchestrated (no delay/handoff between them) — they can
+  // overlap in time, though in practice the dot's phase-0 (out, ending at the
+  // first valley) is what's live for most of the intro's ~5.4s run, so the
+  // ordinary case reads as: intro, then a descent to the valley, then
+  // "breathe out."
   const emitTick = useRef(() => {
     if (introPlayedRef.current || phaseRef.current !== 'game') return
     const played = voiceRef.current?.play('intro')
@@ -179,7 +199,7 @@ export default function StarGame({ onExit }) {
     <div
       className="absolute inset-0 overflow-hidden select-none"
       style={{ touchAction: 'none', background: BG_SOLID }}
-      onPointerDown={unlockAudio}   // resume the AudioContext on the first gesture (iOS)
+      onPointerDown={unlockAudio}   // fallback unlock (iOS) for direct URL loads that skipped the carousel's card-tap unlock — see the note above introPlayedRef
     >
       {/* back button */}
       <button
