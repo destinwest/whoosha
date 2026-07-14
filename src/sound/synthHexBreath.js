@@ -38,7 +38,7 @@
 //   'breeze'     — gentle slow breeze. A touch more air (still low-passed well
 //                  below "windy"), wider/softer body, and a slow shallow LFO
 //                  drift on the cutoff so the texture never sits still.
-export const HEX_BREATH_MODE = 'deepBreath'   // 'deepBreath' | 'breeze'
+export const HEX_BREATH_MODE = 'breeze'   // 'deepBreath' | 'breeze'
 
 // ── Per-mode tunables ──────────────────────────────────────────────────────
 // Every field is safe to tweak live while auditioning:
@@ -65,9 +65,21 @@ const HEX_BREATH_PARAMS = {
     inhale: { source: 'brown', cutoffStartHz: 320, cutoffEndHz: 700, cutoffQ: 0.8, bodyHz: 260, bodyQ: 1.4, bodyGainDb: 5, lfoHz: 0,    lfoDepth: 0,    peakGain: 0.26 },
     exhale: { source: 'brown', cutoffStartHz: 650, cutoffEndHz: 300, cutoffQ: 0.8, bodyHz: 220, bodyQ: 1.4, bodyGainDb: 5, lfoHz: 0,    lfoDepth: 0,    peakGain: 0.26 },
   },
+  // Retuned 2026-07-13 (user: the deepBreath register was "much too deep").
+  // Both prior tunings parked all the energy below ~700 Hz, which phone
+  // speakers physically can't reproduce — the breath measured healthy at the
+  // output but was near-inaudible on the target hardware. The cutoffs now
+  // sweep through the ~600–1500 Hz band (comfortably above small-speaker
+  // rolloff, still well below "bright/windy hiss"), and the body peak sits at
+  // the low end of that band for warmth. Levels stay deliberately SOFT — the
+  // brief is a desert canyon sheltered from the world, a gentle breeze
+  // passing through here and there, not a foreground effect: pink noise
+  // carries far more audible energy per unit gain than the old heavily
+  // low-passed brown, so peakGain stays near the old breeze values rather
+  // than deepBreath's compensated 0.26.
   breeze: {
-    inhale: { source: 'pink',  cutoffStartHz: 380, cutoffEndHz: 620, cutoffQ: 0.6, bodyHz: 300, bodyQ: 0.8, bodyGainDb: 3, lfoHz: 0.08, lfoDepth: 0.18, peakGain: 0.12 },
-    exhale: { source: 'pink',  cutoffStartHz: 560, cutoffEndHz: 360, cutoffQ: 0.6, bodyHz: 280, bodyQ: 0.8, bodyGainDb: 3, lfoHz: 0.07, lfoDepth: 0.18, peakGain: 0.11 },
+    inhale: { source: 'pink',  cutoffStartHz: 550,  cutoffEndHz: 1500, cutoffQ: 0.6, bodyHz: 620, bodyQ: 0.8, bodyGainDb: 3, lfoHz: 0.08, lfoDepth: 0.15, peakGain: 0.15 },
+    exhale: { source: 'pink',  cutoffStartHz: 1350, cutoffEndHz: 520,  cutoffQ: 0.6, bodyHz: 560, bodyQ: 0.8, bodyGainDb: 3, lfoHz: 0.07, lfoDepth: 0.15, peakGain: 0.14 },
   },
 }
 
