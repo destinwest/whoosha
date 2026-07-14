@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useStore from '../../store/useStore'
 import { HOME_GAMES, GAME_GRADIENTS } from '../../data/games'
+import { unlockSharedAudioContext } from '../../sound/sharedContext'
 import GameShape from './GameShape'
 import SquareCardPreview from './square/SquareCardPreview'
 import HexagonCardPreview from './hexagon/HexagonCardPreview'
@@ -234,6 +235,12 @@ export default function GameCarousel() {
   }
 
   function handleCardClick(idx, e) {
+    // Unlock the app's shared AudioContext SYNCHRONOUSLY inside this tap —
+    // the gesture credit is consumed at resume() call time. This is what lets
+    // the game we're about to launch start its audio at mount on iOS (intro
+    // clip, ambient bed) without needing another in-game touch. Idempotent
+    // and cheap, so it runs on every card tap, including index switches.
+    unlockSharedAudioContext()
     if (idx !== activeIndex) {
       setActiveIndex(idx)
       return

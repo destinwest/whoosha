@@ -1,7 +1,7 @@
 // ── useHexBreath ───────────────────────────────────────────────────────────
 // BREATH + AMBIENT-BED audio path for the Hexagon game. Deliberately NOT the
-// full SoundDirector: no bowl, no rumble, no reverb sends. Just an
-// AudioContext, the noise buffers, the hex breath module, and the sampled
+// full SoundDirector: no bowl, no rumble, no reverb sends. Just the app's
+// shared AudioContext, the noise buffers, the hex breath module, and the sampled
 // ambient bed (synthHexAmbient) — routed to the speakers through a master
 // gain (which also honours the shared mute preference).
 //
@@ -44,7 +44,12 @@ import { useEffect, useRef } from 'react'
 import { createNoiseBuffers } from '../sound/noiseBuffer'
 import { createHexBreath }    from '../sound/synthHexBreath'
 import { createHexAmbient }   from '../sound/synthHexAmbient'
+import { getSharedAudioContext } from '../sound/sharedContext'
 import { useMutePref }        from './useMutePref'
+
+// Noise buffers are pure AudioBuffers on the app-lifetime shared context —
+// generate once (~50ms) and reuse across every Hexagon session.
+let _noiseBufs = null
 
 const MASTER_GAIN = 0.9
 
@@ -79,10 +84,17 @@ export function useHexBreath() {
     let lastBreathDuck = 1
 
     try {
-      const AC = window.AudioContext || window.webkitAudioContext
-      if (!AC) return
-      ctx    = new AC()
-      const bufs = createNoiseBuffers(ctx)   // ~50ms once; generates pink + brown
+      // App-lifetime shared context (see sharedContext.js) — the home
+      // carousel's card tap unlocks it inside the tap gesture, so on iOS the
+      // game usually mounts with a context that is already running and the
+      // bed + breath are audible with no in-game touch. A fresh context per
+      // mount (the previous shape) risked iOS's per-page context cap, and
+      // StrictMode doubled the churn. The gesture-free resume below is a
+      // no-op when already running and harmless when refused.
+      ctx = getSharedAudioContext()
+      ctx.resume().catch(() => {})
+      if (!_noiseBufs) _noiseBufs = createNoiseBuffers(ctx)
+      const bufs = _noiseBufs
       master = ctx.createGain()
       master.gain.value = mutedRef.current ? 0 : MASTER_GAIN
       master.connect(ctx.destination)
@@ -115,7 +127,9 @@ export function useHexBreath() {
 
     ref.current = {
       unlock() {
-        if (ctx.state === 'suspended') ctx.resume().catch(() => {})
+        // `!== 'running'` (not `=== 'suspended'`) so the iOS-only
+        // 'interrupted' state is also driven back toward running.
+        if (ctx.state !== 'running') ctx.resume().catch(() => {})
       },
       update(fraction) {
         if (disposed || ctx.state !== 'running') return
@@ -157,7 +171,10 @@ export function useHexBreath() {
       try { ambientBedGain.disconnect() }    catch (e) {}
       try { ambientBreathDuck.disconnect() } catch (e) {}
       try { master.disconnect() }         catch (e) {}
-      try { ctx.close() }                 catch (e) {}
+      // Do NOT close or suspend the shared context — it's the app-lifetime
+      // singleton (closing it would count against iOS's per-page context cap,
+      // and suspending here would undo the card-tap unlock during StrictMode's
+      // dev remount). All of this game's nodes are stopped/disconnected above.
       ref.current = { unlock() {}, update() {}, updateGauge() {}, fadeOut() {} }
     }
   }, [])
