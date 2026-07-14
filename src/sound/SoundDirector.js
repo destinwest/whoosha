@@ -20,12 +20,13 @@
 //   - visibilitychange handler suspends the context when the tab is hidden so
 //     audio doesn't drain battery in the background.
 
-import { createNoiseBuffers } from './noiseBuffer'
-import { createBreath }       from './synthBreath'
-import { createRumble }       from './synthRumble'
-import { createBowl }         from './synthBowl'
-import { createAmbient }      from './synthAmbient'
-import { createReverb }       from './reverb'
+import { createNoiseBuffers }     from './noiseBuffer'
+import { createBreath }           from './synthBreath'
+import { createRumble }           from './synthRumble'
+import { createBowl }             from './synthBowl'
+import { createAmbient }          from './synthAmbient'
+import { createReverb }           from './reverb'
+import { getSharedAudioContext }  from './sharedContext'
 
 const RAMP_FAST = 0.05  // 50ms — for mute toggles
 
@@ -124,21 +125,6 @@ const TC_RUMBLE  = 0.12
 // Min target change before re-scheduling — avoids zipper from per-frame
 // micro-modulation of already-stable params.
 const RESCHEDULE_EPS = 0.005
-
-// ── Shared AudioContext singleton ──────────────────────────────────────────
-// One AudioContext for the app's lifetime, created lazily and reused across
-// every game session. Browsers cap AudioContexts per page (~4 on iOS Safari)
-// and don't reliably release closed ones, so creating a fresh context per
-// game-mount risks permanently breaking audio after a handful of entries.
-// We create exactly one and SUSPEND (never close) it between games.
-let _sharedCtx = null
-function getSharedAudioContext() {
-  if (!_sharedCtx) {
-    const Ctx = window.AudioContext || window.webkitAudioContext  // webkit prefix for older Safari
-    _sharedCtx = new Ctx()
-  }
-  return _sharedCtx
-}
 
 export default class SoundDirector {
   constructor() {

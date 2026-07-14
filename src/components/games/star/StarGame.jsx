@@ -54,6 +54,11 @@ function buildMorningBg(w, h, dpr) {
 // "breathe out" cues via useStarVoice), testing whether voice-only reads better
 // than text for this game. The star's 10 arms made the old text labels feel
 // cramped regardless of layout tuning; removed rather than fought.
+//
+// A one-shot spoken intro ("StarGameBreathIntro.mp3") also plays once at game
+// open, ahead of the first breath cue — see emitTick below. This is the one
+// piece of Star's audio design that's deliberately different from every other
+// game (none of which have an intro clip).
 export default function StarGame({ onExit }) {
 
   // Mount straight into play — no in-game intro (same as Hexagon / Infinity /
@@ -82,19 +87,53 @@ export default function StarGame({ onExit }) {
 
   const lastBreathPhaseRef = useRef(-1)
   // Edge-detects breath-phase transitions from StarCanvas's per-frame, TIME-
-  // based fraction [0, 10) (evenly spaced — see the note above getPacing in
-  // StarCanvas for why it's NOT the geometric pacing fraction) and fires
-  // exactly one voice cue per transition, every 5s — mirrors HexagonCanvas's
-  // onBreath shape, but this consumer is event-driven (a one-shot clip per
-  // phase change) rather than continuous synth modulation.
+  // based fraction [0, 10), counted from GAME START not mount (evenly spaced,
+  // guaranteed to begin at phase 0 = "in" — see the onBreath call site in
+  // StarCanvas for the full story) and fires one voice cue per transition,
+  // every 5s — mirrors HexagonCanvas's onBreath shape, but this consumer is
+  // event-driven (a one-shot clip per phase change) rather than continuous
+  // synth modulation.
+  //
+  // lastBreathPhaseRef only advances when play() reports it actually started
+  // (see useStarVoice) — if the AudioContext's resume() from unlock() hasn't
+  // resolved yet on this exact frame (a possible few-ms gap right at game
+  // start), the SAME phaseIdx is retried on the next frame instead of the
+  // cue being silently lost until the next phase boundary.
   const emitBreath = useRef((fraction) => {
     if (phaseRef.current !== 'game') return   // no new cues once completion begins
     const phaseIdx = Math.floor(fraction)
     if (phaseIdx === lastBreathPhaseRef.current) return
-    lastBreathPhaseRef.current = phaseIdx
-    voiceRef.current?.play(phaseIdx % 2 === 0 ? 'in' : 'out')
+    const played = voiceRef.current?.play(phaseIdx % 2 === 0 ? 'in' : 'out')
+    if (played) lastBreathPhaseRef.current = phaseIdx
   }).current
   const unlockAudio = useRef(() => voiceRef.current?.unlock()).current
+
+  const introPlayedRef = useRef(false)
+  // Reset the intro flag whenever the voice-session effect tears down. With
+  // the shared AudioContext already running at mount (card-tap unlock),
+  // StrictMode's dev-only mount→cleanup→remount would otherwise let the
+  // FIRST, instantly-disposed voice instance claim the intro (play() succeeds
+  // for a few ms, then dispose silences it) and the surviving instance would
+  // never replay it. In production this cleanup only runs at real unmount.
+  useEffect(() => () => { introPlayedRef.current = false }, [])
+  // Plays the intro clip once, as early as technically possible — "the
+  // opening of the game" (mount), NOT gated on game-start like the in/out
+  // cues (this is a one-shot scene-setter, not a repeating breath cue).
+  // Retried every frame via onTick — which, unlike onBreath, fires
+  // unconditionally from mount regardless of startedRef — until play()
+  // reports success, since audio can't actually sound until the browser
+  // unlocks the AudioContext on the child's first touch anywhere on the
+  // screen (unlockAudio, below). There's currently no way to start it any
+  // earlier than that first touch without moving where/when the AudioContext
+  // itself is created (e.g. unlocking from the home-carousel card tap, before
+  // the route transition) — a bigger change, not done here. Exact timing
+  // against the first "breathe in"/"breathe out" cue is explicitly deferred
+  // per the user — for now the two can overlap.
+  const emitTick = useRef(() => {
+    if (introPlayedRef.current || phaseRef.current !== 'game') return
+    const played = voiceRef.current?.play('intro')
+    if (played) introPlayedRef.current = true
+  }).current
 
   // ── Morning background — baked once per resize ──────────────────────────────
   useEffect(() => {
@@ -188,6 +227,7 @@ export default function StarGame({ onExit }) {
             strokeModeRef={strokeModeRef}
             pacingCanvasRef={pacingCanvasRef}
             onGameStart={() => { sessionStartRef.current = Date.now() }}
+            onTick={emitTick}
             onBreath={emitBreath}
             interactive={phase === 'game'}
           />

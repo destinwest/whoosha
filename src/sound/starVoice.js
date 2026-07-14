@@ -1,7 +1,11 @@
 // ── starVoice ──────────────────────────────────────────────────────────────
-// Spoken-word breath cues for the Star game — "breathe in" / "breathe out"
-// samples that play once per breath-phase transition, fading in and settling
-// out around the clip so it sits cleanly inside its 5s phase.
+// Spoken-word cues for the Star game:
+//   'in' / 'out'  — "breathe in" / "breathe out", one per breath-phase
+//                   transition, fading in and settling out around the clip so
+//                   it sits cleanly inside its 5s phase.
+//   'intro'       — a one-shot ~5.4s piece played once at game open (see the
+//                   trigger in StarGame — this module only knows how to play
+//                   it, not when).
 //
 // This is deliberately SAMPLED, not synthesized — synthesis in this codebase
 // makes tones/ambience, not speech, so the "cued/breath-coupled elements stay
@@ -10,23 +14,25 @@
 // aren't in that set.
 //
 // Deliberately NOT the full SoundDirector: no bus spine, no interruption-
-// recovery state machine. Nothing here outlives a single 5s phase — each cue
-// is a fresh one-shot AudioBufferSource fired against whatever state the
-// context happens to be in — so there's no persistent graph for an iOS lock/
-// unlock to leave broken. Mirrors the createHexBreath / useHexBreath shape
-// (own AudioContext, closed on unmount) rather than SoundDirector's shared,
-// app-lifetime one.
+// recovery state machine. Nothing here outlives a single clip — each cue is a
+// fresh one-shot AudioBufferSource fired against whatever state the context
+// happens to be in — so there's no persistent graph for an iOS lock/unlock to
+// leave broken. Runs on the app's shared AudioContext (see sharedContext.js),
+// handed in by useStarVoice; this module only owns its own nodes.
 //
 // Usage (see useStarVoice.js for the React wrapper):
 //   const voice = createStarVoice(ctx)
-//   await voice.ready                 // resolves once both clips are decoded
-//   voice.play('in' | 'out')          // fire a cue; cuts any still-fading prior one short
+//   await voice.ready                 // resolves once all clips are decoded
+//   voice.play('in' | 'out' | 'intro') // fire a cue (returns true/false — see
+//                                      // play()); cuts any still-fading prior
+//                                      // one short
 //   voice.output.connect(master)
 //   voice.dispose()
 
 const FILES = {
-  in:  '/sounds/BreatheIn.mp3',
-  out: '/sounds/BreatheOut.mp3',
+  in:     '/sounds/BreatheIn.mp3',
+  out:    '/sounds/BreatheOut.mp3',
+  intro:  '/sounds/StarGameBreathIntro.mp3',
 }
 
 const PEAK_GAIN     = 0.85   // cue volume at full fade-in
@@ -77,10 +83,15 @@ export function createStarVoice(ctx) {
     activeGain   = null
   }
 
+  // Returns true if the cue actually started, false if skipped (disposed, or
+  // the clip hasn't finished decoding yet). The caller (useStarVoice → StarGame)
+  // uses this to RETRY on the next frame rather than silently losing the cue —
+  // important for the very first "breathe in" at game start, which must not be
+  // missable (see the onBreath call site in StarCanvas for the fuller story).
   function play(kind) {
-    if (disposed) return
+    if (disposed) return false
     const buffer = buffers[kind]
-    if (!buffer) return   // not loaded yet (only possible in the first ~200ms) — skip
+    if (!buffer) return false   // not loaded yet (only possible in the first ~200ms) — caller retries
 
     stopActive()
 
@@ -110,6 +121,7 @@ export function createStarVoice(ctx) {
       try { gain.disconnect()   } catch (e) {}
       if (activeSource === source) { activeSource = null; activeGain = null }
     }
+    return true
   }
 
   // Immediately (quick-fade) silences any in-flight cue — called when the game

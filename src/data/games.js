@@ -10,7 +10,7 @@
 
 export const HOME_GAMES = [
   { id: 'heart',    name: 'Heart Breathing',   tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'heart',    locked: true,  placeholder: false },
-  { id: 'rainbow',  name: 'Rainbow Breathing', tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'rainbow',  locked: true,  placeholder: false },
+  { id: 'rainbow',  name: 'Rainbow Breathing', tagline: 'Climb the rainbow',  route: '/games/rainbow',  gameKey: 'rainbow',     shape: 'rainbow',  locked: false, placeholder: false },
   { id: 'infinity', name: 'Infinity Breathing', tagline: 'Trace the infinity', route: '/games/infinity', gameKey: 'infinity',    shape: 'infinity', locked: false, placeholder: false },
   { id: 'square',   name: 'Square Breathing',   tagline: 'Trace the square',   route: '/games/square',   gameKey: 'square',      shape: 'square',   locked: false, placeholder: false },
   { id: 'hexagon',  name: 'Hexagon Breathing',  tagline: '',                   route: '/games/hexagon',  gameKey: 'hexagon',     shape: 'hexagon',  locked: false, placeholder: false },
@@ -29,5 +29,6 @@ export const GAME_GRADIENTS = {
   infinity:    'linear-gradient(160deg, #D2C9E5, #B0A3D0)',
   triangle:    'linear-gradient(160deg, #8BB8E4, #5C91C7)',
   star:        'linear-gradient(160deg, #FCF6DB, #A7C2F7)',
+  rainbow:     'linear-gradient(160deg, #FEFAE6, #F6E4AE)',
   placeholder: 'linear-gradient(160deg, #E0E8DF, #BFCEC1)',
 }
