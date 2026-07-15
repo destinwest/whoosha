@@ -86,10 +86,12 @@ const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 5
 const VOICE_PHASE_MS        = CYCLE_MS / SIDES
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-// Finger-trail drift palette — the user's "morning's first light" palette (soft
-// pink → lavender → blue → pale-yellow). The palette's yellow (#FCDF6C) is the
-// TRACK color and is omitted here so the paint stays visible against the track.
-const LAP_COLORS = ['#FCCAD2', '#CECFED', '#A7C2F7', '#FCF9DA']
+// Finger-trail drift palette — retuned 2026-07-14 for the night-sky background
+// (was tuned against the earlier morning sky): blueish-white → blueish-white →
+// bright yellow → bright yellow, reading as a shining star's flicker between a
+// cool glint and a hot flash. The track's own gold (#FCDF6C) is omitted so the
+// paint stays visible against the track.
+const LAP_COLORS = ['#EFF6FD', '#DCE8FA', '#FFEA00', '#FFD332']
 
 // Time for one full LAP_COLORS cycle in ms of active tracing.
 // 72 000ms = ~72 seconds — roughly four laps at pacing speed.
