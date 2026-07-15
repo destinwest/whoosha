@@ -6,9 +6,9 @@ import { bboxOf, fitWithMargin, fitCenter, REGION_CENTER_RATIO, SHAPE_VISUAL_WEI
 // render of the Star game for the home carousel card. A calm "resting" state —
 // mirroring InfinityCardPreview's treatment of the same night sky: a quiet
 // night gradient with a soft central glow (no stars, no Milky Way band /
-// nebulae — the launch cross-dissolve blooms into the full baked sky) and the
-// star-outline track in its bare base colour. No pacing dot (see the note at
-// the track draw below) and no breathing labels.
+// nebulae — the launch cross-dissolve blooms into the full baked sky), the
+// star-outline track in its bare base colour, and a quiet pale pacing dot
+// resting at the top tip (the game dot's actual start). No breathing labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — a five-pointed star OUTLINE (10 vertices, one
@@ -128,13 +128,25 @@ function drawScene(ctx, w, h) {
   ctx.closePath()
 
   // Flat track — a single soft band (no shadow / highlight / inner wall).
-  // No pacing dot: the old one (inset along the V0 valley → V1 top-tip run,
-  // from when the game's dot started at a valley) was wider than the track at
-  // card scale and read as a lump on the star's top edge — removed 2026-07-14.
   ctx.lineWidth   = lw
   ctx.lineJoin    = 'round'
   ctx.strokeStyle = TRACK_COLOR
   ctx.stroke()
+
+  // Quiet pacing dot resting at the TOP TIP's arc midpoint — where the game's
+  // pacing dot actually starts (pacingArcOrigin, since the 2026-07-11 top-tip
+  // change; the old card dot sat inset along the valley→tip run, a leftover
+  // from the earlier valley start). Family-standard size (lw·0.62, matching
+  // Square/Hexagon cards), centered on the track centerline.
+  const u0     = uOut[0]                                  // side 0 runs valley V0 → top tip V1
+  const to0    = { x: verts[1].x - u0.x * Ttan[1], y: verts[1].y - u0.y * Ttan[1] }
+  const nrm0   = turn[1] >= 0 ? { x: -u0.y, y: u0.x } : { x: u0.y, y: -u0.x }
+  const c0     = { x: to0.x + nrm0.x * r, y: to0.y + nrm0.y * r }
+  const midAng = Math.atan2(to0.y - c0.y, to0.x - c0.x) + turn[1] / 2
+  ctx.beginPath()
+  ctx.arc(c0.x + r * Math.cos(midAng), c0.y + r * Math.sin(midAng), lw * 0.62, 0, Math.PI * 2)
+  ctx.fillStyle = '#FFFFFF'
+  ctx.fill()
 }
 
 export default function StarCardPreview({ className = '' }) {
