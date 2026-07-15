@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react'
-import { roundedPolyPath } from '../_shared/roundedPolyPath'
 import { bboxOf, fitWithMargin, fitCenter, REGION_CENTER_RATIO, SHAPE_VISUAL_WEIGHT } from '../_shared/cardLayout'
 
 // ── StarCardPreview ─────────────────────────────────────────────────────────
@@ -68,29 +67,70 @@ function drawScene(ctx, w, h) {
 
   const circleR = (2 * R) * 0.0728
   const lw      = (circleR * 2 + 8) * 0.85   // matches StarCanvas STAR_TRACK_SLIM
+
+  // Per-vertex edge directions + SIGNED turns. The star outline is CONCAVE —
+  // valleys are reflex corners with a negative turn — which is why the earlier
+  // roundedPolyPath/arcTo draw was wrong here: arcTo only handles convex
+  // corners, and combined with the path seam on the valley→top-tip edge it
+  // made the stroke diverge from itself into a visible bump at the star's top.
+  // This is the same reason StarCanvas's buildGeo constructs its own rounded
+  // centerline; the block below is a card-scale port of that construction.
+  const n = 10
+  const uOut = []   // unit direction of the edge leaving vertex i
+  const turn = []   // signed deflection at vertex i
+  for (let i = 0; i < n; i++) {
+    const p = verts[(i - 1 + n) % n], v = verts[i], q = verts[(i + 1) % n]
+    let ix = v.x - p.x, iy = v.y - p.y; const il = Math.hypot(ix, iy) || 1; ix /= il; iy /= il
+    let ox = q.x - v.x, oy = q.y - v.y; const ol = Math.hypot(ox, oy) || 1; ox /= ol; oy /= ol
+    uOut.push({ x: ox, y: oy })
+    turn.push(Math.atan2(ix * oy - iy * ox, ix * ox + iy * oy))
+  }
+
   // Corner radius — mirrors StarCanvas: sized above lw/2 so the stroked inner
   // edge stays rounded, clamped so both corner tangents on the tightest edge
   // (the sharp tips dominate) fit within 88% of the edge.
   const edgeLen = Math.hypot(verts[1].x - verts[0].x, verts[1].y - verts[0].y)
-  const halfTan = []   // tan(|turn_i| / 2) per vertex
-  for (let i = 0; i < 10; i++) {
-    const p = verts[(i - 1 + 10) % 10], v = verts[i], q = verts[(i + 1) % 10]
-    let ix = v.x - p.x, iy = v.y - p.y; const il = Math.hypot(ix, iy) || 1; ix /= il; iy /= il
-    let ox = q.x - v.x, oy = q.y - v.y; const ol = Math.hypot(ox, oy) || 1; ox /= ol; oy /= ol
-    const turnAbs = Math.abs(Math.atan2(ix * oy - iy * ox, ix * ox + iy * oy))
-    halfTan.push(Math.tan(turnAbs / 2))
-  }
   let maxEdgeTan = 0
-  for (let i = 0; i < 10; i++) maxEdgeTan = Math.max(maxEdgeTan, halfTan[i] + halfTan[(i + 1) % 10])
+  for (let i = 0; i < n; i++) {
+    const sum = Math.tan(Math.abs(turn[i]) / 2) + Math.tan(Math.abs(turn[(i + 1) % n]) / 2)
+    maxEdgeTan = Math.max(maxEdgeTan, sum)
+  }
   const r = Math.min(lw * 0.90, (0.88 * edgeLen) / maxEdgeTan)
+
+  // Rounded centerline — straight runs + signed corner arcs (arc center offset
+  // along the signed normal: left of travel at convex tips, right at reflex
+  // valleys), sampled and stroked as one closed polyline. Same construction as
+  // StarCanvas buildGeo, coarser sampling (12 segments/arc is plenty at card
+  // scale). Drawn once per resize — per-frame cost stays zero.
+  const Ttan = turn.map(t => r * Math.tan(Math.abs(t) / 2))   // per-vertex tangent length
+  const ARC_STEPS = 12
+  ctx.beginPath()
+  for (let i = 0; i < n; i++) {
+    const a = verts[i]
+    const b = verts[(i + 1) % n]
+    const u = uOut[i]
+    const from = { x: a.x + u.x * Ttan[i],           y: a.y + u.y * Ttan[i] }
+    const to   = { x: b.x - u.x * Ttan[(i + 1) % n], y: b.y - u.y * Ttan[(i + 1) % n] }
+    if (i === 0) ctx.moveTo(from.x, from.y)
+    else         ctx.lineTo(from.x, from.y)
+    ctx.lineTo(to.x, to.y)
+
+    // Corner arc at vertex i+1 (belongs to this side).
+    const sweep  = turn[(i + 1) % n]
+    const nrm    = sweep >= 0 ? { x: -u.y, y: u.x } : { x: u.y, y: -u.x }
+    const center = { x: to.x + nrm.x * r, y: to.y + nrm.y * r }
+    const a0     = Math.atan2(to.y - center.y, to.x - center.x)
+    for (let k = 1; k <= ARC_STEPS; k++) {
+      const ang = a0 + sweep * (k / ARC_STEPS)
+      ctx.lineTo(center.x + r * Math.cos(ang), center.y + r * Math.sin(ang))
+    }
+  }
+  ctx.closePath()
 
   // Flat track — a single soft band (no shadow / highlight / inner wall).
   // No pacing dot: the old one (inset along the V0 valley → V1 top-tip run,
   // from when the game's dot started at a valley) was wider than the track at
-  // card scale and read as a bump deforming the star's top silhouette —
-  // removed 2026-07-14 so the card shows a clean star shape.
-  ctx.beginPath()
-  roundedPolyPath(ctx, verts, r)
+  // card scale and read as a lump on the star's top edge — removed 2026-07-14.
   ctx.lineWidth   = lw
   ctx.lineJoin    = 'round'
   ctx.strokeStyle = TRACK_COLOR
