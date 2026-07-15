@@ -7,9 +7,9 @@ import { bboxOf, fitWithMargin, fitCenter, REGION_CENTER_RATIO, SHAPE_VISUAL_WEI
 // render of the Star game for the home carousel card. A calm "resting" state —
 // mirroring InfinityCardPreview's treatment of the same night sky: a quiet
 // night gradient with a soft central glow (no stars, no Milky Way band /
-// nebulae — the launch cross-dissolve blooms into the full baked sky), the
-// star-outline track in its bare base colour and a quiet pale pacing dot at
-// the start valley. No breathing labels.
+// nebulae — the launch cross-dissolve blooms into the full baked sky) and the
+// star-outline track in its bare base colour. No pacing dot (see the note at
+// the track draw below) and no breathing labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — a five-pointed star OUTLINE (10 vertices, one
@@ -85,26 +85,16 @@ function drawScene(ctx, w, h) {
   const r = Math.min(lw * 0.90, (0.88 * edgeLen) / maxEdgeTan)
 
   // Flat track — a single soft band (no shadow / highlight / inner wall).
+  // No pacing dot: the old one (inset along the V0 valley → V1 top-tip run,
+  // from when the game's dot started at a valley) was wider than the track at
+  // card scale and read as a bump deforming the star's top silhouette —
+  // removed 2026-07-14 so the card shows a clean star shape.
   ctx.beginPath()
   roundedPolyPath(ctx, verts, r)
   ctx.lineWidth   = lw
   ctx.lineJoin    = 'round'
   ctx.strokeStyle = TRACK_COLOR
   ctx.stroke()
-
-  // Quiet pacing dot at the start of the first breathe-in side (V0 valley → V1
-  // top tip), inset past the corner so it sits on the straight run.
-  const p   = verts[0]
-  const q   = verts[1]
-  const len = Math.hypot(q.x - p.x, q.y - p.y)
-  const inset = Math.min(r * 1.2, len * 0.35)
-  const dotX = p.x + ((q.x - p.x) / len) * inset
-  const dotY = p.y + ((q.y - p.y) / len) * inset
-  const dotR = lw * 0.62
-  ctx.beginPath()
-  ctx.arc(dotX, dotY, dotR, 0, Math.PI * 2)
-  ctx.fillStyle = '#FFFFFF'
-  ctx.fill()
 }
 
 export default function StarCardPreview({ className = '' }) {
