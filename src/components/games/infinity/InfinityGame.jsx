@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import InfinityCanvas   from './InfinityCanvas'
 import CompletionScreen from '../square/CompletionScreen'
-import { buildNightSkyBg } from '../_shared/nightSky'
+import { buildLakeSurfaceBg } from './lakeSurface'
 
 // Game canvas opacity once completion phase begins — the world recedes behind
 // the completion card without vanishing entirely.
@@ -12,7 +12,9 @@ const LABEL_TEXTS = ['breathe in', 'breathe out']
 
 // ── InfinityGame ──────────────────────────────────────────────────────────────
 // Phase manager — owns intro/game/completion phase, session timing, exit, and the
-// baked night-sky background. All canvas drawing + geometry live in InfinityCanvas.
+// baked lake-surface background (an abstract Rocky Mountain lake — see
+// lakeSurface.js; replaced the night sky 2026-07-14). All canvas drawing +
+// geometry live in InfinityCanvas.
 export default function InfinityGame({ onExit }) {
   const [phase, setPhase]                         = useState('game')  // 'game' | 'completion'
   const [completionSeconds, setCompletionSeconds] = useState(0)
@@ -23,7 +25,7 @@ export default function InfinityGame({ onExit }) {
   const bgCanvasRef       = useRef(null)
   const pacingCanvasRef   = useRef(null)
 
-  // ── Night-sky background — baked once per resize ────────────────────────────
+  // ── Lake-surface background — baked once per resize ─────────────────────────
   useEffect(() => {
     const el = bgCanvasRef.current
     if (!el) return
@@ -34,7 +36,7 @@ export default function InfinityGame({ onExit }) {
       const dpr = window.devicePixelRatio || 1
       el.width  = w * dpr
       el.height = h * dpr
-      el.getContext('2d').drawImage(buildNightSkyBg(w, h, dpr), 0, 0)
+      el.getContext('2d').drawImage(buildLakeSurfaceBg(w, h, dpr), 0, 0)
     }
     draw()
     const ro = new ResizeObserver(draw)
@@ -53,7 +55,7 @@ export default function InfinityGame({ onExit }) {
   function handleCompletionDismiss() { onExit(completionSeconds) }
 
   return (
-    <div className="absolute inset-0 overflow-hidden select-none" style={{ touchAction: 'none', background: '#070A22' }}>
+    <div className="absolute inset-0 overflow-hidden select-none" style={{ touchAction: 'none', background: '#2CAD9A' }}>
       {/* Top chrome */}
       <div style={{ opacity: 'var(--intro-ui, 1)' }}>
         <button
@@ -70,11 +72,11 @@ export default function InfinityGame({ onExit }) {
 
       {/* The world */}
       <div style={{
-        position: 'absolute', inset: 0, background: '#070A22',
+        position: 'absolute', inset: 0, background: '#2CAD9A',
         opacity: phase === 'completion' ? COMPLETION_CANVAS_OPACITY : 1,
         transition: phase === 'completion' ? 'opacity 1800ms ease' : undefined,
       }}>
-        {/* Night sky — baked; desaturates with the heat gauge */}
+        {/* Lake surface — baked; desaturates with the heat gauge */}
         <div style={{
           position: 'absolute', inset: 0,
           filter: 'saturate(var(--game-saturation, 1))',
@@ -122,7 +124,7 @@ export default function InfinityGame({ onExit }) {
                       fontFamily: "'Nunito', sans-serif",
                       fontWeight: 700,
                       fontSize: `${fs}px`,
-                      color: 'rgba(232,227,248,0.82)',
+                      color: 'rgba(9,62,57,0.82)',   // deep lake pine — legible on morning aqua
                       whiteSpace: 'nowrap',
                     }}
                   >
@@ -135,10 +137,12 @@ export default function InfinityGame({ onExit }) {
         </div>
       </div>
 
-      {/* Vignette — the one allowed overlay */}
+      {/* Vignette — the one allowed overlay. Deep-teal shading (not pure black)
+          so the bright morning water darkens toward its own depths at the
+          edges rather than toward night. */}
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 15,
-        background: 'radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(0,0,0,0.45) 100%)',
+        background: 'radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(8,52,48,0.38) 100%)',
       }} />
 
       {/* Completion overlay — time shown first, then the trailing phrase, per

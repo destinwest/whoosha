@@ -130,7 +130,7 @@ const WAKELET_TILT_DEG = 45
 const WAKELET_TILT_COS = Math.cos(WAKELET_TILT_DEG * Math.PI / 180)
 const WAKELET_TILT_SIN = Math.sin(WAKELET_TILT_DEG * Math.PI / 180)
 const WAKE_ALPHA          = 0.12   // peak fill alpha — intentionally faint (unchanged final)
-const WAKE_COLOR          = '205,210,236'  // soft cool moonlight-lavender
+const WAKE_COLOR          = '224,246,240'  // pale sunlit aqua-white (was moonlight-lavender pre-lake)
 // Two fill passes per wavelet — wide+faint outer, narrow+firm inner — fake a
 // soft feathered edge without shadowBlur (expensive to animate on iOS Safari).
 const WAKELET_RIBBON_PASSES = [
@@ -143,15 +143,15 @@ const WAKELET_RIBBON_PASSES = [
 // catching open sky) gets a highlight band, the inward-facing edge (the
 // trough, toward the path) gets a shadow band. No fixed world light
 // direction needed, so it stays consistent regardless of which way the
-// finger moves. Colors pulled from the actual baked night sky (nightSky.js)
-// rather than invented: highlight leans toward the pale-blue star tint
-// (205,220,255), shadow leans toward the deep navy base wash (#0E1235 /
-// #181A47) lightened just enough to still read against a dark background.
+// finger moves. Colors pulled from the actual baked lake surface
+// (lakeSurface.js) rather than invented: highlight leans toward the pale
+// sunlit ripple tint (228,250,244), shadow toward the deep lake-teal ripple
+// troughs (10,72,66) lifted just enough to read against the aquamarine.
 // Composited with 'screen' (brightens what's beneath) / 'multiply' (darkens
 // it) instead of flat source-over, so the light actually interacts with the
 // scene rather than looking painted on top of it.
-const WAKE_HIGHLIGHT_COLOR = '220,230,255'
-const WAKE_SHADOW_COLOR    = '48,52,98'
+const WAKE_HIGHLIGHT_COLOR = '236,252,247'
+const WAKE_SHADOW_COLOR    = '22,88,80'
 const WAKELET_EDGE_THICK_MUL = 0.55  // highlight/shadow band width, × the base ribbon's half-thickness
 const WAKELET_EDGE_SHIFT_MUL = 0.42  // how far the band rides toward its edge, × peak half-thickness
 const WAKELET_EDGE_PASSES = [

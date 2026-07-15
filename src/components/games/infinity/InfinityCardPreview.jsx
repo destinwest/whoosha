@@ -5,9 +5,10 @@ import { fitWithMargin, REGION_CENTER_RATIO, SHAPE_VISUAL_WEIGHT } from '../_sha
 // The Infinity counterpart to Square/HexagonCardPreview: a soft, muted render of
 // the Infinity game for the home carousel card — a calm "resting" state that the
 // launch cross-dissolve blooms into the vivid game. Deliberately NOT a faithful
-// game frame: a quiet night gradient with a soft central glow and a vignette
-// darkening the edges (mirroring the game's own vignette overlay — see
-// InfinityGame.jsx), no stars, no Milky Way band / nebulae, and a "Liquid
+// game frame: a quiet, dimmed version of the lake surface (see lakeSurface.js —
+// muted shore shallows at the bottom rising into calm aquamarine) with a soft
+// central glow and a vignette darkening the edges (mirroring the game's own
+// vignette overlay — see InfinityGame.jsx), no ripple bands, and a "Liquid
 // Glass" translucent figure-8 track — a uniform tinted glass body,
 // background showing through — with one quiet pale pacing dot. No breathing
 // labels.
@@ -27,19 +28,21 @@ const ASPECT = 2.2                    // figure height:width — matches the gam
 const RAW    = 1 / (2 * Math.SQRT2)   // max |x| of the raw lemniscate
 
 function drawScene(ctx, w, h) {
-  // Soft night gradient — the game's palette, dimmed and calmed (no band/nebulae).
-  const bg = ctx.createLinearGradient(0, 0, w * 0.4, h)
-  bg.addColorStop(0,   '#1B1F4D')
-  bg.addColorStop(0.6, '#241F50')
-  bg.addColorStop(1,   '#141238')
+  // Soft lake gradient — the game's palette, dimmed and calmed (no ripples).
+  // Bottom-up like the game: muted gray-brown shallows into quiet aquamarine.
+  const bg = ctx.createLinearGradient(0, h, 0, 0)
+  bg.addColorStop(0.00, '#6E6B5E')
+  bg.addColorStop(0.25, '#41816F')
+  bg.addColorStop(0.65, '#2BA893')
+  bg.addColorStop(1.00, '#3FBFAC')
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
 
-  // Faint central violet glow.
+  // Faint central aqua glow — the game's upper-center vibrancy, softened.
   const cy = h * REGION_CENTER_RATIO
   const glow = ctx.createRadialGradient(w / 2, cy, 0, w / 2, cy, Math.max(w, h) * 0.55)
-  glow.addColorStop(0, 'rgba(120,95,190,0.18)')
-  glow.addColorStop(1, 'rgba(120,95,190,0)')
+  glow.addColorStop(0, 'rgba(110,228,206,0.18)')
+  glow.addColorStop(1, 'rgba(110,228,206,0)')
   ctx.fillStyle = glow
   ctx.fillRect(0, 0, w, h)
 
@@ -99,7 +102,7 @@ function drawScene(ctx, w, h) {
   mctx.stroke()
 
   mctx.globalCompositeOperation = 'source-in'
-  mctx.fillStyle = 'rgba(150,140,182,0.10)'   // flat glass tint — the previous gradient's dimmest stop
+  mctx.fillStyle = 'rgba(216,246,239,0.12)'   // flat glass tint — cool pale aqua for the lake scene
   mctx.fillRect(0, 0, w, h)
 
   ctx.save()
@@ -112,17 +115,18 @@ function drawScene(ctx, w, h) {
   const [dotX, dotY] = pt(0.25)
   ctx.beginPath()
   ctx.arc(dotX, dotY, lw * 0.62, 0, Math.PI * 2)
-  ctx.fillStyle = '#EDE7FA'
+  ctx.fillStyle = '#F0FBF7'
   ctx.fill()
 
   // Vignette — darker at the edges, lighter in the middle. Mirrors the
   // game's own vignette overlay (InfinityGame.jsx: 'radial-gradient(ellipse
-  // at 50% 50%, transparent 40%, rgba(0,0,0,0.45) 100%)'), drawn last so it
+  // at 50% 50%, transparent 40%, rgba(8,52,48,0.38) 100%)' — deep teal, not
+  // black, so the water darkens toward its own depths), drawn last so it
   // sits over everything, same as the game's DOM stacking (a CSS overlay
   // above the game canvas).
   const vignette = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.hypot(w / 2, h / 2))
-  vignette.addColorStop(0.4, 'rgba(0,0,0,0)')
-  vignette.addColorStop(1,   'rgba(0,0,0,0.45)')
+  vignette.addColorStop(0.4, 'rgba(8,52,48,0)')
+  vignette.addColorStop(1,   'rgba(8,52,48,0.40)')
   ctx.fillStyle = vignette
   ctx.fillRect(0, 0, w, h)
 }
