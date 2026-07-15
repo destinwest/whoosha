@@ -100,12 +100,13 @@ function CarouselCard({ game, distance }) {
   const isRainbow  = game.gameKey === 'rainbow'
   const hasPreview = isSquare || isHexagon || isInfinity || isTriangle || isStar || isRainbow   // full-bleed track render + bottom title
   // Title colour matched to each preview's palette (light on the dark square/
-  // infinity cards — square's matches its pacing dot — dark on the light
-  // hexagon / triangle / star cards).
+  // infinity/star cards — square's matches its pacing dot, star's matches
+  // infinity's since the two share the night sky — dark on the light
+  // hexagon / triangle cards).
   const titleColor = isSquare ? '#F4F0E6'
     : isHexagon ? '#5C2E1C'
     : isTriangle ? '#33465A'
-    : isStar ? '#5E5A86'
+    : isStar ? '#E8E3F8'
     : isRainbow ? '#8A6A2F'
     : '#E8E3F8'
   return (
@@ -125,7 +126,7 @@ function CarouselCard({ game, distance }) {
                 : isTriangle
                   ? '#74A5D6'
                   : isStar
-                    ? '#ECD5E4'
+                    ? '#1B1F4D'
                     : isRainbow
                       ? '#FBF0CC'
                       : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),

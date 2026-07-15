@@ -1,9 +1,10 @@
 // ── nightSky.js ───────────────────────────────────────────────────────────────
-// Shared night-sky bake for the Infinity game. Extracted from InfinityGame so the
-// game canvas (InfinityCanvas) can bake an identical copy to REFRACT (sample as a
-// bitmap for the water-lens effect) without a circular import. The seed is fixed,
-// so InfinityGame's background canvas and InfinityCanvas's refraction source are
-// pixel-identical.
+// Shared night-sky bake, used by BOTH the Infinity and Star games (moved to
+// _shared/ when Star adopted the same sky). Originally extracted from
+// InfinityGame so the game canvas (InfinityCanvas) could bake an identical copy
+// to REFRACT (sample as a bitmap for the water-lens effect) without a circular
+// import. The seed is fixed, so every consumer's bake — Infinity's background
+// and refraction source, Star's background — is pixel-identical.
 
 // ── mulberry32 ────────────────────────────────────────────────────────────────
 // Tiny seeded PRNG so the baked star field is identical across re-bakes (resize).

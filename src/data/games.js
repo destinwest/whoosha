@@ -28,7 +28,7 @@ export const GAME_GRADIENTS = {
   hexagon:     'linear-gradient(160deg, #E4B48C, #C77E5A)',
   infinity:    'linear-gradient(160deg, #D2C9E5, #B0A3D0)',
   triangle:    'linear-gradient(160deg, #8BB8E4, #5C91C7)',
-  star:        'linear-gradient(160deg, #FCF6DB, #A7C2F7)',
+  star:        'linear-gradient(160deg, #1B1F4D, #141238)',   // night sky — shared with Infinity
   rainbow:     'linear-gradient(160deg, #FEFAE6, #F6E4AE)',
   placeholder: 'linear-gradient(160deg, #E0E8DF, #BFCEC1)',
 }

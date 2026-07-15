@@ -1,13 +1,15 @@
 import { useEffect, useRef } from 'react'
 import { roundedPolyPath } from '../_shared/roundedPolyPath'
-import { bboxOf, fitWithMargin, fitCenter, SHAPE_VISUAL_WEIGHT } from '../_shared/cardLayout'
+import { bboxOf, fitWithMargin, fitCenter, REGION_CENTER_RATIO, SHAPE_VISUAL_WEIGHT } from '../_shared/cardLayout'
 
 // ── StarCardPreview ─────────────────────────────────────────────────────────
 // The Star counterpart to Square/Hexagon/Triangle CardPreview: a soft, muted
-// render of the Star game for the home carousel card. A calm "resting" state — a
-// PLACEHOLDER morning gradient (no scenery, just the gradient) with the star-
-// outline track in its bare base colour and a quiet pale pacing dot at the start
-// valley. No breathing labels.
+// render of the Star game for the home carousel card. A calm "resting" state —
+// mirroring InfinityCardPreview's treatment of the same night sky: a quiet
+// night gradient with a soft central glow (no stars, no Milky Way band /
+// nebulae — the launch cross-dissolve blooms into the full baked sky), the
+// star-outline track in its bare base colour and a quiet pale pacing dot at
+// the start valley. No breathing labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — a five-pointed star OUTLINE (10 vertices, one
@@ -16,7 +18,8 @@ import { bboxOf, fitWithMargin, fitCenter, SHAPE_VISUAL_WEIGHT } from '../_share
 // come from the shared cardLayout module — see its header for the fit/weight
 // logic (the star's slim points get a perceptual-size boost there).
 //
-// Colors mirror StarGame / StarCanvas: morning-light sky + the #FCDF6C track.
+// Colors mirror StarGame / StarCanvas: night sky (see _shared/nightSky.js,
+// dimmed and calmed here like InfinityCardPreview) + the #FCDF6C track.
 
 const STAR_INNER_RATIO = 0.42        // matches StarCanvas
 const TRACK_COLOR      = '#FCDF6C'   // matches the game track base
@@ -36,14 +39,22 @@ function buildVerts(R, cx, cyc) {
 }
 
 function drawScene(ctx, w, h) {
-  // Sky gradient — matches StarGame's morning sky (softened sunrise stops).
-  const sky = ctx.createLinearGradient(0, 0, 0, h)
-  sky.addColorStop(0.00, '#FCF6DB')
-  sky.addColorStop(0.30, '#FBDAD6')
-  sky.addColorStop(0.55, '#ECD5E4')
-  sky.addColorStop(0.78, '#CFD2EE')
-  sky.addColorStop(1.00, '#A7C2F7')
+  // Soft night gradient — the game's night-sky palette, dimmed and calmed
+  // (no stars/band/nebulae). Same stops as InfinityCardPreview so the two
+  // night-sky cards read as one family.
+  const sky = ctx.createLinearGradient(0, 0, w * 0.4, h)
+  sky.addColorStop(0,   '#1B1F4D')
+  sky.addColorStop(0.6, '#241F50')
+  sky.addColorStop(1,   '#141238')
   ctx.fillStyle = sky
+  ctx.fillRect(0, 0, w, h)
+
+  // Faint central violet glow — mirrors InfinityCardPreview (same center ratio).
+  const glowCy = h * REGION_CENTER_RATIO
+  const glow = ctx.createRadialGradient(w / 2, glowCy, 0, w / 2, glowCy, Math.max(w, h) * 0.55)
+  glow.addColorStop(0, 'rgba(120,95,190,0.18)')
+  glow.addColorStop(1, 'rgba(120,95,190,0)')
+  ctx.fillStyle = glow
   ctx.fillRect(0, 0, w, h)
 
   // ── Star-outline geometry — mirrors StarCanvas buildGeo (one tip up) ────────

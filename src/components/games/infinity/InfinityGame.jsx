@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import InfinityCanvas   from './InfinityCanvas'
 import CompletionScreen from '../square/CompletionScreen'
-import { buildNightSkyBg } from './nightSky'
+import { buildNightSkyBg } from '../_shared/nightSky'
 
 // Game canvas opacity once completion phase begins — the world recedes behind
 // the completion card without vanishing entirely.

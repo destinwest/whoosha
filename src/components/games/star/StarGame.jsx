@@ -4,6 +4,7 @@ import StarCanvas from './StarCanvas'
 import CompletionScreen from '../square/CompletionScreen'
 import MuteButton from '../../ui/MuteButton'
 import { useStarVoice } from '../../../hooks/useStarVoice'
+import { buildNightSkyBg } from '../_shared/nightSky'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
 // StrokeSelector component, but each toggles its visibility independently.
@@ -13,41 +14,16 @@ const STROKE_SELECTOR_ENABLED = false
 // behind the completion card without vanishing entirely (matches Infinity).
 const COMPLETION_CANVAS_OPACITY = 0.25
 
-// ── Morning's-first-light background ─────────────────────────────────────────
-// Soft sunrise gradient after the user's reference photo: light white-yellow at
-// the top, through a soft peach/pink glow and dusty lavender, to light blue at
-// the bottom. Softened toward the reference's low saturation while staying in
-// the same hue family as the paint palette (StarCanvas LAP_COLORS).
-const SKY_STOPS = [
-  [0.00, '#FCF6DB'],   // light white-yellow (top)
-  [0.30, '#FBDAD6'],   // soft peach / pink glow
-  [0.55, '#ECD5E4'],   // pink-lavender
-  [0.78, '#CFD2EE'],   // lavender-blue
-  [1.00, '#A7C2F7'],   // light blue (bottom)
-]
-const BG_SOLID = '#ECD5E4'   // flat fallback behind the canvas (mid sky tone)
-
-// ── buildMorningBg ──────────────────────────────────────────────────────────
-// A single baked vertical gradient, baked once per resize so per-frame cost is
-// zero — same baked-bitmap pattern as the other games.
-function buildMorningBg(w, h, dpr) {
-  const oc = document.createElement('canvas')
-  oc.width  = w * dpr
-  oc.height = h * dpr
-  const ctx = oc.getContext('2d')
-  ctx.scale(dpr, dpr)
-
-  const sky = ctx.createLinearGradient(0, 0, 0, h)
-  for (const [stop, color] of SKY_STOPS) sky.addColorStop(stop, color)
-  ctx.fillStyle = sky
-  ctx.fillRect(0, 0, w, h)
-
-  return oc
-}
+// ── Night-sky background ─────────────────────────────────────────────────────
+// The same starry night as the Infinity game — buildNightSkyBg from
+// _shared/nightSky.js (fixed seed, so the two games' skies are pixel-identical).
+// Replaced the earlier morning's-first-light gradient entirely (user request,
+// 2026-07-14). Baked once per resize; per-frame cost zero.
+const BG_SOLID = '#070A22'   // flat fallback behind the canvas (sky's darkest tone — matches Infinity)
 
 // ── StarGame ──────────────────────────────────────────────────────────────────
 // Phase manager — owns game phase, stroke selection, session timing, exit, the
-// baked (placeholder) morning background, and the voice cues. All canvas
+// baked night-sky background, and the voice cues. All canvas
 // drawing, geometry, and pointer handling live in StarCanvas.
 //
 // No on-screen breathing labels — voice-only instruction (spoken "breathe in" /
@@ -155,7 +131,7 @@ export default function StarGame({ onExit }) {
     if (played) introPlayedRef.current = true
   }).current
 
-  // ── Morning background — baked once per resize ──────────────────────────────
+  // ── Night-sky background — baked once per resize ────────────────────────────
   useEffect(() => {
     const el = bgCanvasRef.current
     if (!el) return
@@ -167,7 +143,7 @@ export default function StarGame({ onExit }) {
       const dpr = window.devicePixelRatio || 1
       el.width  = w * dpr
       el.height = h * dpr
-      el.getContext('2d').drawImage(buildMorningBg(w, h, dpr), 0, 0)
+      el.getContext('2d').drawImage(buildNightSkyBg(w, h, dpr), 0, 0)
     }
 
     draw()
@@ -204,7 +180,7 @@ export default function StarGame({ onExit }) {
       {/* back button */}
       <button
         onClick={handleExit}
-        className="absolute top-4 left-4 z-20 w-11 h-11 flex items-center justify-center rounded-2xl bg-slate-600/15 text-slate-600 hover:bg-slate-600/25 active:bg-slate-600/30 transition-colors"
+        className="absolute top-4 left-4 z-20 w-11 h-11 flex items-center justify-center rounded-2xl bg-white/15 text-white hover:bg-white/25 active:bg-white/30 transition-colors"
         aria-label="Exit game"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -236,7 +212,7 @@ export default function StarGame({ onExit }) {
           filter: 'saturate(var(--game-saturation, 1))',
           willChange: 'filter',
         }}>
-          {/* Morning background — baked at resize (placeholder gradient for now) */}
+          {/* Night-sky background — baked at resize (shared with Infinity) */}
           <canvas
             ref={bgCanvasRef}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
@@ -263,12 +239,12 @@ export default function StarGame({ onExit }) {
         />
       </div>
 
-      {/* Vignette — a gentle cool lavender darkening at the edges (light, so the
-          pale morning sky doesn't turn muddy). */}
+      {/* Vignette — deep darkening at the edges, matching Infinity's treatment
+          of the same night sky. */}
       <div style={{
         position: 'absolute',
         inset: 0,
-        background: 'radial-gradient(ellipse at 50% 50%, transparent 45%, rgba(120,116,168,0.16) 100%)',
+        background: 'radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(0,0,0,0.45) 100%)',
         pointerEvents: 'none',
         zIndex: 15,
       }} />
