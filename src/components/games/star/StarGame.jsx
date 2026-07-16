@@ -69,13 +69,20 @@ export default function StarGame({ onExit }) {
   // HexagonCanvas's onBreath shape, but this consumer is event-driven (a
   // one-shot clip per phase change) rather than continuous synth modulation.
   // Called UNCONDITIONALLY every frame from mount, same as Hexagon's — no
-  // startedRef gate (see StarCanvas's onBreath call site for why an earlier
-  // version had one, and why it was wrong).
+  // startedRef gate of its OWN (see StarCanvas's onBreath call site for why
+  // an earlier version had one, and why it was wrong). Since 2026-07-15,
+  // StarCanvas's caller does skip calling this for the first
+  // PACING_START_DELAY_MS (a fixed time gate, not a touch/tracing gate — see
+  // that call site for why the distinction matters) so the pacing dot can sit
+  // still through the spoken intro; from this function's own point of view
+  // nothing changed, it still just reacts to whatever fraction it's handed.
   //
-  // Phase parity: pacingArcOrigin anchors the dot at the TOP TIP at mount, so
-  // its first full segment (phase 0) is a DESCENT — "out", not "in". Even
-  // phases are out, odd are in (the reverse of the pre-2026-07-14 mapping,
-  // which matched the old valley-anchored origin).
+  // Phase parity: pacingArcOrigin anchors the dot at the BOTTOM TROUGH (V6,
+  // between the star's two lowest tips) at mount, so its first full segment
+  // (phase 0) is an ASCENT — "in", not "out". Even phases are in, odd are out
+  // (2026-07-15 user request — reverts the 2026-07-14 mapping, which matched
+  // the old top-tip-anchored origin; matches the ORIGINAL pre-2026-07-11
+  // mapping, back from when the origin was also valley-anchored).
   //
   // lastBreathPhaseRef only advances when play() reports it actually started
   // (see useStarVoice) — if the AudioContext's resume() from unlock() hasn't
@@ -86,7 +93,7 @@ export default function StarGame({ onExit }) {
     if (phaseRef.current !== 'game') return   // no new cues once completion begins
     const phaseIdx = Math.floor(fraction)
     if (phaseIdx === lastBreathPhaseRef.current) return
-    const played = voiceRef.current?.play(phaseIdx % 2 === 0 ? 'out' : 'in')
+    const played = voiceRef.current?.play(phaseIdx % 2 === 0 ? 'in' : 'out')
     if (played) lastBreathPhaseRef.current = phaseIdx
   }).current
   const unlockAudio = useRef(() => voiceRef.current?.unlock()).current
@@ -116,15 +123,17 @@ export default function StarGame({ onExit }) {
   // unlockAudio (this component's own onPointerDown, below) is what
   // eventually flips the context to 'running'.
   //
-  // emitBreath (in/out, above) follows the exact same shape — mount-anchored,
-  // unconditional, audible on first unlock, whichever path provided it — so
-  // intro and the breath cues behave consistently; no more gating divergence
-  // between them. Sequencing intro against the first breath cue is still not
-  // explicitly orchestrated (no delay/handoff between them) — they can
-  // overlap in time, though in practice the dot's phase-0 (out, ending at the
-  // first valley) is what's live for most of the intro's ~5.4s run, so the
-  // ordinary case reads as: intro, then a descent to the valley, then
-  // "breathe out."
+  // emitBreath (in/out, above) is mount-anchored the same way, but — since
+  // 2026-07-15 — its caller (StarCanvas) deliberately withholds it for
+  // PACING_START_DELAY_MS (5.5s) so it can't fire while this intro clip is
+  // still playing; see the onBreath call site in StarCanvas for the
+  // mechanism. So intro-vs-first-cue sequencing IS now explicitly
+  // orchestrated (this was an open follow-up through 2026-07-15, resolved by
+  // that change): intro starts at mount, the pacing dot sits still at the
+  // bottom trough until the intro's had time to finish, then the dot starts
+  // its first full segment — an ASCENT toward a tip — landing exactly as
+  // "breathe in" fires. Ordinary case reads as: intro, then a beat of
+  // stillness, then the dot climbs to a tip as "breathe in" plays.
   const emitTick = useRef(() => {
     if (introPlayedRef.current || phaseRef.current !== 'game') return
     const played = voiceRef.current?.play('intro')

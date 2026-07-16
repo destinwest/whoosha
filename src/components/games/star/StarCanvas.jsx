@@ -89,8 +89,8 @@ const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 4
 // clock (see the onBreath call site), which is intentionally independent of the
 // geometry-driven pacing fraction.
 const VOICE_PHASE_MS        = CYCLE_MS / SIDES
-// How long the pacing circle stays frozen at its mount position (the top tip)
-// before it starts moving, so it doesn't move — and no breath cue fires, see
+// How long the pacing circle stays frozen at its mount position (the bottom
+// trough) before it starts moving, so it doesn't move — and no breath cue fires, see
 // the onBreath call site — until the spoken intro ("StarGameBreathIntro.mp3",
 // a "take one big deep breath in" prompt) has had time to finish. The clip
 // itself runs 5.407s (confirmed via ffprobe, 2026-07-15); this adds a ~93ms
@@ -205,9 +205,11 @@ function buildGeo(rect) {
   const Ri = R * STAR_INNER_RATIO   // valley (inner) radius
 
   // 10 vertices in clockwise traversal order (increasing canvas angle), starting
-  // at the valley just before the top tip so side 0 (valley→tip) is the first
-  // "breathe in". Even index → valley (radius Ri), odd → tip (radius R); index 1
-  // lands exactly on the top tip (angle −90°).
+  // at the valley just before the top tip. This indexing is fixed regardless
+  // of where the pacing circle's mount-time origin currently sits (see
+  // pacingArcOrigin below, which has moved independently of this numbering —
+  // currently V6, not V0/V1). Even index → valley (radius Ri), odd → tip
+  // (radius R); index 1 lands exactly on the top tip (angle −90°).
   const n  = SIDES
   const A0 = -Math.PI / 2 - Math.PI / 5   // valley before the top tip
   const verts = []
@@ -322,25 +324,31 @@ function buildGeo(rect) {
   // "size" handle (drives label font sizing etc.).
   const sq = 2 * R
 
-  // Pacing origin — the arc-length of the MIDPOINT of V1's (top tip) corner
-  // arc, so the pacing circle's MOUNT-TIME position sits at the top of the
-  // star (user request). The pacing circle runs at constant arc-length speed
-  // from here, and since consecutive corner-arc midpoints are exactly
-  // totalPathLength/SIDES apart, every breath boundary (each 1/SIDES of the
-  // loop) lands on a corner midpoint: each inhale ends at a tip (peak), each
-  // exhale at a valley (notch). V1's arc is the TRAILING arc of side 0 (the
-  // arc AT vertex 1), so it sits at the end of side 0's sample block —
-  // cumLen[N / SIDES] marks that boundary; back off half the arc's own length
-  // to land on its midpoint.
+  // Pacing origin — the arc-length of the MIDPOINT of V6's corner arc: the
+  // valley directly opposite the top tip, nestled in the trough between the
+  // star's two lowest tips (V5 and V7) — so the pacing circle's MOUNT-TIME
+  // position sits at the bottom of the star, between its two bottom-most
+  // points (user request, 2026-07-15; V1's top-tip arc, used 2026-07-11 to
+  // 2026-07-15, sits exactly half the loop — 5 vertices — away). The pacing
+  // circle runs at constant arc-length speed from here, and since consecutive
+  // corner-arc midpoints are exactly totalPathLength/SIDES apart, every
+  // breath boundary (each 1/SIDES of the loop) still lands on a corner
+  // midpoint: each inhale ends at a tip (peak), each exhale at a valley
+  // (notch) — only WHICH corner comes first changes. V6's arc is the
+  // TRAILING arc of side 5 (the arc AT vertex 6), so it sits at the end of
+  // side 5's sample block — cumLen[6 * (N / SIDES)] marks that boundary;
+  // back off half the arc's own length to land on its midpoint.
   //
   // NOTE: this controls the DOT's geometric position/motion. The voice-cue
   // clock (see the onBreath call site) shares this SAME mount origin — both
   // start counting at elapsed=0 — but is computed from a separate TIME-based
   // fraction rather than this arc-length one, since sampling this fraction
   // directly for voice would flip unevenly (see the "IMPORTANT" note above
-  // getPacing).
-  const v1ArcLen        = r * Math.abs(turn[1])
-  const pacingArcOrigin = cumLen[N / SIDES] - v1ArcLen / 2
+  // getPacing). Starting at a VALLEY instead of a tip also flips which phase
+  // reads as "in" vs "out" — see the phase-parity mapping in StarGame's
+  // emitBreath, and the "IMPORTANT" note above getPacing below.
+  const v6ArcLen        = r * Math.abs(turn[6])
+  const pacingArcOrigin = cumLen[6 * (N / SIDES)] - v6ArcLen / 2
 
   return {
     cx, cy, sq, R, Ri, r, lw, sfArr,
@@ -715,10 +723,11 @@ const StarCanvas = forwardRef(function StarCanvas(
   // single steady rate everywhere. Time is linear in arc-length, and consecutive
   // corner-arc midpoints are exactly totalPathLength/SIDES apart, so every 4s
   // breath boundary lands on a corner (a tip or a valley). We start from
-  // pacingArcOrigin (the midpoint of V1's — the TOP TIP's — corner arc), so at
-  // mount (elapsed=0) the dot sits at the top and its first full segment is a
-  // DESCENT toward the next valley (side 0 = out, not in — see the onBreath
-  // call site below, which maps phase parity to match).
+  // pacingArcOrigin (the midpoint of V6's — the BOTTOM TROUGH's, between the
+  // star's two lowest tips — corner arc), so at mount (elapsed=0) the dot
+  // sits at the bottom and its first full segment is an ASCENT toward the
+  // next tip (side 6 = in, not out — see the onBreath call site below, which
+  // maps phase parity to match).
   //
   // `fraction` is returned as the GEOMETRIC fraction (side index + progress,
   // derived from the resulting sample index) — the heat-gauge/synergy side
@@ -1126,10 +1135,11 @@ const StarCanvas = forwardRef(function StarCanvas(
 
       // ── Pacing position (computed once, shared by fingerprint + pacing circle) ─
       // Pacing starts at mount — independent of first touch — but stays frozen
-      // at its phase-0 origin (the top tip) for the first PACING_START_DELAY_MS,
-      // giving the spoken intro room to finish before the dot moves (2026-07-15
-      // user request: the intro says "take one big deep breath in" — the dot
-      // starting to move immediately, before that finishes, undercut it).
+      // at its phase-0 origin (the bottom trough) for the first
+      // PACING_START_DELAY_MS, giving the spoken intro room to finish before
+      // the dot moves (2026-07-15 user request: the intro says "take one big
+      // deep breath in" — the dot starting to move immediately, before that
+      // finishes, undercut it).
       // elapsedPacing is clamped to 0 through the delay, then counts up
       // continuously with no jump once it elapses — same getPacing, same
       // origin, just time-shifted.

@@ -8,7 +8,8 @@ import { bboxOf, fitWithMargin, fitCenter, REGION_CENTER_RATIO, SHAPE_VISUAL_WEI
 // night gradient with a soft central glow (no stars, no Milky Way band /
 // nebulae — the launch cross-dissolve blooms into the full baked sky), the
 // star-outline track in its bare base colour, and a quiet pale pacing dot
-// resting at the top tip (the game dot's actual start). No breathing labels.
+// resting at the bottom trough (the game dot's actual start). No breathing
+// labels.
 //
 // Drawn ONCE per mount/resize (no rAF loop), DPR-aware. The track geometry
 // mirrors the game's buildGeo — a five-pointed star OUTLINE (10 vertices, one
@@ -133,18 +134,20 @@ function drawScene(ctx, w, h) {
   ctx.strokeStyle = TRACK_COLOR
   ctx.stroke()
 
-  // Quiet pacing dot resting at the TOP TIP's arc midpoint — where the game's
-  // pacing dot actually starts (pacingArcOrigin, since the 2026-07-11 top-tip
-  // change; the old card dot sat inset along the valley→tip run, a leftover
-  // from the earlier valley start). Family-standard size (lw·0.62, matching
-  // Square/Hexagon cards), centered on the track centerline.
-  const u0     = uOut[0]                                  // side 0 runs valley V0 → top tip V1
-  const to0    = { x: verts[1].x - u0.x * Ttan[1], y: verts[1].y - u0.y * Ttan[1] }
-  const nrm0   = turn[1] >= 0 ? { x: -u0.y, y: u0.x } : { x: u0.y, y: -u0.x }
-  const c0     = { x: to0.x + nrm0.x * r, y: to0.y + nrm0.y * r }
-  const midAng = Math.atan2(to0.y - c0.y, to0.x - c0.x) + turn[1] / 2
+  // Quiet pacing dot resting at V6's arc midpoint — the bottom trough,
+  // nestled between the star's two lowest tips (V5 and V7) — where the
+  // game's pacing dot actually starts (pacingArcOrigin, since the 2026-07-15
+  // bottom-trough change; it rested at the top tip's arc midpoint from
+  // 2026-07-11 to 2026-07-15, and at an inset along the valley→tip run before
+  // that). Family-standard size (lw·0.62, matching Square/Hexagon cards),
+  // centered on the track centerline.
+  const u5     = uOut[5]                                  // side 5 runs tip V5 → valley V6
+  const to5    = { x: verts[6].x - u5.x * Ttan[6], y: verts[6].y - u5.y * Ttan[6] }
+  const nrm5   = turn[6] >= 0 ? { x: -u5.y, y: u5.x } : { x: u5.y, y: -u5.x }
+  const c5     = { x: to5.x + nrm5.x * r, y: to5.y + nrm5.y * r }
+  const midAng = Math.atan2(to5.y - c5.y, to5.x - c5.x) + turn[6] / 2
   ctx.beginPath()
-  ctx.arc(c0.x + r * Math.cos(midAng), c0.y + r * Math.sin(midAng), lw * 0.62, 0, Math.PI * 2)
+  ctx.arc(c5.x + r * Math.cos(midAng), c5.y + r * Math.sin(midAng), lw * 0.62, 0, Math.PI * 2)
   ctx.fillStyle = '#FFFFFF'
   ctx.fill()
 }
