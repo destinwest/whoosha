@@ -43,12 +43,21 @@ const SIDE_START_MS = SIDE_DURATIONS_MS.reduce((acc, dur, i) => {
 }, [])
 
 // ── HEART-SPECIFIC: unit-space path definition ───────────────────────────────
-// A classic heart traced as 6 mirrored cubic Beziers, derived from the app's
-// own heart glyph (GameShape.jsx's 'heart' icon, 100×100 viewBox) so the game
-// track matches the icon's proportions. Coordinates below are that icon's
-// path shifted so its bounding-box center sits at (0,0): bbox is 72 wide
-// (x: -36..36) × 76 tall (y: -38..38). Traversal starts at the top-center
-// cleft (the dip between the two lobes) and runs:
+// A classic heart traced as 6 mirrored cubic Beziers, fitted to the user's
+// reference SVG ("simple-rounded-heart-shape-outline", 2026-07-16). That icon's
+// OUTER contour was parsed (its group transform translate(0,980) scale(0.1,-0.1)
+// applied), its anchors measured, and one clean cubic least-squares-fitted to
+// each of the three left-half arcs; the right half is an exact mirror. See
+// scratchpad/analyze_heart.mjs + fit_heart.mjs for the derivation.
+//
+// Coordinates are centered at (0,0), y-down, scaled to half-height 38. The key
+// property vs. the previous version: the reference heart is WIDER THAN TALL
+// (half-width 42.3 vs half-height 38, aspect 1.11) with full round lobes — the
+// old track was narrower/taller (half-width 36), which pinched the lobes
+// together and made the cleft read as a deep sharp gash. Widening the lobes
+// opens the cleft into the broad shallow valley the reference shows.
+//
+// Traversal starts at the top-center cleft (the dip between the two lobes):
 //   seg 0  cleft        → leftLobeTop   ┐
 //   seg 1  leftLobeTop  → leftExtreme   ├─ LEFT HALF  (breathe in)
 //   seg 2  leftExtreme  → bottom        ┘
@@ -59,29 +68,28 @@ const SIDE_START_MS = SIDE_DURATIONS_MS.reduce((acc, dur, i) => {
 // length — the fraction split at SIDES=2 lands exactly on the vertical
 // centerline (cleft and bottom point), matching the design spec.
 //
-// Both the top cleft and the bottom tip are ROUNDED, not sharp cusps (per
-// user reference image, 2026-07-16). A cusp forms wherever a segment's
-// tangent control point coincides with its endpoint (zero-length tangent) —
-// the original glyph did this at both the cleft (seg5→seg0) and the bottom
-// (seg2→seg3). Rounding a joint just means giving both sides a NONZERO
-// tangent that points in the same direction (G1/tangent continuity) instead
-// of degenerating to a point — no extra segments needed. Both joints use a
-// horizontal tangent (the natural direction at a curve's own local min/max),
-// which reads as a soft, filleted point/dip instead of a "V". Radii below
-// (CLEFT_ROUND / TIP_ROUND) are in the same unit space as the coordinates
-// (half-width 36) — larger = chubbier/more rounded.
-const CLEFT_ROUND = 7    // top-notch fillet radius
-const TIP_ROUND    = 15  // bottom-point fillet radius
+// Both the top cleft and the bottom tip are ROUNDED (per the reference and the
+// user's 2026-07-16 note that the old cleft was too deep/sharp and the bottom
+// too sharp). Each is a smooth join, NOT a cusp: the two segments meeting there
+// share a HORIZONTAL tangent (control points level with the join point), so the
+// curve reads as a filleted valley / rounded point instead of a "V" or a spike.
+// The horizontal arm length sets how round — baked into c1/c2 of segs 0,2,3,5
+// below (cleft arm 11 @ y=-32, bottom arm 8). The cleft is kept shallow/broad
+// (y=-32, not the SVG's measured -30): stroking the centerline with the full
+// track width lw perpendicular-offsets the inner edge, and at a tight concave
+// cleft that inner edge pinches into a downward "tongue" — a broader, shallower
+// valley keeps it gentle. Finer inner-edge/depth work is deferred to the next
+// (shading/depth) pass.
 const HEART_UNIT_SEGS = [
-  { p0: { x: 0,   y: -30 }, c1: { x: -CLEFT_ROUND, y: -30 }, c2: { x: -6,  y: -38 }, p1: { x: -12, y: -38 } },
-  { p0: { x: -12, y: -38 }, c1: { x: -24, y: -38 }, c2: { x: -36, y: -30 }, p1: { x: -36, y: -14 } },
-  { p0: { x: -36, y: -14 }, c1: { x: -36, y: 12  }, c2: { x: -TIP_ROUND, y: 38 }, p1: { x: 0,   y: 38  } },
-  { p0: { x: 0,   y: 38  }, c1: { x: TIP_ROUND, y: 38 }, c2: { x: 36,  y: 12  }, p1: { x: 36,  y: -14 } },
-  { p0: { x: 36,  y: -14 }, c1: { x: 36,  y: -30 }, c2: { x: 24,  y: -38 }, p1: { x: 12,  y: -38 } },
-  { p0: { x: 12,  y: -38 }, c1: { x: 6,   y: -38 }, c2: { x: CLEFT_ROUND, y: -30 }, p1: { x: 0,   y: -30 } },
+  { p0: { x: 0, y: -32 }, c1: { x: -11, y: -32 }, c2: { x: -12.87, y: -38.12 }, p1: { x: -20.13, y: -37.92 } },
+  { p0: { x: -20.13, y: -37.92 }, c1: { x: -33.98, y: -36.82 }, c2: { x: -44.44, y: -22.5 }, p1: { x: -41.94, y: -8.96 } },
+  { p0: { x: -41.94, y: -8.96 }, c1: { x: -36.81, y: 12.47 }, c2: { x: -8, y: 38 }, p1: { x: 0, y: 38 } },
+  { p0: { x: 0, y: 38 }, c1: { x: 8, y: 38 }, c2: { x: 36.81, y: 12.47 }, p1: { x: 41.94, y: -8.96 } },
+  { p0: { x: 41.94, y: -8.96 }, c1: { x: 44.44, y: -22.5 }, c2: { x: 33.98, y: -36.82 }, p1: { x: 20.13, y: -37.92 } },
+  { p0: { x: 20.13, y: -37.92 }, c1: { x: 12.87, y: -38.12 }, c2: { x: 11, y: -32 }, p1: { x: 0, y: -32 } },
 ]
-const HEART_HALF_WIDTH  = 36  // unit-space half-width  (x: -36..36)
-const HEART_HALF_HEIGHT = 38  // unit-space half-height (y: -38..38)
+const HEART_HALF_WIDTH  = 42.3  // unit-space half-width  (x: -42.3..42.3)
+const HEART_HALF_HEIGHT = 38    // unit-space half-height (y: -38..38)
 const STEPS_PER_SEG      = 60  // sample density per bezier segment
 
 function cubicPoint(p0, c1, c2, p1, t) {
@@ -226,10 +234,12 @@ function buildGeo(rect) {
   const cx = w / 2
   const cy = h / 2
 
-  // Uniform scale from unit heart-space (half-width 36, half-height 38) into
-  // pixel space. Coefficients leave margin for the track width + vignette,
-  // tuned by eye alongside the other shapes' fit coefficients.
-  const S = Math.min(w * 0.40 / HEART_HALF_WIDTH, h * 0.42 / HEART_HALF_HEIGHT)
+  // Uniform scale from unit heart-space (half-width 42.3, half-height 38) into
+  // pixel space. FIT shrinks the whole heart to leave comfortable window margin
+  // — the reference-matched shape is wider than before, and the user asked for
+  // it ~15% smaller so it sits well inside the frame (2026-07-16).
+  const FIT = 0.85
+  const S = Math.min(w * 0.40 * FIT / HEART_HALF_WIDTH, h * 0.42 * FIT / HEART_HALF_HEIGHT)
 
   // "Circumradius"-equivalent size handle (half-height in pixel space) —
   // drives the track width using the same 0.0728 coefficient the other games

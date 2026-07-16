@@ -19,23 +19,20 @@ import { bboxOf, fitWithMargin, fitCenter, SHAPE_VISUAL_WEIGHT } from '../_share
 
 const TRACK_COLOR = '#F7EBD9'   // the game track's base cream (drawTrackBody base stop)
 
-// Unit-space heart anchor points (S=1) — same proportions as HeartCanvas's
-// HEART_UNIT_SEGS (bbox half-width 36, half-height 38, centered at origin).
-// Duplicated locally (not imported) per this codebase's CardPreview
-// convention — see TriangleCardPreview's own local buildVerts. Cleft/tip
-// rounding radii kept in sync with HeartCanvas's CLEFT_ROUND/TIP_ROUND —
-// see that file's comment for why a nonzero shared tangent rounds a joint.
-const CLEFT_ROUND = 7
-const TIP_ROUND    = 15
+// Unit-space heart anchor points (S=1) — kept in sync with HeartCanvas's
+// HEART_UNIT_SEGS (fitted to the reference SVG; bbox half-width 42.3, half-
+// height 38, wider than tall, rounded cleft + bottom). Duplicated locally
+// (not imported) per this codebase's CardPreview convention — see
+// TriangleCardPreview's own local buildVerts.
 const HEART_UNIT_SEGS = [
-  { p0: { x: 0,   y: -30 }, c1: { x: -CLEFT_ROUND, y: -30 }, c2: { x: -6,  y: -38 }, p1: { x: -12, y: -38 } },
-  { p0: { x: -12, y: -38 }, c1: { x: -24, y: -38 }, c2: { x: -36, y: -30 }, p1: { x: -36, y: -14 } },
-  { p0: { x: -36, y: -14 }, c1: { x: -36, y: 12  }, c2: { x: -TIP_ROUND, y: 38 }, p1: { x: 0,   y: 38  } },
-  { p0: { x: 0,   y: 38  }, c1: { x: TIP_ROUND, y: 38 }, c2: { x: 36,  y: 12  }, p1: { x: 36,  y: -14 } },
-  { p0: { x: 36,  y: -14 }, c1: { x: 36,  y: -30 }, c2: { x: 24,  y: -38 }, p1: { x: 12,  y: -38 } },
-  { p0: { x: 12,  y: -38 }, c1: { x: 6,   y: -38 }, c2: { x: CLEFT_ROUND, y: -30 }, p1: { x: 0,   y: -30 } },
+  { p0: { x: 0, y: -32 }, c1: { x: -11, y: -32 }, c2: { x: -12.87, y: -38.12 }, p1: { x: -20.13, y: -37.92 } },
+  { p0: { x: -20.13, y: -37.92 }, c1: { x: -33.98, y: -36.82 }, c2: { x: -44.44, y: -22.5 }, p1: { x: -41.94, y: -8.96 } },
+  { p0: { x: -41.94, y: -8.96 }, c1: { x: -36.81, y: 12.47 }, c2: { x: -8, y: 38 }, p1: { x: 0, y: 38 } },
+  { p0: { x: 0, y: 38 }, c1: { x: 8, y: 38 }, c2: { x: 36.81, y: 12.47 }, p1: { x: 41.94, y: -8.96 } },
+  { p0: { x: 41.94, y: -8.96 }, c1: { x: 44.44, y: -22.5 }, c2: { x: 33.98, y: -36.82 }, p1: { x: 20.13, y: -37.92 } },
+  { p0: { x: 20.13, y: -37.92 }, c1: { x: 12.87, y: -38.12 }, c2: { x: 11, y: -32 }, p1: { x: 0, y: -32 } },
 ]
-const HEART_HALF_WIDTH  = 36
+const HEART_HALF_WIDTH  = 42.3
 const HEART_HALF_HEIGHT = 38
 
 // Scales+translates the unit segments into pixel space at the given center/scale.
