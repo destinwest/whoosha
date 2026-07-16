@@ -9,7 +9,7 @@
 // derive `locked` from the user's profiles.tier.
 
 export const HOME_GAMES = [
-  { id: 'heart',    name: 'Heart Breathing',   tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'heart',    locked: true,  placeholder: false },
+  { id: 'heart',    name: 'Heart Breathing',   tagline: 'Trace the heart',   route: '/games/heart',    gameKey: 'heart',       shape: 'heart',    locked: false, placeholder: false },
   { id: 'rainbow',  name: 'Rainbow Breathing', tagline: 'Climb the rainbow',  route: '/games/rainbow',  gameKey: 'rainbow',     shape: 'rainbow',  locked: false, placeholder: false },
   { id: 'infinity', name: 'Infinity Breathing', tagline: 'Trace the infinity', route: '/games/infinity', gameKey: 'infinity',    shape: 'infinity', locked: false, placeholder: false },
   { id: 'square',   name: 'Square Breathing',   tagline: 'Trace the square',   route: '/games/square',   gameKey: 'square',      shape: 'square',   locked: false, placeholder: false },
@@ -30,5 +30,6 @@ export const GAME_GRADIENTS = {
   triangle:    'linear-gradient(160deg, #9AA3C9, #52587B)',   // periwinkle → the game sky's near-ridge purple
   star:        'linear-gradient(160deg, #1B1F4D, #141238)',   // night sky
   rainbow:     'linear-gradient(160deg, #FEFAE6, #F6E4AE)',
+  heart:       'linear-gradient(160deg, #F5A084, #C25848)',   // soft salmon — see the game's radial bg
   placeholder: 'linear-gradient(160deg, #E0E8DF, #BFCEC1)',
 }

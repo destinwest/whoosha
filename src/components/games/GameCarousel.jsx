@@ -10,6 +10,7 @@ import InfinityCardPreview from './infinity/InfinityCardPreview'
 import TriangleCardPreview from './triangle/TriangleCardPreview'
 import StarCardPreview from './star/StarCardPreview'
 import RainbowCardPreview from './rainbow/RainbowCardPreview'
+import HeartCardPreview from './heart/HeartCardPreview'
 
 // ── Tunable layout constants ──────────────────────────────────────────────────
 const CARD_W       = 200    // px
@@ -98,17 +99,19 @@ function CarouselCard({ game, distance }) {
   const isTriangle = game.gameKey === 'triangle'
   const isStar     = game.gameKey === 'star'
   const isRainbow  = game.gameKey === 'rainbow'
-  const hasPreview = isSquare || isHexagon || isInfinity || isTriangle || isStar || isRainbow   // full-bleed track render + bottom title
+  const isHeart    = game.gameKey === 'heart'
+  const hasPreview = isSquare || isHexagon || isInfinity || isTriangle || isStar || isRainbow || isHeart   // full-bleed track render + bottom title
   // Title colour matched to each preview's palette (light on the dark square/
   // infinity/star/triangle cards — triangle's card is darkest at the bottom
   // where the title sits, matching the game's inverted sky — dark on the
-  // light hexagon / rainbow cards).
+  // light hexagon / rainbow / heart cards).
   const titleColor = isSquare ? '#F4F0E6'
     : isHexagon ? '#5C2E1C'
     : isTriangle ? '#E9ECF8'   // pale periwinkle-white on the dark purple card bottom
     : isStar ? '#E8E3F8'
     : isRainbow ? '#8A6A2F'
     : isInfinity ? '#F0F6FC'   // pale blue-white on the dimmed royal-lake card
+    : isHeart ? '#5C2030'      // deep warm rose on the salmon card bottom
     : '#E8E3F8'
   return (
     <div data-card-index="" style={cardStyle(distance)}>
@@ -130,7 +133,9 @@ function CarouselCard({ game, distance }) {
                     ? '#1B1F4D'
                     : isRainbow
                       ? '#FBF0CC'
-                      : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
+                      : isHeart
+                        ? '#D46A54'
+                        : (GAME_GRADIENTS[game.gameKey] ?? GAME_GRADIENTS.placeholder),
           boxShadow: '0 12px 32px rgba(62, 94, 82, 0.22), 0 2px 6px rgba(62, 94, 82, 0.12)',
           filter: game.placeholder
             ? 'blur(1.5px) saturate(0.4)'
@@ -154,7 +159,9 @@ function CarouselCard({ game, distance }) {
                     ? <TriangleCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
                     : isStar
                       ? <StarCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
-                      : <RainbowCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />}
+                      : isRainbow
+                        ? <RainbowCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />
+                        : <HeartCardPreview className="absolute inset-0 w-full h-full rounded-3xl" />}
             <div
               className="absolute inset-x-0 px-3 text-center pointer-events-none font-display text-[18px] leading-tight font-semibold"
               style={{ top: '86%', transform: 'translateY(-50%)', color: titleColor }}

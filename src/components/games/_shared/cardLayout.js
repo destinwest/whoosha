@@ -56,6 +56,7 @@ export const SHAPE_VISUAL_WEIGHT = {
   star:     1.32,   // ten slim points + a slimmed track read smaller than their bbox —
                     // then +15% per user request (1.15 → 1.3225)
   infinity: 1.08,   // thin ribbon curve, most of its bbox is empty space
+  heart:    1.02,   // two rounded lobes read close to full — near-square weight
 }
 
 // Bounding box of a vertex list, plus its own centroid (which may not be the

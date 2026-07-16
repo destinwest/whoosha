@@ -21,6 +21,7 @@ import InfinityPage from './pages/games/InfinityPage'
 import TrianglePage from './pages/games/TrianglePage'
 import StarPage from './pages/games/StarPage'
 import RainbowPage from './pages/games/RainbowPage'
+import HeartPage from './pages/games/HeartPage'
 
 // ── TEMP: auth bypass ───────────────────────────────────────────────────────
 // Supabase auth is unavailable (account disabled), so the normal login flow
@@ -185,6 +186,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <RainbowPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/games/heart"
+        element={
+          <ProtectedRoute>
+            <HeartPage />
           </ProtectedRoute>
         }
       />
