@@ -46,9 +46,13 @@ const SIDE_START_MS = SIDE_DURATIONS_MS.reduce((acc, dur, i) => {
 // A classic heart traced as 6 mirrored cubic Beziers, fitted to the user's
 // reference SVG ("simple-rounded-heart-shape-outline", 2026-07-16). That icon's
 // OUTER contour was parsed (its group transform translate(0,980) scale(0.1,-0.1)
-// applied), its anchors measured, and one clean cubic least-squares-fitted to
-// each of the three left-half arcs; the right half is an exact mirror. See
-// scratchpad/analyze_heart.mjs + fit_heart.mjs for the derivation.
+// applied), its TRUE geometric anchors measured — lobe crown at the real min-y
+// (|x|≈18.3, not the potrace segment junction ≈20.1 the first fit used) and
+// widest at the real min-x (|x|≈42.2 @ y≈-12.7, not ≈-9.0) — and a cubic fitted
+// per left-half arc (crown/widest via 4-pt interpolation; the long widest→bottom
+// arc via endpoint tangents: vertical at the widest, horizontal at the tip).
+// Right half is an exact mirror. See scratchpad analyze_heart.mjs, fit_heart.mjs,
+// fit_heart2.mjs for the derivation and the SVG-overlay comparison.
 //
 // Coordinates are centered at (0,0), y-down, scaled to half-height 38. The key
 // property vs. the previous version: the reference heart is WIDER THAN TALL
@@ -81,12 +85,12 @@ const SIDE_START_MS = SIDE_DURATIONS_MS.reduce((acc, dur, i) => {
 // valley keeps it gentle. Finer inner-edge/depth work is deferred to the next
 // (shading/depth) pass.
 const HEART_UNIT_SEGS = [
-  { p0: { x: 0, y: -32 }, c1: { x: -11, y: -32 }, c2: { x: -12.87, y: -38.12 }, p1: { x: -20.13, y: -37.92 } },
-  { p0: { x: -20.13, y: -37.92 }, c1: { x: -33.98, y: -36.82 }, c2: { x: -44.44, y: -22.5 }, p1: { x: -41.94, y: -8.96 } },
-  { p0: { x: -41.94, y: -8.96 }, c1: { x: -36.81, y: 12.47 }, c2: { x: -8, y: 38 }, p1: { x: 0, y: 38 } },
-  { p0: { x: 0, y: 38 }, c1: { x: 8, y: 38 }, c2: { x: 36.81, y: 12.47 }, p1: { x: 41.94, y: -8.96 } },
-  { p0: { x: 41.94, y: -8.96 }, c1: { x: 44.44, y: -22.5 }, c2: { x: 33.98, y: -36.82 }, p1: { x: 20.13, y: -37.92 } },
-  { p0: { x: 20.13, y: -37.92 }, c1: { x: 12.87, y: -38.12 }, c2: { x: 11, y: -32 }, p1: { x: 0, y: -32 } },
+  { p0: { x: 0, y: -32 }, c1: { x: -11, y: -32 }, c2: { x: -13.34, y: -37.98 }, p1: { x: -18.34, y: -37.98 } },
+  { p0: { x: -18.34, y: -37.98 }, c1: { x: -31.47, y: -38 }, c2: { x: -42.76, y: -25.75 }, p1: { x: -42.16, y: -12.73 } },
+  { p0: { x: -42.16, y: -12.73 }, c1: { x: -42.16, y: 9.26 }, c2: { x: -8, y: 38 }, p1: { x: 0, y: 38 } },
+  { p0: { x: 0, y: 38 }, c1: { x: 8, y: 38 }, c2: { x: 42.16, y: 9.26 }, p1: { x: 42.16, y: -12.73 } },
+  { p0: { x: 42.16, y: -12.73 }, c1: { x: 42.76, y: -25.75 }, c2: { x: 31.47, y: -38 }, p1: { x: 18.34, y: -37.98 } },
+  { p0: { x: 18.34, y: -37.98 }, c1: { x: 13.34, y: -37.98 }, c2: { x: 11, y: -32 }, p1: { x: 0, y: -32 } },
 ]
 const HEART_HALF_WIDTH  = 42.3  // unit-space half-width  (x: -42.3..42.3)
 const HEART_HALF_HEIGHT = 38    // unit-space half-height (y: -38..38)
