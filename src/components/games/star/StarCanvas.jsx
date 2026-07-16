@@ -2,8 +2,8 @@
 // Star Breathing canvas — mirrors TriangleCanvas in mechanics but draws a
 // rounded five-pointed-star OUTLINE (10 vertices: 5 tips + 5 valleys), traversed
 // clockwise from the valley just before the top tip, with one tip oriented at
-// the top of the screen. Uniform 5s per segment, alternating breathe-in /
-// breathe-out (no holds → 50s cycle). Each edge either ascends valley→tip
+// the top of the screen. Uniform 4s per segment, alternating breathe-in /
+// breathe-out (no holds → 40s cycle). Each edge either ascends valley→tip
 // (breathe in) or descends tip→valley (breathe out):
 //   side 0  V0→V1  valley→top-tip (ascending)  — breathe in
 //   side 1  V1→V2  top-tip→valley (descending) — breathe out
@@ -73,12 +73,17 @@ const STAR_CORNER_MAX_EDGE  = 0.88   // both corner tangents together ≤ 88% of
 // width, acceptance zone, corner radius) scales with it, so this stays coherent.
 // Dial to taste — 1.0 = same width as the other games.
 const STAR_TRACK_SLIM       = 0.85   // 15% slimmer
-// Alternating breathe-in / breathe-out, 5s per segment, no holds. 10 × 5s = 50s.
+// Overall star perimeter (tip radius) multiplier — grows the shape without
+// touching the track. In buildGeo below, lw is deliberately computed from the
+// UNSCALED fit radius before this is applied, so the channel stays the same
+// absolute width as the star grows — only the perimeter grows, not the track.
+const STAR_SIZE_SCALE       = 1.15   // +15% perimeter
+// Alternating breathe-in / breathe-out, 4s per segment, no holds. 10 × 4s = 40s.
 // The pacing dot advances by constant ARC-LENGTH over CYCLE_MS (see getPacing),
-// so SIDE_DURATIONS_MS[i] is really "5s per breath phase"; the heat gauge reads
-// the per-phase 5s from it. All phases equal, so index choice never matters.
-const SIDE_DURATIONS_MS     = Array(SIDES).fill(5000)
-const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 50_000
+// so SIDE_DURATIONS_MS[i] is really "4s per breath phase"; the heat gauge reads
+// the per-phase 4s from it. All phases equal, so index choice never matters.
+const SIDE_DURATIONS_MS     = Array(SIDES).fill(4000)
+const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 40_000
 // Voice-cue phase duration — same value as each SIDE_DURATIONS_MS entry (all
 // equal), named separately because it drives the audio trigger's own TIME-based
 // clock (see the onBreath call site), which is intentionally independent of the
@@ -174,14 +179,20 @@ function buildGeo(rect) {
   const cy = h / 2
 
   // Tip (outer) radius. The star spans 2R wide and up to ~2R tall (one tip up,
-  // two tips down-outward). Fit width/height within bounds like the other games.
-  const R  = Math.min(w * 0.46, h * 0.46)
-  const Ri = R * STAR_INNER_RATIO   // valley (inner) radius
-  // Track width — same 0.0728 coefficient on the shared size handle 2R as the
-  // other games, so lw / bead / pacing circle / bloom / particles all match the
-  // Square/Hexagon/Triangle proportions pixel-for-pixel.
-  const circleR = (2 * R) * 0.0728
+  // two tips down-outward). Fit width/height within bounds like the other
+  // games, THEN apply STAR_SIZE_SCALE to grow the perimeter.
+  //
+  // Track width is computed from Rfit (the UNSCALED fit radius) rather than
+  // the enlarged R — same 0.0728 coefficient on the shared size handle 2·Rfit
+  // as the other games — so STAR_SIZE_SCALE does not change lw (or anything
+  // keyed off it: bead, pacing circle, bloom, particles, corner radius,
+  // acceptance zone) at all. The track stays exactly as wide as before; only
+  // the star grows around it.
+  const Rfit    = Math.min(w * 0.46, h * 0.46)
+  const circleR = (2 * Rfit) * 0.0728
   const lw      = (circleR * 2 + 8) * STAR_TRACK_SLIM
+  const R  = Rfit * STAR_SIZE_SCALE
+  const Ri = R * STAR_INNER_RATIO   // valley (inner) radius
 
   // 10 vertices in clockwise traversal order (increasing canvas angle), starting
   // at the valley just before the top tip so side 0 (valley→tip) is the first
@@ -689,10 +700,10 @@ const StarCanvas = forwardRef(function StarCanvas(
   // ── Pacing circle position ─────────────────────────────────────────────────
   // CONSTANT-SPEED pacing: the star's 10 segments are geometrically UNEQUAL in
   // length (a tip's corner arc is much longer than a valley's), so giving each
-  // an equal 5s made the dot speed up and slow down. Instead we advance by
+  // an equal 4s made the dot speed up and slow down. Instead we advance by
   // constant ARC-LENGTH — the whole loop in CYCLE_MS — so the dot moves at a
   // single steady rate everywhere. Time is linear in arc-length, and consecutive
-  // corner-arc midpoints are exactly totalPathLength/SIDES apart, so every 5s
+  // corner-arc midpoints are exactly totalPathLength/SIDES apart, so every 4s
   // breath boundary lands on a corner (a tip or a valley). We start from
   // pacingArcOrigin (the midpoint of V1's — the TOP TIP's — corner arc), so at
   // mount (elapsed=0) the dot sits at the top and its first full segment is a
@@ -703,14 +714,14 @@ const StarCanvas = forwardRef(function StarCanvas(
   // derived from the resulting sample index) — the heat-gauge/synergy side
   // lookup expects that. The gauge's speed comparison is unaffected: a child
   // tracking the dot moves at arc-rate P/CYCLE, i.e. childPathRate (already
-  // arc-normalized) = SIDES/CYCLE = pacingRate = 1/5000.
+  // arc-normalized) = SIDES/CYCLE = pacingRate = 1/4000.
   //
   // IMPORTANT: the voice-cue trigger does NOT use this fraction (see the
   // onBreath call site below) — `fraction` flips side-index at the END of each
   // corner arc (a fixed SAMPLE-INDEX boundary), and since tip arcs are ~2× the
   // length of valley arcs, that flip is NOT evenly spaced in time even though
   // the dot's motion is constant-speed. Using it for audio produced alternating
-  // ~2.9s / ~5.1s segments instead of a clean 5s/5s (bug, fixed 2026-07-11).
+  // ~2.9s / ~5.1s segments instead of a clean 4s/4s (bug, fixed 2026-07-11).
   function getPacing(elapsed) {
     const geo = geoRef.current
     if (!geo) return null

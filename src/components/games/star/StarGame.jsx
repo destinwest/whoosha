@@ -65,7 +65,7 @@ export default function StarGame({ onExit }) {
   // Edge-detects breath-phase transitions from StarCanvas's per-frame, TIME-
   // based fraction [0, 10), counted from MOUNT (evenly spaced — see the
   // onBreath call site in StarCanvas for why a plain geometric fraction won't
-  // do) and fires one voice cue per transition, every 5s — mirrors
+  // do) and fires one voice cue per transition, every 4s — mirrors
   // HexagonCanvas's onBreath shape, but this consumer is event-driven (a
   // one-shot clip per phase change) rather than continuous synth modulation.
   // Called UNCONDITIONALLY every frame from mount, same as Hexagon's — no

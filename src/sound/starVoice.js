@@ -2,7 +2,7 @@
 // Spoken-word cues for the Star game:
 //   'in' / 'out'  — "breathe in" / "breathe out", one per breath-phase
 //                   transition, fading in and settling out around the clip so
-//                   it sits cleanly inside its 5s phase.
+//                   it sits cleanly inside its 4s phase.
 //   'intro'       — a one-shot ~5.4s piece played once at game open (see the
 //                   trigger in StarGame — this module only knows how to play
 //                   it, not when).
@@ -68,7 +68,7 @@ export function createStarVoice(ctx) {
 
   // Cuts a still-playing cue short with a quick fade, in case a phase change
   // fires again before the previous cue finished (shouldn't happen at the
-  // normal 5s cadence — clips are ~1–1.5s — but a rapid dev-tool timeline
+  // normal 4s cadence — clips are ~1–1.5s — but a rapid dev-tool timeline
   // scrub or similar shouldn't leave two cues overlapping).
   function stopActive() {
     if (!activeSource) return
