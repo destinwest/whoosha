@@ -125,7 +125,7 @@ export default function StarGame({ onExit }) {
   //
   // emitBreath (in/out, above) is mount-anchored the same way, but — since
   // 2026-07-15 — its caller (StarCanvas) deliberately withholds it for
-  // PACING_START_DELAY_MS (5.5s) so it can't fire while this intro clip is
+  // PACING_START_DELAY_MS (6s) so it can't fire while this intro clip is
   // still playing; see the onBreath call site in StarCanvas for the
   // mechanism. So intro-vs-first-cue sequencing IS now explicitly
   // orchestrated (this was an open follow-up through 2026-07-15, resolved by

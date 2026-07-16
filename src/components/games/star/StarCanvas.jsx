@@ -93,12 +93,13 @@ const VOICE_PHASE_MS        = CYCLE_MS / SIDES
 // trough) before it starts moving, so it doesn't move — and no breath cue fires, see
 // the onBreath call site — until the spoken intro ("StarGameBreathIntro.mp3",
 // a "take one big deep breath in" prompt) has had time to finish. The clip
-// itself runs 5.407s (confirmed via ffprobe, 2026-07-15); this adds a ~93ms
-// buffer past its own fade-out tail. Hardcoded rather than read from the
-// decoded buffer's real duration (simpler, matches how every other timing
-// constant in this file works) — if the intro clip is ever re-recorded to a
-// different length, this needs a matching manual update.
-const PACING_START_DELAY_MS = 5500
+// itself runs 5.407s (confirmed via ffprobe, 2026-07-15); this adds a ~593ms
+// buffer past its own fade-out tail (was 5500/~93ms — user asked for half a
+// second more breathing room, 2026-07-15). Hardcoded rather than read from
+// the decoded buffer's real duration (simpler, matches how every other
+// timing constant in this file works) — if the intro clip is ever
+// re-recorded to a different length, this needs a matching manual update.
+const PACING_START_DELAY_MS = 6000
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // Finger-trail drift palette — retuned 2026-07-14 for the night-sky background
