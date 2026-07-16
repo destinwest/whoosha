@@ -55,7 +55,7 @@ export default function InfinityGame({ onExit }) {
   function handleCompletionDismiss() { onExit(completionSeconds) }
 
   return (
-    <div className="absolute inset-0 overflow-hidden select-none" style={{ touchAction: 'none', background: '#2CAD9A' }}>
+    <div className="absolute inset-0 overflow-hidden select-none" style={{ touchAction: 'none', background: '#0656AB' }}>
       {/* Top chrome */}
       <div style={{ opacity: 'var(--intro-ui, 1)' }}>
         <button
@@ -72,7 +72,7 @@ export default function InfinityGame({ onExit }) {
 
       {/* The world */}
       <div style={{
-        position: 'absolute', inset: 0, background: '#2CAD9A',
+        position: 'absolute', inset: 0, background: '#0656AB',
         opacity: phase === 'completion' ? COMPLETION_CANVAS_OPACITY : 1,
         transition: phase === 'completion' ? 'opacity 1800ms ease' : undefined,
       }}>
@@ -124,7 +124,7 @@ export default function InfinityGame({ onExit }) {
                       fontFamily: "'Nunito', sans-serif",
                       fontWeight: 700,
                       fontSize: `${fs}px`,
-                      color: 'rgba(9,62,57,0.82)',   // deep lake pine — legible on morning aqua
+                      color: 'rgba(228,240,252,0.85)',   // pale blue-white — legible on the deep royal water
                       whiteSpace: 'nowrap',
                     }}
                   >
@@ -137,12 +137,12 @@ export default function InfinityGame({ onExit }) {
         </div>
       </div>
 
-      {/* Vignette — the one allowed overlay. Deep-teal shading (not pure black)
-          so the bright morning water darkens toward its own depths at the
-          edges rather than toward night. */}
+      {/* Vignette — the one allowed overlay. Deep-navy shading (not pure black)
+          so the royal water darkens toward its own depths at the edges rather
+          than toward night. */}
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 15,
-        background: 'radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(8,52,48,0.38) 100%)',
+        background: 'radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(4,28,56,0.40) 100%)',
       }} />
 
       {/* Completion overlay — time shown first, then the trailing phrase, per

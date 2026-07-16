@@ -108,7 +108,7 @@ function CarouselCard({ game, distance }) {
     : isTriangle ? '#33465A'
     : isStar ? '#E8E3F8'
     : isRainbow ? '#8A6A2F'
-    : isInfinity ? '#F0FBF7'   // pale foam-white on the dimmed lake card
+    : isInfinity ? '#F0F6FC'   // pale blue-white on the dimmed royal-lake card
     : '#E8E3F8'
   return (
     <div data-card-index="" style={cardStyle(distance)}>
@@ -123,7 +123,7 @@ function CarouselCard({ game, distance }) {
             : isHexagon
               ? '#D99E6A'
               : isInfinity
-                ? '#2BA893'
+                ? '#1B5AA6'
                 : isTriangle
                   ? '#74A5D6'
                   : isStar

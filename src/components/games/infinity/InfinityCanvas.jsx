@@ -130,7 +130,7 @@ const WAKELET_TILT_DEG = 45
 const WAKELET_TILT_COS = Math.cos(WAKELET_TILT_DEG * Math.PI / 180)
 const WAKELET_TILT_SIN = Math.sin(WAKELET_TILT_DEG * Math.PI / 180)
 const WAKE_ALPHA          = 0.12   // peak fill alpha — intentionally faint (unchanged final)
-const WAKE_COLOR          = '224,246,240'  // pale sunlit aqua-white (was moonlight-lavender pre-lake)
+const WAKE_COLOR          = '224,238,252'  // pale sunlit blue-white (matches the royal lake's ripple light)
 // Two fill passes per wavelet — wide+faint outer, narrow+firm inner — fake a
 // soft feathered edge without shadowBlur (expensive to animate on iOS Safari).
 const WAKELET_RIBBON_PASSES = [
@@ -145,13 +145,13 @@ const WAKELET_RIBBON_PASSES = [
 // direction needed, so it stays consistent regardless of which way the
 // finger moves. Colors pulled from the actual baked lake surface
 // (lakeSurface.js) rather than invented: highlight leans toward the pale
-// sunlit ripple tint (228,250,244), shadow toward the deep lake-teal ripple
-// troughs (10,72,66) lifted just enough to read against the aquamarine.
+// sunlit ripple tint (224,238,252), shadow toward the deep lake-navy ripple
+// troughs (8,40,78) lifted just enough to read against the royal blue.
 // Composited with 'screen' (brightens what's beneath) / 'multiply' (darkens
 // it) instead of flat source-over, so the light actually interacts with the
 // scene rather than looking painted on top of it.
-const WAKE_HIGHLIGHT_COLOR = '236,252,247'
-const WAKE_SHADOW_COLOR    = '22,88,80'
+const WAKE_HIGHLIGHT_COLOR = '238,248,255'
+const WAKE_SHADOW_COLOR    = '18,58,110'
 const WAKELET_EDGE_THICK_MUL = 0.55  // highlight/shadow band width, × the base ribbon's half-thickness
 const WAKELET_EDGE_SHIFT_MUL = 0.42  // how far the band rides toward its edge, × peak half-thickness
 const WAKELET_EDGE_PASSES = [

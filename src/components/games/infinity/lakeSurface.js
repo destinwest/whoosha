@@ -7,7 +7,8 @@
 //   • WATER ONLY — no shore pebbles, no treeline, no sky. The whole screen is
 //     lake surface.
 //   • Bottom = muted gray-brown shallows (the lake edge underfoot), rising
-//     through murky green into a vibrant alpine aquamarine.
+//     through dusty steel blue into a deep royal blue built around #0656AB
+//     (user's anchor — the first aquamarine version read too close to Square).
 //   • Peak vibrancy sits UPPER-CENTER (behind the figure-8's heart) as a soft
 //     radial glow, easing slightly toward the top edge.
 //   • BROAD, SOFT horizontal ripple bands of light and shadow — the natural-
@@ -20,16 +21,18 @@
 
 import { mulberry32 } from '../_shared/nightSky'
 
-// Vertical water gradient, bottom → top. Muted shore shallows into aquamarine.
+// Vertical water gradient, bottom → top. Muted shore shallows into deep royal
+// blue — the whole palette is built around #0656AB (user's anchor, 2026-07-14;
+// the first aquamarine version read too close to the Square game's teal).
 // Stops are authored bottom-first for readability, then flipped for the
 // canvas gradient (which runs top → bottom).
 const WATER_STOPS_BOTTOM_UP = [
   [0.00, '#7C7264'],   // muted gray-brown — the shallows at the viewer's feet
-  [0.10, '#6E7767'],   // brown giving way to olive
-  [0.24, '#4A8A79'],   // murky green — first real water color
-  [0.46, '#2CAD9A'],   // teal-green
-  [0.70, '#33C7B2'],   // aquamarine
-  [1.00, '#4ED2C1'],   // soft vivid aqua at the top edge
+  [0.10, '#6E7278'],   // brown giving way to gray-slate
+  [0.24, '#3A6392'],   // dusty steel blue — first real water color
+  [0.46, '#1B63B4'],   // royal blue rising
+  [0.70, '#0656AB'],   // THE anchor — deep royal blue
+  [1.00, '#2E77CC'],   // lighter, luminous royal at the top edge
 ]
 
 // Upper-center vibrancy glow — where the figure-8's heart sits. Screen-blended
@@ -37,11 +40,11 @@ const WATER_STOPS_BOTTOM_UP = [
 const GLOW_CX_RATIO = 0.5
 const GLOW_CY_RATIO = 0.34
 const GLOW_R_RATIO  = 0.62               // × max(w, h)
-const GLOW_COLOR    = 'rgba(96,232,210,0.30)'
-const GLOW_MID      = 'rgba(96,232,210,0.12)'
+const GLOW_COLOR    = 'rgba(72,148,240,0.32)'
+const GLOW_MID      = 'rgba(72,148,240,0.13)'
 
 // Morning haze — a whisper of pale light across the upper water.
-const HAZE_COLOR = 'rgba(226,250,244,0.07)'
+const HAZE_COLOR = 'rgba(224,238,252,0.07)'
 
 // ── Ripple bands ──────────────────────────────────────────────────────────────
 // Each band is a row of wide, heavily y-squashed radial glows (the same
@@ -62,8 +65,8 @@ const LIGHT_ALPHA_MIN   = 0.05
 const LIGHT_ALPHA_MAX   = 0.10
 const SHADOW_ALPHA_MIN  = 0.05
 const SHADOW_ALPHA_MAX  = 0.09
-const LIGHT_RGB         = '228,250,244'  // pale sunlit aqua-white
-const SHADOW_RGB        = '10,72,66'     // deep lake teal
+const LIGHT_RGB         = '224,238,252'  // pale sunlit blue-white
+const SHADOW_RGB        = '8,40,78'      // deep lake navy
 
 // ── buildLakeSurfaceBg ────────────────────────────────────────────────────────
 export function buildLakeSurfaceBg(w, h, dpr) {
@@ -87,14 +90,14 @@ export function buildLakeSurfaceBg(w, h, dpr) {
   const glow = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr)
   glow.addColorStop(0,   GLOW_COLOR)
   glow.addColorStop(0.5, GLOW_MID)
-  glow.addColorStop(1,   'rgba(96,232,210,0)')
+  glow.addColorStop(1,   'rgba(72,148,240,0)')
   ctx.fillStyle = glow
   ctx.fillRect(0, 0, w, h)
 
   // Morning haze across the upper water.
   const haze = ctx.createLinearGradient(0, 0, 0, h * 0.5)
   haze.addColorStop(0, HAZE_COLOR)
-  haze.addColorStop(1, 'rgba(226,250,244,0)')
+  haze.addColorStop(1, 'rgba(224,238,252,0)')
   ctx.fillStyle = haze
   ctx.fillRect(0, 0, w, h * 0.5)
 

@@ -29,20 +29,21 @@ const RAW    = 1 / (2 * Math.SQRT2)   // max |x| of the raw lemniscate
 
 function drawScene(ctx, w, h) {
   // Soft lake gradient — the game's palette, dimmed and calmed (no ripples).
-  // Bottom-up like the game: muted gray-brown shallows into quiet aquamarine.
+  // Bottom-up like the game: muted gray-brown shallows into quiet royal blue
+  // (built around the game's #0656AB anchor).
   const bg = ctx.createLinearGradient(0, h, 0, 0)
   bg.addColorStop(0.00, '#6E6B5E')
-  bg.addColorStop(0.25, '#41816F')
-  bg.addColorStop(0.65, '#2BA893')
-  bg.addColorStop(1.00, '#3FBFAC')
+  bg.addColorStop(0.25, '#3F5F8A')
+  bg.addColorStop(0.65, '#1B5AA6')
+  bg.addColorStop(1.00, '#2F6FBE')
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
 
-  // Faint central aqua glow — the game's upper-center vibrancy, softened.
+  // Faint central blue glow — the game's upper-center vibrancy, softened.
   const cy = h * REGION_CENTER_RATIO
   const glow = ctx.createRadialGradient(w / 2, cy, 0, w / 2, cy, Math.max(w, h) * 0.55)
-  glow.addColorStop(0, 'rgba(110,228,206,0.18)')
-  glow.addColorStop(1, 'rgba(110,228,206,0)')
+  glow.addColorStop(0, 'rgba(92,160,240,0.18)')
+  glow.addColorStop(1, 'rgba(92,160,240,0)')
   ctx.fillStyle = glow
   ctx.fillRect(0, 0, w, h)
 
@@ -102,7 +103,7 @@ function drawScene(ctx, w, h) {
   mctx.stroke()
 
   mctx.globalCompositeOperation = 'source-in'
-  mctx.fillStyle = 'rgba(216,246,239,0.12)'   // flat glass tint — cool pale aqua for the lake scene
+  mctx.fillStyle = 'rgba(218,236,252,0.12)'   // flat glass tint — cool pale blue for the royal lake
   mctx.fillRect(0, 0, w, h)
 
   ctx.save()
@@ -115,18 +116,18 @@ function drawScene(ctx, w, h) {
   const [dotX, dotY] = pt(0.25)
   ctx.beginPath()
   ctx.arc(dotX, dotY, lw * 0.62, 0, Math.PI * 2)
-  ctx.fillStyle = '#F0FBF7'
+  ctx.fillStyle = '#F0F6FC'
   ctx.fill()
 
   // Vignette — darker at the edges, lighter in the middle. Mirrors the
   // game's own vignette overlay (InfinityGame.jsx: 'radial-gradient(ellipse
-  // at 50% 50%, transparent 40%, rgba(8,52,48,0.38) 100%)' — deep teal, not
+  // at 50% 50%, transparent 40%, rgba(4,28,56,0.40) 100%)' — deep navy, not
   // black, so the water darkens toward its own depths), drawn last so it
   // sits over everything, same as the game's DOM stacking (a CSS overlay
   // above the game canvas).
   const vignette = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.hypot(w / 2, h / 2))
-  vignette.addColorStop(0.4, 'rgba(8,52,48,0)')
-  vignette.addColorStop(1,   'rgba(8,52,48,0.40)')
+  vignette.addColorStop(0.4, 'rgba(4,28,56,0)')
+  vignette.addColorStop(1,   'rgba(4,28,56,0.40)')
   ctx.fillStyle = vignette
   ctx.fillRect(0, 0, w, h)
 }
