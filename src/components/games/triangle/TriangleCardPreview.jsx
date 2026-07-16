@@ -39,9 +39,14 @@ function drawScene(ctx, w, h) {
   // HexagonCardPreview's `createLinearGradient(0,0,w*0.5,h)` two-stop pattern
   // so the two cards read as the same family. No ridges/scenery on the card,
   // just the gradient.
+  // Purple/periwinkle, not blue (user request 2026-07-14): founded on the
+  // game background's own darkest purple — the near-ridge slate-purple
+  // hsl(231,20%,40%) ≈ #52587B (RIDGE_NEAR under VIBRANT_PALETTE in
+  // TriangleGame.jsx) — rising to a light periwinkle. Dark end at the bottom,
+  // matching the game's inverted sky (darker below, lighter above).
   const sky = ctx.createLinearGradient(0, 0, w * 0.5, h)
-  sky.addColorStop(0, '#8BB8E4')
-  sky.addColorStop(1, '#5C91C7')
+  sky.addColorStop(0, '#9AA3C9')
+  sky.addColorStop(1, '#52587B')
   ctx.fillStyle = sky
   ctx.fillRect(0, 0, w, h)
 

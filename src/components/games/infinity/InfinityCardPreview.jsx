@@ -29,12 +29,13 @@ const RAW    = 1 / (2 * Math.SQRT2)   // max |x| of the raw lemniscate
 
 function drawScene(ctx, w, h) {
   // Soft lake gradient — the game's palette, dimmed and calmed (no ripples).
-  // Bottom-up like the game: muted gray-brown shallows into quiet royal blue
-  // (built around the game's #0656AB anchor).
+  // ALL blue (user request 2026-07-14): the game keeps its gray-brown shore at
+  // the bottom, but the card simplifies to pure royal water — deep navy-royal
+  // at the bottom rising to a lighter royal (built around the game's #0656AB
+  // anchor).
   const bg = ctx.createLinearGradient(0, h, 0, 0)
-  bg.addColorStop(0.00, '#6E6B5E')
-  bg.addColorStop(0.25, '#3F5F8A')
-  bg.addColorStop(0.65, '#1B5AA6')
+  bg.addColorStop(0.00, '#0B4A94')
+  bg.addColorStop(0.60, '#1B5AA6')
   bg.addColorStop(1.00, '#2F6FBE')
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)

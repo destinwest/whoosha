@@ -27,7 +27,7 @@ export const GAME_GRADIENTS = {
   square:      'linear-gradient(160deg, #C8E0CD, #A0C8B0)',
   hexagon:     'linear-gradient(160deg, #E4B48C, #C77E5A)',
   infinity:    'linear-gradient(160deg, #2E77CC, #0656AB)',   // royal-blue lake — see lakeSurface.js
-  triangle:    'linear-gradient(160deg, #8BB8E4, #5C91C7)',
+  triangle:    'linear-gradient(160deg, #9AA3C9, #52587B)',   // periwinkle → the game sky's near-ridge purple
   star:        'linear-gradient(160deg, #1B1F4D, #141238)',   // night sky
   rainbow:     'linear-gradient(160deg, #FEFAE6, #F6E4AE)',
   placeholder: 'linear-gradient(160deg, #E0E8DF, #BFCEC1)',

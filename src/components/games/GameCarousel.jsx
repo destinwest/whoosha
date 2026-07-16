@@ -100,12 +100,12 @@ function CarouselCard({ game, distance }) {
   const isRainbow  = game.gameKey === 'rainbow'
   const hasPreview = isSquare || isHexagon || isInfinity || isTriangle || isStar || isRainbow   // full-bleed track render + bottom title
   // Title colour matched to each preview's palette (light on the dark square/
-  // infinity/star cards — square's matches its pacing dot, star's matches
-  // infinity's since the two share the night sky — dark on the light
-  // hexagon / triangle cards).
+  // infinity/star/triangle cards — triangle's card is darkest at the bottom
+  // where the title sits, matching the game's inverted sky — dark on the
+  // light hexagon / rainbow cards).
   const titleColor = isSquare ? '#F4F0E6'
     : isHexagon ? '#5C2E1C'
-    : isTriangle ? '#33465A'
+    : isTriangle ? '#E9ECF8'   // pale periwinkle-white on the dark purple card bottom
     : isStar ? '#E8E3F8'
     : isRainbow ? '#8A6A2F'
     : isInfinity ? '#F0F6FC'   // pale blue-white on the dimmed royal-lake card
@@ -125,7 +125,7 @@ function CarouselCard({ game, distance }) {
               : isInfinity
                 ? '#1B5AA6'
                 : isTriangle
-                  ? '#74A5D6'
+                  ? '#767FA2'
                   : isStar
                     ? '#1B1F4D'
                     : isRainbow
