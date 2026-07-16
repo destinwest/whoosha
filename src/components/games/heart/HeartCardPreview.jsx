@@ -22,14 +22,18 @@ const TRACK_COLOR = '#F7EBD9'   // the game track's base cream (drawTrackBody ba
 // Unit-space heart anchor points (S=1) — same proportions as HeartCanvas's
 // HEART_UNIT_SEGS (bbox half-width 36, half-height 38, centered at origin).
 // Duplicated locally (not imported) per this codebase's CardPreview
-// convention — see TriangleCardPreview's own local buildVerts.
+// convention — see TriangleCardPreview's own local buildVerts. Cleft/tip
+// rounding radii kept in sync with HeartCanvas's CLEFT_ROUND/TIP_ROUND —
+// see that file's comment for why a nonzero shared tangent rounds a joint.
+const CLEFT_ROUND = 7
+const TIP_ROUND    = 15
 const HEART_UNIT_SEGS = [
-  { p0: { x: 0,   y: -30 }, c1: { x: -2,  y: -35 }, c2: { x: -6,  y: -38 }, p1: { x: -12, y: -38 } },
+  { p0: { x: 0,   y: -30 }, c1: { x: -CLEFT_ROUND, y: -30 }, c2: { x: -6,  y: -38 }, p1: { x: -12, y: -38 } },
   { p0: { x: -12, y: -38 }, c1: { x: -24, y: -38 }, c2: { x: -36, y: -30 }, p1: { x: -36, y: -14 } },
-  { p0: { x: -36, y: -14 }, c1: { x: -36, y: 12  }, c2: { x: 0,   y: 38  }, p1: { x: 0,   y: 38  } },
-  { p0: { x: 0,   y: 38  }, c1: { x: 0,   y: 38  }, c2: { x: 36,  y: 12  }, p1: { x: 36,  y: -14 } },
+  { p0: { x: -36, y: -14 }, c1: { x: -36, y: 12  }, c2: { x: -TIP_ROUND, y: 38 }, p1: { x: 0,   y: 38  } },
+  { p0: { x: 0,   y: 38  }, c1: { x: TIP_ROUND, y: 38 }, c2: { x: 36,  y: 12  }, p1: { x: 36,  y: -14 } },
   { p0: { x: 36,  y: -14 }, c1: { x: 36,  y: -30 }, c2: { x: 24,  y: -38 }, p1: { x: 12,  y: -38 } },
-  { p0: { x: 12,  y: -38 }, c1: { x: 6,   y: -38 }, c2: { x: 2,   y: -35 }, p1: { x: 0,   y: -30 } },
+  { p0: { x: 12,  y: -38 }, c1: { x: 6,   y: -38 }, c2: { x: CLEFT_ROUND, y: -30 }, p1: { x: 0,   y: -30 } },
 ]
 const HEART_HALF_WIDTH  = 36
 const HEART_HALF_HEIGHT = 38

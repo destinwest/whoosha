@@ -58,13 +58,27 @@ const SIDE_START_MS = SIDE_DURATIONS_MS.reduce((acc, dur, i) => {
 // Left/right halves are exact mirrors (x negated), so they have identical arc
 // length — the fraction split at SIDES=2 lands exactly on the vertical
 // centerline (cleft and bottom point), matching the design spec.
+//
+// Both the top cleft and the bottom tip are ROUNDED, not sharp cusps (per
+// user reference image, 2026-07-16). A cusp forms wherever a segment's
+// tangent control point coincides with its endpoint (zero-length tangent) —
+// the original glyph did this at both the cleft (seg5→seg0) and the bottom
+// (seg2→seg3). Rounding a joint just means giving both sides a NONZERO
+// tangent that points in the same direction (G1/tangent continuity) instead
+// of degenerating to a point — no extra segments needed. Both joints use a
+// horizontal tangent (the natural direction at a curve's own local min/max),
+// which reads as a soft, filleted point/dip instead of a "V". Radii below
+// (CLEFT_ROUND / TIP_ROUND) are in the same unit space as the coordinates
+// (half-width 36) — larger = chubbier/more rounded.
+const CLEFT_ROUND = 7    // top-notch fillet radius
+const TIP_ROUND    = 15  // bottom-point fillet radius
 const HEART_UNIT_SEGS = [
-  { p0: { x: 0,   y: -30 }, c1: { x: -2,  y: -35 }, c2: { x: -6,  y: -38 }, p1: { x: -12, y: -38 } },
+  { p0: { x: 0,   y: -30 }, c1: { x: -CLEFT_ROUND, y: -30 }, c2: { x: -6,  y: -38 }, p1: { x: -12, y: -38 } },
   { p0: { x: -12, y: -38 }, c1: { x: -24, y: -38 }, c2: { x: -36, y: -30 }, p1: { x: -36, y: -14 } },
-  { p0: { x: -36, y: -14 }, c1: { x: -36, y: 12  }, c2: { x: 0,   y: 38  }, p1: { x: 0,   y: 38  } },
-  { p0: { x: 0,   y: 38  }, c1: { x: 0,   y: 38  }, c2: { x: 36,  y: 12  }, p1: { x: 36,  y: -14 } },
+  { p0: { x: -36, y: -14 }, c1: { x: -36, y: 12  }, c2: { x: -TIP_ROUND, y: 38 }, p1: { x: 0,   y: 38  } },
+  { p0: { x: 0,   y: 38  }, c1: { x: TIP_ROUND, y: 38 }, c2: { x: 36,  y: 12  }, p1: { x: 36,  y: -14 } },
   { p0: { x: 36,  y: -14 }, c1: { x: 36,  y: -30 }, c2: { x: 24,  y: -38 }, p1: { x: 12,  y: -38 } },
-  { p0: { x: 12,  y: -38 }, c1: { x: 6,   y: -38 }, c2: { x: 2,   y: -35 }, p1: { x: 0,   y: -30 } },
+  { p0: { x: 12,  y: -38 }, c1: { x: 6,   y: -38 }, c2: { x: CLEFT_ROUND, y: -30 }, p1: { x: 0,   y: -30 } },
 ]
 const HEART_HALF_WIDTH  = 36  // unit-space half-width  (x: -36..36)
 const HEART_HALF_HEIGHT = 38  // unit-space half-height (y: -38..38)
@@ -376,6 +390,31 @@ function lerpCumLen(cumLen, idx) {
   return cumLen[i] + (cumLen[i + 1] - cumLen[i]) * t
 }
 
+// Inverse of lerpCumLen: the fractional index whose arc-length is `s`.
+// Needed because HeartCanvas's points are sampled at uniform BEZIER-PARAMETER
+// steps (STEPS_PER_SEG per segment), not uniform arc-length — a cubic bezier's
+// speed (d(arc-length)/dt) varies along its length (fastest through the flatter
+// mid-lobe stretch, slowest through the tightly-curved cleft/tip), so equal
+// steps in index-space are NOT equal steps in pixel-space. Any caller that
+// wants constant PIXEL speed over time (the pacing dot) must walk cumLen
+// (arc-length), not the raw index, then convert back to an index/position via
+// this lookup — binary search since cumLen is monotonic increasing.
+function idxAtLen(cumLen, s) {
+  const N = cumLen.length - 1
+  if (s <= 0) return 0
+  if (s >= cumLen[N]) return N
+  let lo = 0, hi = N
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (cumLen[mid] < s) lo = mid + 1
+    else hi = mid
+  }
+  const i = Math.max(0, lo - 1)
+  const segLen = cumLen[i + 1] - cumLen[i]
+  const t = segLen > 0 ? (s - cumLen[i]) / segLen : 0
+  return i + t
+}
+
 // Pixel position at a fractional index.
 function pointAt(points, idx) {
   const N = points.length - 1
@@ -597,12 +636,17 @@ const HeartCanvas = forwardRef(function HeartCanvas(
   // Triangle (straight segment + corner arc needing sfArr), the heart's whole
   // outline is one continuous curve, so the pixel position is read directly
   // off the pre-sampled points/cumLen via the geometry-agnostic pointAt() —
-  // fraction/SIDES maps linearly onto the sample-index range [0, N].
+  // fraction/SIDES maps onto arc-length (via idxAtLen), NOT the raw sample
+  // index — the index range [0, N] is uniform in bezier-parameter, not pixel
+  // distance, so index-linear mapping made the dot visibly speed up through
+  // the flatter mid-lobe stretch and slow through the tightly-curved
+  // cleft/tip. Arc-length is what actually reads as "constant speed" on
+  // screen, and both halves have identical arc length (mirror symmetry), so
+  // time-linear-in-arc-length gives a true constant-speed traversal.
   function getPacing(elapsed) {
     const geo = geoRef.current
     if (!geo) return null
-    const { points } = geo
-    const N = points.length - 1
+    const { points, cumLen, totalPathLength } = geo
 
     const t = elapsed % CYCLE_MS
     let sideIdx = SIDES - 1
@@ -611,7 +655,8 @@ const HeartCanvas = forwardRef(function HeartCanvas(
     }
     const sideProgress = (t - SIDE_START_MS[sideIdx]) / SIDE_DURATIONS_MS[sideIdx]
     const fraction     = sideIdx + sideProgress
-    const idx          = (fraction / SIDES) * N
+    const s            = (fraction / SIDES) * totalPathLength
+    const idx          = idxAtLen(cumLen, s)
     const pos          = pointAt(points, idx)
     return { x: pos.x, y: pos.y, fraction }
   }
