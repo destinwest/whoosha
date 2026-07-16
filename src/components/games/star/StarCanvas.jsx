@@ -89,6 +89,16 @@ const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 4
 // clock (see the onBreath call site), which is intentionally independent of the
 // geometry-driven pacing fraction.
 const VOICE_PHASE_MS        = CYCLE_MS / SIDES
+// How long the pacing circle stays frozen at its mount position (the top tip)
+// before it starts moving, so it doesn't move — and no breath cue fires, see
+// the onBreath call site — until the spoken intro ("StarGameBreathIntro.mp3",
+// a "take one big deep breath in" prompt) has had time to finish. The clip
+// itself runs 5.407s (confirmed via ffprobe, 2026-07-15); this adds a ~93ms
+// buffer past its own fade-out tail. Hardcoded rather than read from the
+// decoded buffer's real duration (simpler, matches how every other timing
+// constant in this file works) — if the intro clip is ever re-recorded to a
+// different length, this needs a matching manual update.
+const PACING_START_DELAY_MS = 5500
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 // Finger-trail drift palette — retuned 2026-07-14 for the night-sky background
@@ -1115,8 +1125,16 @@ const StarCanvas = forwardRef(function StarCanvas(
       ctx.restore()
 
       // ── Pacing position (computed once, shared by fingerprint + pacing circle) ─
-      // Pacing starts at mount — independent of first touch.
-      const elapsedPacing = now - pacingStartRef.current
+      // Pacing starts at mount — independent of first touch — but stays frozen
+      // at its phase-0 origin (the top tip) for the first PACING_START_DELAY_MS,
+      // giving the spoken intro room to finish before the dot moves (2026-07-15
+      // user request: the intro says "take one big deep breath in" — the dot
+      // starting to move immediately, before that finishes, undercut it).
+      // elapsedPacing is clamped to 0 through the delay, then counts up
+      // continuously with no jump once it elapses — same getPacing, same
+      // origin, just time-shifted.
+      const elapsedSinceMount = now - pacingStartRef.current
+      const elapsedPacing     = Math.max(0, elapsedSinceMount - PACING_START_DELAY_MS)
       const pacingPos = getPacing(elapsedPacing)
       if (pacingPos) {
         pacingPosRef.current = pacingPos
@@ -1131,23 +1149,35 @@ const StarCanvas = forwardRef(function StarCanvas(
       // crossings still land at the same instant the dot passes each corner's
       // midpoint (a tip or valley).
       //
-      // MOUNT-anchored (pacingStartRef) and UNCONDITIONAL — called every frame
-      // regardless of startedRef, exactly mirroring HexagonCanvas's onBreath
-      // and SquareCanvas's onGameStateTick (both mount-anchored, both
-      // unconditional) and Star's own onTick-driven intro trigger above. A
-      // prior version of this gated the call on startedRef and anchored to
-      // gameStartRef (first successful ON-TRACK touch) specifically to
-      // guarantee a deterministic first "breathe in" — but that gate doesn't
-      // exist anywhere else in this codebase, and it meant in/out never even
-      // ATTEMPTED to play until the child traced successfully, which is a much
-      // stricter bar than "any touch unlocks audio" — so the intro (gated only
-      // on unlock) would play but the breath cues silently wouldn't, if the
-      // child's first touch missed the track (very plausible on a shape this
-      // spread out). Reverted 2026-07-14 (user report, confirmed by diffing
-      // against Hexagon/Square) so in/out autoplay exactly like every other
-      // audio in this app: attempts from mount, becomes audible on first
-      // unlock, whatever phase happens to be live plays first.
-      onBreath?.((elapsedPacing % CYCLE_MS) / VOICE_PHASE_MS)
+      // MOUNT-anchored (pacingStartRef) — exactly mirroring HexagonCanvas's
+      // onBreath and SquareCanvas's onGameStateTick (both mount-anchored) and
+      // Star's own onTick-driven intro trigger above. A prior version of this
+      // gated the call on startedRef and anchored to gameStartRef (first
+      // successful ON-TRACK touch) specifically to guarantee a deterministic
+      // first "breathe in" — but that gate doesn't exist anywhere else in this
+      // codebase, and it meant in/out never even ATTEMPTED to play until the
+      // child traced successfully, which is a much stricter bar than "any touch
+      // unlocks audio" — so the intro (gated only on unlock) would play but the
+      // breath cues silently wouldn't, if the child's first touch missed the
+      // track (very plausible on a shape this spread out). Reverted 2026-07-14
+      // (user report, confirmed by diffing against Hexagon/Square) so in/out
+      // autoplay like every other audio in this app: attempts from mount,
+      // becomes audible on first unlock, whatever phase happens to be live
+      // plays first.
+      //
+      // The PACING_START_DELAY_MS gate below is a DIFFERENT axis, not a repeat
+      // of that reverted bug: it's a fixed TIME threshold from mount, the same
+      // for every player every time, not conditioned on the child's touch/
+      // tracing success — so it can't reintroduce the "silently never plays if
+      // the child's first touch misses the track" failure mode the 07-14 fix
+      // removed. The call is skipped ENTIRELY during the delay (not just fed a
+      // clamped-to-0 fraction) so lastBreathPhaseRef (in StarGame) stays at its
+      // initial -1 sentinel throughout — the first real call, exactly when the
+      // dot starts moving, is phaseIdx 0's edge-detected transition, firing
+      // "breathe out" at that exact instant instead of at mount.
+      if (elapsedSinceMount >= PACING_START_DELAY_MS) {
+        onBreath?.((elapsedPacing % CYCLE_MS) / VOICE_PHASE_MS)
+      }
 
       // ── Bead tracing (per-frame, leash + acceptance) ──────────────────────
       // Move the bead toward the finger along the groove, or freeze it if the
