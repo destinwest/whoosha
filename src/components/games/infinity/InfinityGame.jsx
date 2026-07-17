@@ -7,8 +7,11 @@ import { buildLakeSurfaceBg } from './lakeSurface'
 // the completion card without vanishing entirely.
 const COMPLETION_CANVAS_OPACITY = 0.25
 
-// Two-phase lazy-8 breath: top lobe = inhale, bottom lobe = exhale.
-const LABEL_TEXTS = ['breathe in', 'breathe out']
+// Label screen slot 0 (top-lobe position) always shows the breathe in/out text;
+// slot 1 (bottom-lobe position) always shows the countdown. Which physical lobe
+// the pacing circle is tracing at any moment is independent of this — see
+// InfinityCanvas's getPacing.
+const PHASE_TEXT = { in: 'breathe in', out: 'breathe out' }
 
 // ── InfinityGame ──────────────────────────────────────────────────────────────
 // Phase manager — owns intro/game/completion phase, session timing, exit, and the
@@ -19,11 +22,28 @@ export default function InfinityGame({ onExit }) {
   const [phase, setPhase]                         = useState('game')  // 'game' | 'completion'
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [labelGeo, setLabelGeo]                   = useState(null)    // { labelMids, size }
+  const [breathLabel, setBreathLabel]             = useState('in')    // 'in' | 'out'
+  const [breathSecondsLeft, setBreathSecondsLeft] = useState(3)
 
   const sessionStartRef = useRef(null)
   const infinityCanvasRef = useRef(null)
   const bgCanvasRef       = useRef(null)
   const pacingCanvasRef   = useRef(null)
+  const breathLabelRef       = useRef('in')
+  const breathSecondsLeftRef = useRef(3)
+
+  // Per-rAF-frame tick from InfinityCanvas — only re-render when the displayed
+  // breath label or countdown second actually changes, not on every frame.
+  function handleGameStateTick(state) {
+    if (state.breathLabel !== breathLabelRef.current) {
+      breathLabelRef.current = state.breathLabel
+      setBreathLabel(state.breathLabel)
+    }
+    if (state.breathSecondsLeft !== breathSecondsLeftRef.current) {
+      breathSecondsLeftRef.current = state.breathSecondsLeft
+      setBreathSecondsLeft(state.breathSecondsLeft)
+    }
+  }
 
   // ── Lake-surface background — baked once per resize ─────────────────────────
   useEffect(() => {
@@ -97,6 +117,7 @@ export default function InfinityGame({ onExit }) {
               ref={infinityCanvasRef}
               pacingCanvasRef={pacingCanvasRef}
               onGameStart={() => { sessionStartRef.current = Date.now() }}
+              onGameStateTick={handleGameStateTick}
               onResize={setLabelGeo}
               interactive={phase === 'game'}
             />
@@ -108,12 +129,15 @@ export default function InfinityGame({ onExit }) {
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
           />
 
-          {/* Labels — DOM text at each lobe's center (static for now) */}
+          {/* Labels — DOM text at each lobe's screen slot. Top slot: breathe
+              in/out text, toggles once per phase. Bottom slot: countdown
+              number, ticks every second. */}
           {labelGeo && (() => {
             const fs = Math.max(13, labelGeo.size * 0.045)
+            const items = [PHASE_TEXT[breathLabel], String(breathSecondsLeft)]
             return (
               <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                {LABEL_TEXTS.map((text, i) => (
+                {items.map((text, i) => (
                   <div
                     key={i}
                     style={{
