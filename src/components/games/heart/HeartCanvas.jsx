@@ -96,13 +96,29 @@ const SIDE_START_MS = SIDE_DURATIONS_MS.reduce((acc, dur, i) => {
 // below (y=-28.8, control arm toward the crown) is tuned to a radius of ≈7.23 —
 // just above the worst case — so the notch is sharp on every size and never
 // folds on small screens. Re-tune with scratchpad/tune_cleft.mjs if lw changes.
+//
+// The SAME radius-vs-lw/2 rule bites on the INNER edge, in the opposite sense.
+// Wherever the centerline bends TOWARD the inside of the heart with radius <
+// lw/2, the inner edge folds back through itself and the stroke fills the
+// overlap — which reads as a hard CORNER on the inner edge while the outer edge
+// stays smooth (user reported exactly this at the crown, 2026-07-16). So on any
+// inward-bending stretch, keep radius comfortably > lw/2.
+//
+// That is why the crown (segs 0/1 and their mirrors 4/5) is G2-continuous, not
+// just G1: both arcs are tuned to a COMMON crown radius of 24.39 — measured
+// from the reference SVG's own crown — so curvature does not jump across the
+// join (an earlier fit matched only tangents, leaving a 4.4x curvature jump and
+// a radius of 4.83 that folded). Matching the SVG's real curvature also pulls
+// the lobe CLOSER to the reference (max deviation 1.18u -> 0.28u). If you retune
+// the crown, keep segs 0 and 1 sharing one radius and keep it > lw/2:
+// scratchpad/fix_crown.mjs solves the control arms for both.
 const HEART_UNIT_SEGS = [
-  { p0: { x: 0, y: -28.8 }, c1: { x: -4.17, y: -30.21 }, c2: { x: -13.34, y: -37.98 }, p1: { x: -18.34, y: -37.98 } },
-  { p0: { x: -18.34, y: -37.98 }, c1: { x: -31.47, y: -38 }, c2: { x: -42.76, y: -25.75 }, p1: { x: -42.16, y: -12.73 } },
+  { p0: { x: 0, y: -28.8 }, c1: { x: -5.23, y: -30.57 }, c2: { x: -7.36, y: -37.98 }, p1: { x: -18.34, y: -37.98 } },
+  { p0: { x: -18.34, y: -37.98 }, c1: { x: -32.44, y: -37.98 }, c2: { x: -42.76, y: -25.75 }, p1: { x: -42.16, y: -12.73 } },
   { p0: { x: -42.16, y: -12.73 }, c1: { x: -42.16, y: 9.26 }, c2: { x: -8, y: 38 }, p1: { x: 0, y: 38 } },
   { p0: { x: 0, y: 38 }, c1: { x: 8, y: 38 }, c2: { x: 42.16, y: 9.26 }, p1: { x: 42.16, y: -12.73 } },
-  { p0: { x: 42.16, y: -12.73 }, c1: { x: 42.76, y: -25.75 }, c2: { x: 31.47, y: -38 }, p1: { x: 18.34, y: -37.98 } },
-  { p0: { x: 18.34, y: -37.98 }, c1: { x: 13.34, y: -37.98 }, c2: { x: 4.17, y: -30.21 }, p1: { x: 0, y: -28.8 } },
+  { p0: { x: 42.16, y: -12.73 }, c1: { x: 42.76, y: -25.75 }, c2: { x: 32.44, y: -37.98 }, p1: { x: 18.34, y: -37.98 } },
+  { p0: { x: 18.34, y: -37.98 }, c1: { x: 7.36, y: -37.98 }, c2: { x: 5.23, y: -30.57 }, p1: { x: 0, y: -28.8 } },
 ]
 const HEART_HALF_WIDTH  = 42.3  // unit-space half-width  (x: -42.3..42.3)
 const HEART_HALF_HEIGHT = 38    // unit-space half-height (y: -38..38)
