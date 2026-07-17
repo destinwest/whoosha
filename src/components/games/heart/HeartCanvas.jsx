@@ -358,12 +358,31 @@ function buildTrackGradient(ctx, { cx, cy, R, lw }) {
   return grad
 }
 
+// ── lineJoin: why 'round' matters here ───────────────────────────────────────
+// The centerline has ONE real corner: the cleft (a ~37° deflection). Canvas
+// treats the two sides of a corner differently:
+//   - INSIDE of the turn  = the OUTER edge here. The two offsets overlap and the
+//     union gives a sharp point. lineJoin does NOT affect it, so the outer V
+//     stays sharp no matter what.
+//   - OUTSIDE of the turn = the INNER edge here. There's a gap, and lineJoin
+//     fills it: 'miter' (canvas's DEFAULT) puts an angular point there, 'round'
+//     puts a smooth arc.
+// So 'round' is what keeps the inner boundary free of angles while leaving the
+// outer V untouched (user, 2026-07-16: smooth the inner boundary, keep the
+// outer V sharp). Leaving lineJoin unset silently gets 'miter' and the angle
+// comes back.
+// The bottom tip's inner V is NOT a join — it comes from the inner offset
+// folding (radius 3.34 < lw/2), and the centerline is smooth there — so it
+// survives 'round' untouched, which is what we want.
+const TRACK_LINE_JOIN = 'round'
+
 // Pass A — outer shadow: bleeds outside track footprint, soft drop shadow.
 function drawTrackShadow(ctx, { segs, lw }) {
   ctx.save()
   ctx.beginPath()
   heartPath(ctx, segs)
   ctx.lineWidth   = lw + 7
+  ctx.lineJoin    = TRACK_LINE_JOIN
   ctx.strokeStyle = 'rgba(120,60,70,0.20)'
   ctx.stroke()
   ctx.restore()
@@ -375,18 +394,22 @@ function drawTrackBody(ctx, { segs, lw }, trackGradient) {
   ctx.beginPath()
   heartPath(ctx, segs)
   ctx.lineWidth   = lw
+  ctx.lineJoin    = TRACK_LINE_JOIN
   ctx.strokeStyle = trackGradient ?? '#F7EBD9'
   ctx.stroke()
   ctx.restore()
 }
 
 // Pass D — inner wall shadow: faint dark stroke at the inner edge of track.
+// Rides the inner boundary, so it needs the same 'round' join — a miter here
+// would draw an angular kink in the shadow right where the boundary is smooth.
 function drawTrackInnerWall(ctx, { cx, cy, S, lw }) {
   const innerSegs = scaledHeartSegs(cx, cy, S, -(lw * 0.5))
   ctx.save()
   ctx.beginPath()
   heartPath(ctx, innerSegs)
   ctx.lineWidth   = lw * 0.18
+  ctx.lineJoin    = TRACK_LINE_JOIN
   ctx.strokeStyle = 'rgba(120,60,70,0.13)'
   ctx.stroke()
   ctx.restore()
