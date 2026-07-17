@@ -10,10 +10,10 @@
 
 export const HOME_GAMES = [
   { id: 'heart',    name: 'Heart Breathing',   tagline: 'Trace the heart',   route: '/games/heart',    gameKey: 'heart',       shape: 'heart',    locked: false, placeholder: false },
-  { id: 'rainbow',  name: 'Rainbow Breathing', tagline: 'Climb the rainbow',  route: '/games/rainbow',  gameKey: 'rainbow',     shape: 'rainbow',  locked: false, placeholder: false },
-  { id: 'infinity', name: 'Infinity Breathing', tagline: 'Trace the infinity', route: '/games/infinity', gameKey: 'infinity',    shape: 'infinity', locked: false, placeholder: false },
-  { id: 'square',   name: 'Square Breathing',   tagline: 'Trace the square',   route: '/games/square',   gameKey: 'square',      shape: 'square',   locked: false, placeholder: false },
   { id: 'hexagon',  name: 'Hexagon Breathing',  tagline: '',                   route: '/games/hexagon',  gameKey: 'hexagon',     shape: 'hexagon',  locked: false, placeholder: false },
+  { id: 'rainbow',  name: 'Rainbow Breathing', tagline: 'Climb the rainbow',  route: '/games/rainbow',  gameKey: 'rainbow',     shape: 'rainbow',  locked: false, placeholder: false },
+  { id: 'square',   name: 'Square Breathing',   tagline: 'Trace the square',   route: '/games/square',   gameKey: 'square',      shape: 'square',   locked: false, placeholder: false },
+  { id: 'infinity', name: 'Infinity Breathing', tagline: 'Trace the infinity', route: '/games/infinity', gameKey: 'infinity',    shape: 'infinity', locked: false, placeholder: false },
   { id: 'triangle', name: 'Triangle Breathing',  tagline: 'Trace the triangle', route: '/games/triangle', gameKey: 'triangle',    shape: 'triangle', locked: false, placeholder: false },
   { id: 'star',     name: 'Star Breathing',      tagline: 'Trace the star',     route: '/games/star',     gameKey: 'star',        shape: 'star',     locked: false, placeholder: false },
   { id: 'flower',   name: 'Flower Breathing',  tagline: '',                  route: null,              gameKey: 'placeholder', shape: 'flower',   locked: true,  placeholder: false },
