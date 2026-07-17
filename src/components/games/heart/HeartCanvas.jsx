@@ -72,25 +72,37 @@ const SIDE_START_MS = SIDE_DURATIONS_MS.reduce((acc, dur, i) => {
 // length — the fraction split at SIDES=2 lands exactly on the vertical
 // centerline (cleft and bottom point), matching the design spec.
 //
-// Both the top cleft and the bottom tip are ROUNDED (per the reference and the
-// user's 2026-07-16 note that the old cleft was too deep/sharp and the bottom
-// too sharp). Each is a smooth join, NOT a cusp: the two segments meeting there
-// share a HORIZONTAL tangent (control points level with the join point), so the
-// curve reads as a filleted valley / rounded point instead of a "V" or a spike.
-// The horizontal arm length sets how round — baked into c1/c2 of segs 0,2,3,5
-// below (cleft arm 11 @ y=-32, bottom arm 8). The cleft is kept shallow/broad
-// (y=-32, not the SVG's measured -30): stroking the centerline with the full
-// track width lw perpendicular-offsets the inner edge, and at a tight concave
-// cleft that inner edge pinches into a downward "tongue" — a broader, shallower
-// valley keeps it gentle. Finer inner-edge/depth work is deferred to the next
-// (shading/depth) pass.
+// The BOTTOM tip is rounded via a horizontal tangent (bottom arm 8): the two
+// segments meeting there share a level tangent, so it reads as a filleted point
+// rather than a spike.
+//
+// The CLEFT is deliberately tuned so the band's OUTER notch comes to a SHARP
+// point, matching the reference SVG (user, 2026-07-16). The mechanism is
+// non-obvious and easy to break, so: the band is drawn by STROKING this
+// centerline with width lw, which offsets the outer edge TOWARD the cleft's
+// center of curvature. So the outer notch radius = (centerline cleft radius) -
+// lw/2. That gives three regimes:
+//   radius >  lw/2  -> outer notch stays visibly rounded
+//   radius ≈  lw/2  -> outer notch collapses to a sharp point   <-- what we want
+//   radius <  lw/2  -> outer edge SELF-INTERSECTS and blunts itself (worse, not
+//                      sharper — a naive "make it sharper" change lands here)
+// The inner edge meanwhile gets radius + lw/2, i.e. a rounded bulge into the
+// opening. That bulge is NOT an artifact — it is what any thick ring does at a
+// sharp cleft, and the reference SVG has one too (its bulge ≈ its ring
+// thickness). So no taper is needed.
+//
+// lw/2 in THIS unit space is (5.53 + 4/S), which drifts with screen scale S:
+// ≈7.13 on a narrow phone, ≈6.86 at mobile, ≈6.03 on a large screen. The cleft
+// below (y=-28.8, control arm toward the crown) is tuned to a radius of ≈7.23 —
+// just above the worst case — so the notch is sharp on every size and never
+// folds on small screens. Re-tune with scratchpad/tune_cleft.mjs if lw changes.
 const HEART_UNIT_SEGS = [
-  { p0: { x: 0, y: -32 }, c1: { x: -11, y: -32 }, c2: { x: -13.34, y: -37.98 }, p1: { x: -18.34, y: -37.98 } },
+  { p0: { x: 0, y: -28.8 }, c1: { x: -4.17, y: -30.21 }, c2: { x: -13.34, y: -37.98 }, p1: { x: -18.34, y: -37.98 } },
   { p0: { x: -18.34, y: -37.98 }, c1: { x: -31.47, y: -38 }, c2: { x: -42.76, y: -25.75 }, p1: { x: -42.16, y: -12.73 } },
   { p0: { x: -42.16, y: -12.73 }, c1: { x: -42.16, y: 9.26 }, c2: { x: -8, y: 38 }, p1: { x: 0, y: 38 } },
   { p0: { x: 0, y: 38 }, c1: { x: 8, y: 38 }, c2: { x: 42.16, y: 9.26 }, p1: { x: 42.16, y: -12.73 } },
   { p0: { x: 42.16, y: -12.73 }, c1: { x: 42.76, y: -25.75 }, c2: { x: 31.47, y: -38 }, p1: { x: 18.34, y: -37.98 } },
-  { p0: { x: 18.34, y: -37.98 }, c1: { x: 13.34, y: -37.98 }, c2: { x: 11, y: -32 }, p1: { x: 0, y: -32 } },
+  { p0: { x: 18.34, y: -37.98 }, c1: { x: 13.34, y: -37.98 }, c2: { x: 4.17, y: -30.21 }, p1: { x: 0, y: -28.8 } },
 ]
 const HEART_HALF_WIDTH  = 42.3  // unit-space half-width  (x: -42.3..42.3)
 const HEART_HALF_HEIGHT = 38    // unit-space half-height (y: -38..38)

@@ -25,12 +25,12 @@ const TRACK_COLOR = '#F7EBD9'   // the game track's base cream (drawTrackBody ba
 // (not imported) per this codebase's CardPreview convention — see
 // TriangleCardPreview's own local buildVerts.
 const HEART_UNIT_SEGS = [
-  { p0: { x: 0, y: -32 }, c1: { x: -11, y: -32 }, c2: { x: -13.34, y: -37.98 }, p1: { x: -18.34, y: -37.98 } },
+  { p0: { x: 0, y: -28.8 }, c1: { x: -4.17, y: -30.21 }, c2: { x: -13.34, y: -37.98 }, p1: { x: -18.34, y: -37.98 } },
   { p0: { x: -18.34, y: -37.98 }, c1: { x: -31.47, y: -38 }, c2: { x: -42.76, y: -25.75 }, p1: { x: -42.16, y: -12.73 } },
   { p0: { x: -42.16, y: -12.73 }, c1: { x: -42.16, y: 9.26 }, c2: { x: -8, y: 38 }, p1: { x: 0, y: 38 } },
   { p0: { x: 0, y: 38 }, c1: { x: 8, y: 38 }, c2: { x: 42.16, y: 9.26 }, p1: { x: 42.16, y: -12.73 } },
   { p0: { x: 42.16, y: -12.73 }, c1: { x: 42.76, y: -25.75 }, c2: { x: 31.47, y: -38 }, p1: { x: 18.34, y: -37.98 } },
-  { p0: { x: 18.34, y: -37.98 }, c1: { x: 13.34, y: -37.98 }, c2: { x: 11, y: -32 }, p1: { x: 0, y: -32 } },
+  { p0: { x: 18.34, y: -37.98 }, c1: { x: 13.34, y: -37.98 }, c2: { x: 4.17, y: -30.21 }, p1: { x: 0, y: -28.8 } },
 ]
 const HEART_HALF_WIDTH  = 42.3
 const HEART_HALF_HEIGHT = 38
