@@ -25,7 +25,7 @@ function drawScene(ctx, w, h) {
   // Rainbow proportions — mirrors buildGeo, scaled to the card.
   const size   = Math.min(w * 0.86, h * 0.62)
   const lw     = size * 0.075
-  const gap    = Math.max(1.5, lw * 0.08)
+  const gap    = 0                        // bands sit flush — matches the game (no dividing slivers)
   const step   = lw + gap
   const outerR = size / 2 - lw / 2
   const radii  = [outerR - 3 * step, outerR - 2 * step, outerR - step, outerR]

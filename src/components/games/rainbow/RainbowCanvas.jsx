@@ -192,7 +192,7 @@ function buildGeo(rect) {
   // (2R)·0.0728 + 8 family, slimmed like the Star track.
   const size = Math.min(w * 0.92, h * 0.62)
   const lw   = (size * 0.0728 + 8) * RAINBOW_TRACK_SLIM
-  const gap  = Math.max(2, lw * 0.08)   // sliver of sky between bands
+  const gap  = 0                        // bands sit flush — no sliver of sky dividing the levels
   const step = lw + gap
 
   const outerR = size / 2 - lw / 2                 // top (red) centerline radius
@@ -259,35 +259,24 @@ function bakeTrack(geo, dpr) {
   ctx.scale(dpr, dpr)
 
   const { cx, baseY, radii, lw } = geo
+  ctx.lineCap = 'butt'
   for (let a = 0; a < ARC_COUNT; a++) {
     const r    = radii[a]
     const base = BAND_BASES[a]
 
-    // Pass A — soft outer shadow anchoring the band.
-    ctx.beginPath()
-    ctx.arc(cx, baseY, r, Math.PI, Math.PI * 2, false)
-    ctx.lineWidth   = lw + 6
-    ctx.lineCap     = 'butt'
-    ctx.strokeStyle = 'rgba(126,98,52,0.16)'
-    ctx.stroke()
-
-    // Pass B — band body with a radial gradient across its width (lit inner
-    // lip → base → shaded outer edge) for the raised-channel read.
+    // Single band body — a radial gradient across the band's width, DARKEST at
+    // the inner (bottom) edge and lightening to the outer (top) edge. No drop
+    // shadow and no inner-wall line: the bands sit flush (gap zeroed in
+    // buildGeo), so the rainbow reads as one clean sweep of colour rather than
+    // stacked, outlined channels.
     const grad = ctx.createRadialGradient(cx, baseY, r - lw / 2, cx, baseY, r + lw / 2)
-    grad.addColorStop(0,   lerpColor(base, '#FFFFFF', 0.30))
-    grad.addColorStop(0.4, base)
-    grad.addColorStop(1,   lerpColor(base, '#7A6136', 0.16))
+    grad.addColorStop(0,   lerpColor(base, '#7A6136', 0.16))   // inner edge (bottom) — darkest
+    grad.addColorStop(0.5, base)
+    grad.addColorStop(1,   lerpColor(base, '#FFFFFF', 0.28))   // outer edge (top) — lightest
     ctx.beginPath()
     ctx.arc(cx, baseY, r, Math.PI, Math.PI * 2, false)
     ctx.lineWidth   = lw
     ctx.strokeStyle = grad
-    ctx.stroke()
-
-    // Pass C — faint inner-wall shadow just inside the band's inner edge.
-    ctx.beginPath()
-    ctx.arc(cx, baseY, r - lw / 2 + lw * 0.09, Math.PI, Math.PI * 2, false)
-    ctx.lineWidth   = lw * 0.18
-    ctx.strokeStyle = 'rgba(126,98,52,0.10)'
     ctx.stroke()
   }
   return oc
