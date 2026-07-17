@@ -26,7 +26,7 @@ import { createSynergy }   from '../_shared/synergy'
 // it covers twice the path, not because the circle slows down. Which physical
 // lobe (top/bottom) a segment traces alternates continuously every SEGMENT_MS,
 // independent of the inhale/exhale grouping (see getPacing). No holds.
-const SEGMENT_MS       = 3_000
+const SEGMENT_MS       = 4_000   // inhale 4s (1 segment) / exhale 8s (2 segments)
 const INHALE_SEGMENTS  = 1
 const EXHALE_SEGMENTS  = 2
 const CYCLE_MS         = (INHALE_SEGMENTS + EXHALE_SEGMENTS) * SEGMENT_MS

@@ -23,14 +23,14 @@ export default function InfinityGame({ onExit }) {
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [labelGeo, setLabelGeo]                   = useState(null)    // { labelMids, size }
   const [breathLabel, setBreathLabel]             = useState('in')    // 'in' | 'out'
-  const [breathSecondsLeft, setBreathSecondsLeft] = useState(3)
+  const [breathSecondsLeft, setBreathSecondsLeft] = useState(4)
 
   const sessionStartRef = useRef(null)
   const infinityCanvasRef = useRef(null)
   const bgCanvasRef       = useRef(null)
   const pacingCanvasRef   = useRef(null)
   const breathLabelRef       = useRef('in')
-  const breathSecondsLeftRef = useRef(3)
+  const breathSecondsLeftRef = useRef(4)
 
   // Per-rAF-frame tick from InfinityCanvas — only re-render when the displayed
   // breath label or countdown second actually changes, not on every frame.
