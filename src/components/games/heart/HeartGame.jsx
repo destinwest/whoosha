@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import StrokeSelector from '../square/StrokeSelector'   // shared until refactor
 import HeartCanvas from './HeartCanvas'
 import CompletionScreen from '../square/CompletionScreen'
+import { buildHeartFieldBg } from './heartField'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
 // StrokeSelector component, but each toggles its visibility independently.
@@ -10,58 +11,6 @@ const STROKE_SELECTOR_ENABLED = false
 // Game canvas opacity once completion phase begins — the world recedes
 // behind the completion card without vanishing entirely (matches Infinity/Triangle).
 const COMPLETION_CANVAS_OPACITY = 0.25
-
-// ── buildSalmonBg ─────────────────────────────────────────────────────────────
-// Bakes the entire static background into a single offscreen canvas at
-// device-pixel resolution. Design brief: a soft salmon field, more RED than
-// orange (NOT a peachy/orange salmon), radiating from the canvas center
-// outward — a radial gradient, not Triangle's vertical linear sky. No
-// ridges/scenery — just the gradient, baked once per resize; per-frame cost
-// is zero (same "bake once" convention as every other game's background —
-// see POLISH-STRATEGY.md).
-//
-// Stops authored as HSL (hue ~6-12°, which reads as red-leaning coral/salmon
-// — orange starts around 25-35°) so the same paletteColor() scaling lever
-// Triangle uses is available for future tuning, even though the current
-// PALETTE multiplier is a no-op pass-through.
-
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
-function paletteColor(h, s, l, pal, alpha) {
-  const ss = clamp(s * pal.satMul, 0, 100)
-  const ll = clamp(l + pal.lightShift, 0, 100)
-  return alpha === undefined
-    ? `hsl(${h.toFixed(1)},${ss.toFixed(1)}%,${ll.toFixed(1)}%)`
-    : `hsla(${h.toFixed(1)},${ss.toFixed(1)}%,${ll.toFixed(1)}%,${alpha})`
-}
-
-// Radial stops, center → edge: bright warm coral-red at the center, softening
-// and deepening slightly toward the outer edge.
-const SALMON_STOPS = [
-  { t: 0.00, h: 8,  s: 68.0, l: 72.0 },
-  { t: 0.35, h: 9,  s: 58.0, l: 66.0 },
-  { t: 0.65, h: 10, s: 48.0, l: 58.0 },
-  { t: 1.00, h: 12, s: 40.0, l: 48.0 },
-]
-
-const SALMON_PALETTE = { satMul: 1.0, lightShift: 0.0 }
-
-function buildSalmonBg(w, h, dpr) {
-  const oc = document.createElement('canvas')
-  oc.width  = w * dpr
-  oc.height = h * dpr
-  const ctx = oc.getContext('2d')
-  ctx.scale(dpr, dpr)
-
-  const cx = w / 2
-  const cy = h / 2
-  const outerR = Math.hypot(w, h) / 2   // reaches the farthest corner
-  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR)
-  for (const stop of SALMON_STOPS) grad.addColorStop(stop.t, paletteColor(stop.h, stop.s, stop.l, SALMON_PALETTE))
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, w, h)
-
-  return oc
-}
 
 // 2-half label sequence: the path splits at the exact vertical centerline —
 // left half (cleft → bottom point, through the left lobe) is "breathe in",
@@ -90,7 +39,7 @@ export default function HeartGame({ onExit }) {
   const bgCanvasRef      = useRef(null)
   const pacingCanvasRef  = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
 
-  // ── Salmon-radial background — baked once per resize ─────────────────────────
+  // ── Heart-field background — baked once per resize ───────────────────────────
   useEffect(() => {
     const el = bgCanvasRef.current
     if (!el) return
@@ -102,7 +51,7 @@ export default function HeartGame({ onExit }) {
       const dpr = window.devicePixelRatio || 1
       el.width  = w * dpr
       el.height = h * dpr
-      el.getContext('2d').drawImage(buildSalmonBg(w, h, dpr), 0, 0)
+      el.getContext('2d').drawImage(buildHeartFieldBg(w, h, dpr), 0, 0)
     }
 
     draw()
