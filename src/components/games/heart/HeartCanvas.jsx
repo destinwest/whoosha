@@ -30,6 +30,7 @@
 import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
 import * as stampStroke   from '../square/strokes/stampStroke'
 import * as layeredWash   from '../square/strokes/layeredWash'
+import { mulberry32 }     from '../_shared/nightSky'
 
 // ── HEART-SPECIFIC: shape + timing ───────────────────────────────────────────
 const SIDES                 = 2   // left half (breathe in) / right half (breathe out)
@@ -495,6 +496,129 @@ function buildTrackGradient(ctx, { cx, cy, R, lw }) {
   return grad
 }
 
+// ── HEART-SPECIFIC: candy-heart track texture ────────────────────────────────
+// Bakes the track band once per resize as a "conversation heart" surface — the
+// chalky, compacted-sugar look of Valentine candy hearts (user ref, 2026-07-18).
+// Abstraction over replication: the read comes from a soft pastel dome + uneven
+// low-frequency mottle + fine high-frequency sugar grain + sparse crystal
+// glints, NOT a literal candy photo.
+//
+// Per POLISH-STRATEGY: every blend is done IN THE BAKE (globalCompositeOperation
+// below), and the result is drawn each frame as a single source-over bitmap —
+// per-frame cost is one drawImage, zero blend/filter. It REPLACES drawTrackBody's
+// live gradient stroke (a stroke → a bitmap; net per-frame cost ≈ neutral).
+//
+// The band SILHOUETTE is defined by STROKING the centerline at lw — byte-for-byte
+// the same call drawTrackBody makes — so the hard-won cleft/tip geometry is
+// untouched. Every texture pass after the base stroke uses 'source-atop', which
+// clips it to that exact stroked silhouette (no reliance on the outerEdge/
+// innerEdge polygon approximation).
+const CANDY_SEED = 0x48E7   // "heart"
+// Pastel dome, chalky soft pink: lit sugar-white crown → candy pink → seated
+// deeper rose at the outer edge. Radial, matching the track gradient's geometry.
+const CANDY_GRAD = [
+  { t: 0.00, c: '#FCDEE8' },
+  { t: 0.45, c: '#F3C1D3' },
+  { t: 1.00, c: '#E4A1BC' },
+]
+// Low-frequency mottle — the uneven compacted-powder patchiness. Dominant rose
+// light/dark, plus faint whispers of the rest of the assortment (mint / lemon /
+// lavender) so one heart quietly hints at the whole candy box.
+const CANDY_MOTTLE = [
+  { rgb: '255,251,253', aMax: 0.32 },   // sugar-white lift
+  { rgb: '212,146,173', aMax: 0.24 },   // deeper rose pocket
+  { rgb: '203,229,205', aMax: 0.09 },   // whisper mint
+  { rgb: '245,235,189', aMax: 0.09 },   // whisper lemon
+  { rgb: '221,205,236', aMax: 0.09 },   // whisper lavender
+]
+const CANDY_MOTTLE_COUNT = 44
+const CANDY_GRAIN_TILE   = 96     // px; small chalky-noise tile, pattern-repeated
+const CANDY_GRAIN_ALPHA  = 0.085  // subtle high-freq dither — "sugar", not TV static
+const CANDY_GLINT_COUNT  = 30     // sparse bright sugar crystals
+
+// A small tileable chalky-noise pattern. Skewed light (sugar) with occasional
+// darker grains so it reads as pressed powder, not neutral gray static.
+function buildCandyGrainTile(rand) {
+  const tile = document.createElement('canvas')
+  tile.width = tile.height = CANDY_GRAIN_TILE
+  const tctx = tile.getContext('2d')
+  const img = tctx.createImageData(CANDY_GRAIN_TILE, CANDY_GRAIN_TILE)
+  const d = img.data
+  for (let i = 0; i < d.length; i += 4) {
+    const v = 120 + ((rand() * 135) | 0)   // 120–255, skewed to light sugar
+    d[i] = d[i + 1] = d[i + 2] = v
+    d[i + 3] = 255
+  }
+  tctx.putImageData(img, 0, 0)
+  return tile
+}
+
+function buildCandyBand(geo, dpr) {
+  const { w, h, cx, cy, S, R, lw, segs } = geo
+  const oc = document.createElement('canvas')
+  oc.width  = w * dpr
+  oc.height = h * dpr
+  const ctx = oc.getContext('2d')
+  ctx.scale(dpr, dpr)
+  const rand = mulberry32(CANDY_SEED)
+
+  // 1 ─ Base pastel dome — stroke the centerline exactly like drawTrackBody.
+  const innerR = Math.max(0, R * 0.5 - lw / 2)
+  const outerR = R + lw / 2
+  const dome = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
+  for (const s of CANDY_GRAD) dome.addColorStop(s.t, s.c)
+  ctx.beginPath()
+  heartPath(ctx, segs)
+  ctx.lineWidth   = lw
+  ctx.lineJoin    = TRACK_LINE_JOIN
+  ctx.strokeStyle = dome
+  ctx.stroke()
+
+  // Confine everything below to the exact stroked band silhouette.
+  ctx.globalCompositeOperation = 'source-atop'
+
+  const halfW = S * HEART_HALF_WIDTH + lw / 2
+  const halfH = R + lw / 2
+
+  // 2 ─ Mottle: soft uneven patches of the assortment palette.
+  for (let i = 0; i < CANDY_MOTTLE_COUNT; i++) {
+    const cls = CANDY_MOTTLE[(rand() * CANDY_MOTTLE.length) | 0]
+    const px  = cx + (rand() * 2 - 1) * halfW
+    const py  = cy + (rand() * 2 - 1) * halfH
+    const rad = lw * (0.35 + rand() * 0.95)
+    const a   = cls.aMax * (0.4 + rand() * 0.6)
+    const g = ctx.createRadialGradient(px, py, 0, px, py, rad)
+    g.addColorStop(0, `rgba(${cls.rgb},${a.toFixed(3)})`)
+    g.addColorStop(1, `rgba(${cls.rgb},0)`)
+    ctx.fillStyle = g
+    ctx.fillRect(px - rad, py - rad, rad * 2, rad * 2)
+  }
+
+  // 3 ─ Fine sugar grain — chalky high-freq dither, pattern-tiled over the band.
+  const grainTile = buildCandyGrainTile(rand)
+  const pat = ctx.createPattern(grainTile, 'repeat')
+  if (pat) {
+    ctx.globalAlpha = CANDY_GRAIN_ALPHA
+    ctx.fillStyle   = pat
+    ctx.fillRect(cx - halfW, cy - halfH, halfW * 2, halfH * 2)
+    ctx.globalAlpha = 1
+  }
+
+  // 4 ─ Crystal glints — sparse bright sugar specks catching the light.
+  for (let i = 0; i < CANDY_GLINT_COUNT; i++) {
+    const px = cx + (rand() * 2 - 1) * halfW
+    const py = cy + (rand() * 2 - 1) * halfH
+    const r  = 0.6 + rand() * 1.1
+    ctx.beginPath()
+    ctx.arc(px, py, r, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(255,252,250,${(0.22 + rand() * 0.30).toFixed(3)})`
+    ctx.fill()
+  }
+
+  ctx.globalCompositeOperation = 'source-over'
+  return oc
+}
+
 // ── lineJoin: why 'round' matters here ───────────────────────────────────────
 // The centerline has ONE real corner: the cleft (a ~37° deflection). Canvas
 // treats the two sides of a corner differently:
@@ -701,6 +825,7 @@ const HeartCanvas = forwardRef(function HeartCanvas(
   const clipArgsRef      = useRef(null)
   const trackGeoRef      = useRef(null)   // CSS px track centerline geometry
   const trackGradientRef = useRef(null)   // cached Pass B gradient (rebuilt on resize)
+  const candyBandRef     = useRef(null)   // baked candy-heart band bitmap (rebuilt on resize)
 
   // ── Game state refs ────────────────────────────────────────────────────────
   const pacingStartRef       = useRef(null)    // clock for pacing circle — starts at mount
@@ -1186,6 +1311,7 @@ const HeartCanvas = forwardRef(function HeartCanvas(
       }
       trackGeoRef.current      = trackGeo
       trackGradientRef.current = buildTrackGradient(ctx, trackGeo)
+      candyBandRef.current     = buildCandyBand(geoRef.current, dpr)
 
       const color = getDriftColor(colorTimeRef.current)
       stampStroke.init({ paintCtx, lw, dpr, color })
@@ -1227,8 +1353,10 @@ const HeartCanvas = forwardRef(function HeartCanvas(
       const trackGeo = trackGeoRef.current
       if (trackGeo) {
         drawTrackShadow(ctx, trackGeo)
-        drawTrackBody(ctx, trackGeo, trackGradientRef.current)
-        // drawTrackHighlight(ctx, trackGeo)
+        // Candy-heart band: baked chalky-pastel bitmap in place of the live
+        // gradient stroke (falls back to the stroke until the first bake lands).
+        if (candyBandRef.current) ctx.drawImage(candyBandRef.current, 0, 0, W, H)
+        else drawTrackBody(ctx, trackGeo, trackGradientRef.current)
         drawTrackInnerWall(ctx, trackGeo)
       }
 
