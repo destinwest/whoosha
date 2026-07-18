@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { REGION_CENTER_RATIO } from '../_shared/cardLayout'
 
 // ── RainbowCardPreview ────────────────────────────────────────────────────────
 // The Rainbow counterpart to the other games' CardPreviews: a soft, muted
@@ -30,7 +31,14 @@ function drawScene(ctx, w, h) {
   const outerR = size / 2 - lw / 2
   const radii  = [outerR - 3 * step, outerR - 2 * step, outerR - step, outerR]
   const cx     = w / 2
-  const baseY  = h / 2 + outerR * 0.55
+
+  // Center the rainbow + clouds block in the region above the title, matching
+  // every other card (cardLayout.REGION_CENTER_RATIO), instead of the old
+  // hand-tuned low placement. The painted block runs from the arc's top
+  // (baseY − outerR − lw/2) down to where the clouds hang below the baseline;
+  // centering its midpoint on the region center solves for baseY.
+  const cloudDrop = lw * 1.9                        // clouds hang ~this far below the baseline
+  const baseY     = h * REGION_CENTER_RATIO + (outerR + lw / 2) / 2 - cloudDrop / 2
 
   // Bands, bottom → top (purple, green, yellow, red).
   for (let a = 0; a < 4; a++) {
