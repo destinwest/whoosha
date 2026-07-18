@@ -19,13 +19,17 @@ import { createHeatGauge } from '../_shared/heatGauge'
 import { createSynergy }   from '../_shared/synergy'
 
 // ── Breath timing ─────────────────────────────────────────────────────────────
-// Lazy-8: one full cycle = inhale (trace the TOP loop) + exhale (trace the
-// BOTTOM loop). No holds. Bedtime pace — calm and slow. Equal in/out for now;
-// split into unequal durations later (getPacing + pacingRate already localize
-// the assumption). CYCLE_MS is derived so the two always agree.
-const INHALE_MS = 5_000
-const EXHALE_MS = 5_000
-const CYCLE_MS  = INHALE_MS + EXHALE_MS
+// Lazy-8, constant-speed pacing circle: SEGMENT_MS is how long it takes to trace
+// ONE lobe (center → lobe → center) — always the same duration and speed. Inhale
+// is a single segment (one lobe); exhale is two consecutive segments (one full
+// lap of both lobes) — i.e. exhale takes exactly twice as long as inhale because
+// it covers twice the path, not because the circle slows down. Which physical
+// lobe (top/bottom) a segment traces alternates continuously every SEGMENT_MS,
+// independent of the inhale/exhale grouping (see getPacing). No holds.
+const SEGMENT_MS       = 4_000   // inhale 4s (1 segment) / exhale 8s (2 segments)
+const INHALE_SEGMENTS  = 1
+const EXHALE_SEGMENTS  = 2
+const CYCLE_MS         = (INHALE_SEGMENTS + EXHALE_SEGMENTS) * SEGMENT_MS
 
 // ── Figure-8 footprint ────────────────────────────────────────────────────────
 // The centerline is a vertical lemniscate of Bernoulli. Its raw form has a fixed
@@ -226,9 +230,11 @@ function buildTipFadeGradient(ctx, x0, y0, x1, y1, colorRGB) {
 // ── buildGeo ──────────────────────────────────────────────────────────────────
 // Samples the vertical lemniscate into a point array + cumulative arc-lengths.
 // Parameter s ∈ [0,1) walks the whole closed path; t = 3π/2 + s·2π so that:
-//   s ∈ [0, 0.5)  → TOP loop    (center → top → center)   — INHALE
-//   s ∈ [0.5, 1)  → BOTTOM loop (center → bottom → center) — EXHALE
-// Starting at the center means each breath phase is exactly one lobe.
+//   s ∈ [0, 0.5)  → TOP loop    (center → top → center)   — one lobe segment
+//   s ∈ [0.5, 1)  → BOTTOM loop (center → bottom → center) — one lobe segment
+// Starting at the center means each lobe segment is a clean center-to-center
+// trip. Which lobe maps to inhale vs. exhale is NOT fixed here — it alternates
+// continuously across segments (see getPacing's segIndex parity).
 function buildGeo(rect) {
   const w  = rect.width
   const h  = rect.height
@@ -272,8 +278,8 @@ function buildGeo(rect) {
   // Label anchors — vertical middle of each lobe, centered on the axis (sits in
   // the lobe's hole, between the two strands, so text stays clear of the track).
   const labelMids = [
-    { x: cx, y: cy - scaleY * 0.5 },   // 0 — top lobe   — "breathe in"
-    { x: cx, y: cy + scaleY * 0.5 },   // 1 — bottom lobe — "breathe out"
+    { x: cx, y: cy - scaleY * 0.5 },   // 0 — top-lobe screen slot   — breathe in/out label
+    { x: cx, y: cy + scaleY * 0.5 },   // 1 — bottom-lobe screen slot — countdown number
   ]
 
   return {
@@ -466,15 +472,29 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
   }), [])
 
   // ── Pacing circle position (lazy-8) ─────────────────────────────────────────
+  // Segment index alternates which physical lobe is traced (top, bottom, top,
+  // bottom…) every SEGMENT_MS, forever — it does NOT reset per breath phase.
+  // Phase (in/out) is a separate grouping on top of that: the first segment of
+  // each CYCLE_MS window is inhale, the next two are exhale.
   function getPacing(elapsed) {
     const geo = geoRef.current
     if (!geo) return null
-    const cyc = ((elapsed % CYCLE_MS) + CYCLE_MS) % CYCLE_MS
-    let f, phase
-    if (cyc < INHALE_MS) { f = (cyc / INHALE_MS) * 0.5; phase = 'in' }        // top lobe
-    else                 { f = 0.5 + ((cyc - INHALE_MS) / EXHALE_MS) * 0.5; phase = 'out' } // bottom lobe
-    const p = pointAtArcFrac(geo, f)
-    return { x: p.x, y: p.y, fraction: f * geo.sides, phase }
+
+    const e        = Math.max(0, elapsed)
+    const segIndex = Math.floor(e / SEGMENT_MS)
+    const segFrac  = (e - segIndex * SEGMENT_MS) / SEGMENT_MS
+    const lobe     = segIndex % 2 === 0 ? 0 : 1   // 0 = top lobe, 1 = bottom lobe
+    const f        = lobe === 0 ? segFrac * 0.5 : 0.5 + segFrac * 0.5
+    const p        = pointAtArcFrac(geo, f)
+
+    const inhaleMs = SEGMENT_MS * INHALE_SEGMENTS
+    const cyc      = ((e % CYCLE_MS) + CYCLE_MS) % CYCLE_MS
+    const phase    = cyc < inhaleMs ? 'in' : 'out'
+    const secondsLeft = phase === 'in'
+      ? Math.max(1, Math.ceil((inhaleMs - cyc) / 1000))
+      : Math.max(1, Math.ceil((CYCLE_MS - cyc) / 1000))
+
+    return { x: p.x, y: p.y, fraction: f * geo.sides, phase, secondsLeft }
   }
 
   // ── Pointer handlers ─────────────────────────────────────────────────────────
@@ -816,10 +836,10 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
       if (!tracingRef.current) childPathRateRef.current = 0
 
       // ── Heat gauge ─────────────────────────────────────────────────────────
-      // pacingRate = fraction-units per ms the pacing circle covers (sides per
-      // CYCLE_MS with equal in/out durations).
+      // pacingRate = fraction-units (sides) per ms the pacing circle covers —
+      // constant, since one lobe (= 1 side) always takes SEGMENT_MS.
       if (startedRef.current) {
-        const pacingRate = geo.sides / CYCLE_MS
+        const pacingRate = 1 / SEGMENT_MS
         const speedRatio = childPathRateRef.current / pacingRate
         const r = gaugeMachineRef.current.update(dt, { speedRatio, touching: tracingRef.current })
         gaugeActiveRef.current = r.gaugeActive
@@ -834,7 +854,7 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
         if (canEvaluate) {
           const child      = childPosRef.current
           const dist       = Math.hypot(child.clx - pacingPos.x, child.cly - pacingPos.y)
-          const speedRatio = childPathRateRef.current / (geo.sides / CYCLE_MS)
+          const speedRatio = childPathRateRef.current / (1 / SEGMENT_MS)
           close  = dist <= lw * SYNERGY_DIST_THRESHOLD_LW
           inPace = speedRatio <= GAUGE_SPEED_THRESHOLD
         }
@@ -922,13 +942,15 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
 
       // ── External state snapshot (sound director) ──────────────────────────
       if (onGameStateTick) {
-        const pacingRate = geo.sides / CYCLE_MS
+        const pacingRate = 1 / SEGMENT_MS
         onGameStateTick({
           gaugeEffect:  gaugeEffectRef.current,
           gaugeActive:  gaugeActiveRef.current,
           synergyStage: synergyStageRef.current,
           breathPhase:  ((now - pacingStartRef.current) % CYCLE_MS) / CYCLE_MS,
           speedRatio:   childPathRateRef.current / pacingRate,
+          breathLabel:       pacingPos ? pacingPos.phase       : 'in',
+          breathSecondsLeft: pacingPos ? pacingPos.secondsLeft : INHALE_SEGMENTS * SEGMENT_MS / 1000,
         })
       }
     }

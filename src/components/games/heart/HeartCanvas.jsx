@@ -43,12 +43,25 @@ const SIDE_START_MS = SIDE_DURATIONS_MS.reduce((acc, dur, i) => {
 }, [])
 
 // ── HEART-SPECIFIC: unit-space path definition ───────────────────────────────
-// A classic heart traced as 6 mirrored cubic Beziers, derived from the app's
-// own heart glyph (GameShape.jsx's 'heart' icon, 100×100 viewBox) so the game
-// track matches the icon's proportions. Coordinates below are that icon's
-// path shifted so its bounding-box center sits at (0,0): bbox is 72 wide
-// (x: -36..36) × 76 tall (y: -38..38). Traversal starts at the top-center
-// cleft (the dip between the two lobes) and runs:
+// A classic heart traced as 6 mirrored cubic Beziers, fitted to the user's
+// reference SVG ("simple-rounded-heart-shape-outline", 2026-07-16). That icon's
+// OUTER contour was parsed (its group transform translate(0,980) scale(0.1,-0.1)
+// applied), its TRUE geometric anchors measured — lobe crown at the real min-y
+// (|x|≈18.3, not the potrace segment junction ≈20.1 the first fit used) and
+// widest at the real min-x (|x|≈42.2 @ y≈-12.7, not ≈-9.0) — and a cubic fitted
+// per left-half arc (crown/widest via 4-pt interpolation; the long widest→bottom
+// arc via endpoint tangents: vertical at the widest, horizontal at the tip).
+// Right half is an exact mirror. See scratchpad analyze_heart.mjs, fit_heart.mjs,
+// fit_heart2.mjs for the derivation and the SVG-overlay comparison.
+//
+// Coordinates are centered at (0,0), y-down, scaled to half-height 38. The key
+// property vs. the previous version: the reference heart is WIDER THAN TALL
+// (half-width 42.3 vs half-height 38, aspect 1.11) with full round lobes — the
+// old track was narrower/taller (half-width 36), which pinched the lobes
+// together and made the cleft read as a deep sharp gash. Widening the lobes
+// opens the cleft into the broad shallow valley the reference shows.
+//
+// Traversal starts at the top-center cleft (the dip between the two lobes):
 //   seg 0  cleft        → leftLobeTop   ┐
 //   seg 1  leftLobeTop  → leftExtreme   ├─ LEFT HALF  (breathe in)
 //   seg 2  leftExtreme  → bottom        ┘
@@ -58,16 +71,57 @@ const SIDE_START_MS = SIDE_DURATIONS_MS.reduce((acc, dur, i) => {
 // Left/right halves are exact mirrors (x negated), so they have identical arc
 // length — the fraction split at SIDES=2 lands exactly on the vertical
 // centerline (cleft and bottom point), matching the design spec.
+//
+// The BOTTOM tip is rounded via a horizontal tangent (bottom arm 8): the two
+// segments meeting there share a level tangent, so it reads as a filleted point
+// rather than a spike.
+//
+// The CLEFT is deliberately tuned so the band's OUTER notch comes to a SHARP
+// point, matching the reference SVG (user, 2026-07-16). The mechanism is
+// non-obvious and easy to break, so: the band is drawn by STROKING this
+// centerline with width lw, which offsets the outer edge TOWARD the cleft's
+// center of curvature. So the outer notch radius = (centerline cleft radius) -
+// lw/2. That gives three regimes:
+//   radius >  lw/2  -> outer notch stays visibly rounded
+//   radius ≈  lw/2  -> outer notch collapses to a sharp point   <-- what we want
+//   radius <  lw/2  -> outer edge SELF-INTERSECTS and blunts itself (worse, not
+//                      sharper — a naive "make it sharper" change lands here)
+// The inner edge meanwhile gets radius + lw/2, i.e. a rounded bulge into the
+// opening. That bulge is NOT an artifact — it is what any thick ring does at a
+// sharp cleft, and the reference SVG has one too (its bulge ≈ its ring
+// thickness). So no taper is needed.
+//
+// lw/2 in THIS unit space is (5.53 + 4/S), which drifts with screen scale S:
+// ≈7.13 on a narrow phone, ≈6.86 at mobile, ≈6.03 on a large screen. The cleft
+// below (y=-28.8, control arm toward the crown) is tuned to a radius of ≈7.23 —
+// just above the worst case — so the notch is sharp on every size and never
+// folds on small screens. Re-tune with scratchpad/tune_cleft.mjs if lw changes.
+//
+// The SAME radius-vs-lw/2 rule bites on the INNER edge, in the opposite sense.
+// Wherever the centerline bends TOWARD the inside of the heart with radius <
+// lw/2, the inner edge folds back through itself and the stroke fills the
+// overlap — which reads as a hard CORNER on the inner edge while the outer edge
+// stays smooth (user reported exactly this at the crown, 2026-07-16). So on any
+// inward-bending stretch, keep radius comfortably > lw/2.
+//
+// That is why the crown (segs 0/1 and their mirrors 4/5) is G2-continuous, not
+// just G1: both arcs are tuned to a COMMON crown radius of 24.39 — measured
+// from the reference SVG's own crown — so curvature does not jump across the
+// join (an earlier fit matched only tangents, leaving a 4.4x curvature jump and
+// a radius of 4.83 that folded). Matching the SVG's real curvature also pulls
+// the lobe CLOSER to the reference (max deviation 1.18u -> 0.28u). If you retune
+// the crown, keep segs 0 and 1 sharing one radius and keep it > lw/2:
+// scratchpad/fix_crown.mjs solves the control arms for both.
 const HEART_UNIT_SEGS = [
-  { p0: { x: 0,   y: -30 }, c1: { x: -2,  y: -35 }, c2: { x: -6,  y: -38 }, p1: { x: -12, y: -38 } },
-  { p0: { x: -12, y: -38 }, c1: { x: -24, y: -38 }, c2: { x: -36, y: -30 }, p1: { x: -36, y: -14 } },
-  { p0: { x: -36, y: -14 }, c1: { x: -36, y: 12  }, c2: { x: 0,   y: 38  }, p1: { x: 0,   y: 38  } },
-  { p0: { x: 0,   y: 38  }, c1: { x: 0,   y: 38  }, c2: { x: 36,  y: 12  }, p1: { x: 36,  y: -14 } },
-  { p0: { x: 36,  y: -14 }, c1: { x: 36,  y: -30 }, c2: { x: 24,  y: -38 }, p1: { x: 12,  y: -38 } },
-  { p0: { x: 12,  y: -38 }, c1: { x: 6,   y: -38 }, c2: { x: 2,   y: -35 }, p1: { x: 0,   y: -30 } },
+  { p0: { x: 0, y: -28.8 }, c1: { x: -5.23, y: -30.57 }, c2: { x: -7.36, y: -37.98 }, p1: { x: -18.34, y: -37.98 } },
+  { p0: { x: -18.34, y: -37.98 }, c1: { x: -32.44, y: -37.98 }, c2: { x: -42.76, y: -25.75 }, p1: { x: -42.16, y: -12.73 } },
+  { p0: { x: -42.16, y: -12.73 }, c1: { x: -42.16, y: 9.26 }, c2: { x: -8, y: 38 }, p1: { x: 0, y: 38 } },
+  { p0: { x: 0, y: 38 }, c1: { x: 8, y: 38 }, c2: { x: 42.16, y: 9.26 }, p1: { x: 42.16, y: -12.73 } },
+  { p0: { x: 42.16, y: -12.73 }, c1: { x: 42.76, y: -25.75 }, c2: { x: 32.44, y: -37.98 }, p1: { x: 18.34, y: -37.98 } },
+  { p0: { x: 18.34, y: -37.98 }, c1: { x: 7.36, y: -37.98 }, c2: { x: 5.23, y: -30.57 }, p1: { x: 0, y: -28.8 } },
 ]
-const HEART_HALF_WIDTH  = 36  // unit-space half-width  (x: -36..36)
-const HEART_HALF_HEIGHT = 38  // unit-space half-height (y: -38..38)
+const HEART_HALF_WIDTH  = 42.3  // unit-space half-width  (x: -42.3..42.3)
+const HEART_HALF_HEIGHT = 38    // unit-space half-height (y: -38..38)
 const STEPS_PER_SEG      = 60  // sample density per bezier segment
 
 function cubicPoint(p0, c1, c2, p1, t) {
@@ -82,21 +136,21 @@ function cubicPoint(p0, c1, c2, p1, t) {
   }
 }
 
-// Scales+translates the unit-space segment list into pixel space, optionally
-// applying a uniform radial offset (offsetPx, in pixels) about the shape's own
-// center — used to approximate the outer/inner track boundaries for the paint
-// clip and inner-wall stroke. Not a true perpendicular curve-offset (that's
-// not closed-form for beziers), but a uniform scale-about-center is a fine
-// approximation at the small offsets (~lw) used here relative to the shape's
-// overall radius, and the heart is close enough to star-convex about its
-// center for this to look correct.
-function scaledHeartSegs(cx, cy, S, offsetPx = 0) {
-  const Seff = S + offsetPx / HEART_HALF_HEIGHT
+// Scales+translates the unit-space segment list into pixel space — this is the
+// CENTERLINE in pixels, nothing more.
+//
+// It used to take an `offsetPx` and fake the band's boundaries by scaling the
+// whole heart about its centre. Don't bring that back: a radial scale displaces
+// by offsetPx*(r/38), which only equals a perpendicular offset where r == 38, so
+// the "boundaries" drifted (~24% short at the cleft, ~16% over at the widest)
+// and the inner-wall shadow and paint clip sat off the visible edge. bandEdge()
+// computes the real boundaries; use those.
+function scaledHeartSegs(cx, cy, S) {
   return HEART_UNIT_SEGS.map(seg => ({
-    p0: { x: cx + seg.p0.x * Seff, y: cy + seg.p0.y * Seff },
-    c1: { x: cx + seg.c1.x * Seff, y: cy + seg.c1.y * Seff },
-    c2: { x: cx + seg.c2.x * Seff, y: cy + seg.c2.y * Seff },
-    p1: { x: cx + seg.p1.x * Seff, y: cy + seg.p1.y * Seff },
+    p0: { x: cx + seg.p0.x * S, y: cy + seg.p0.y * S },
+    c1: { x: cx + seg.c1.x * S, y: cy + seg.c1.y * S },
+    c2: { x: cx + seg.c2.x * S, y: cy + seg.c2.y * S },
+    p1: { x: cx + seg.p1.x * S, y: cy + seg.p1.y * S },
   }))
 }
 
@@ -195,6 +249,88 @@ function lerpColor(hexA, hexB, t) {
   return `rgb(${Math.round(ar + (br - ar) * t)},${Math.round(ag + (bg - ag) * t)},${Math.round(ab + (bb - ab) * t)})`
 }
 
+// ── bandEdge ──────────────────────────────────────────────────────────────────
+// The visible band is drawn by STROKING the centerline, so its true boundaries
+// are the centerline perpendicular-offset by ±lw/2. They are NOT a scaled copy
+// of the heart: scaledHeartSegs displaces RADIALLY by offsetPx*(r/38), which
+// only equals a perpendicular offset where r == 38. Everywhere else it drifts —
+// ~24% short at the cleft (r≈28.8), ~16% over at the widest (r≈44). The depth
+// passes and the paint clip used to ride that scaled copy, so they sat off the
+// edge the player actually sees. This returns the real edge instead.
+//
+// `d` is signed: + = outward (away from centre), − = inward. Two details make
+// the result match what canvas actually strokes:
+//   - The cleft is a real CORNER. On the OUTSIDE of that turn (the inner edge,
+//     d < 0) the stroke leaves a gap that lineJoin fills, so we insert a round
+//     arc to match TRACK_LINE_JOIN. On the INSIDE (the outer edge, d > 0) the
+//     two offsets overlap and the union is a sharp point — the prune below
+//     resolves that for free, which is what keeps the outer V.
+//   - Wherever the centerline bends toward the offset side tighter than |d|
+//     (the bottom tip, radius 3.34 < lw/2), the offset folds through itself.
+//     Those points land inside the stroke and are pruned — that is exactly what
+//     leaves the bottom V intact.
+// O(n²) prune, but n≈360 and this runs once per RESIZE, never per frame.
+function bandEdge(points, d, cx, cy) {
+  const N = points.length - 1        // points[N] duplicates points[0] (closed)
+  const P = points.slice(0, N)
+  const n = P.length
+  if (n < 8) return P
+  const ad = Math.abs(d)
+  // unit normal of segment a→b, flipped to always point AWAY from the centre
+  const segNormal = (a, b, at) => {
+    let tx = b.x - a.x, ty = b.y - a.y
+    const L = Math.hypot(tx, ty) || 1
+    tx /= L; ty /= L
+    let nx = -ty, ny = tx
+    if (nx * (at.x - cx) + ny * (at.y - cy) < 0) { nx = -nx; ny = -ny }
+    return { x: nx, y: ny }
+  }
+  const E = []
+  const off = (p, nn) => ({ x: p.x + nn.x * d, y: p.y + nn.y * d })
+  // index 0 is the cleft corner — use one-sided normals, not a central diff
+  const nIn  = segNormal(P[n - 1], P[0], P[0])
+  const nOut = segNormal(P[0], P[1], P[0])
+  E.push(off(P[0], nIn))
+  if (d < 0) {
+    // inner edge = outside of the turn → gap → round arc (matches lineJoin)
+    const a0 = Math.atan2(nIn.y * d, nIn.x * d)
+    const a1 = Math.atan2(nOut.y * d, nOut.x * d)
+    let da = a1 - a0
+    while (da >  Math.PI) da -= 2 * Math.PI
+    while (da < -Math.PI) da += 2 * Math.PI
+    const steps = Math.max(2, Math.ceil(Math.abs(da) / 0.12))
+    for (let k = 1; k < steps; k++) {
+      const a = a0 + da * (k / steps)
+      E.push({ x: P[0].x + Math.cos(a) * ad, y: P[0].y + Math.sin(a) * ad })
+    }
+  }
+  E.push(off(P[0], nOut))
+  for (let i = 1; i < n; i++) {
+    E.push(off(P[i], segNormal(P[(i - 1 + n) % n], P[(i + 1) % n], P[i])))
+  }
+  // Drop offset points that landed inside the stroke (the fold loops). A valid
+  // point sits |d| from its own centerline point and no closer to any other.
+  const keep = []
+  for (const q of E) {
+    let m = Infinity
+    for (const p of P) {
+      const dd = Math.hypot(q.x - p.x, q.y - p.y)
+      if (dd < m) { m = dd; if (m < ad * 0.9) break }
+    }
+    if (m >= ad * 0.9) keep.push(q)
+  }
+  return keep.length > 8 ? keep : E
+}
+
+// Traces a point-array edge (from bandEdge) into the current path. `k` scales
+// into device px for the paint canvas.
+function polyPath(ctx, pts, k = 1) {
+  if (!pts || !pts.length) return
+  ctx.moveTo(pts[0].x * k, pts[0].y * k)
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x * k, pts[i].y * k)
+  ctx.closePath()
+}
+
 // ── buildGeo ──────────────────────────────────────────────────────────────────
 // ── HEART-SPECIFIC: geometry ─────────────────────────────────────────────────
 // Builds the centerline geometry for the heart track by sampling the 6-segment
@@ -212,10 +348,12 @@ function buildGeo(rect) {
   const cx = w / 2
   const cy = h / 2
 
-  // Uniform scale from unit heart-space (half-width 36, half-height 38) into
-  // pixel space. Coefficients leave margin for the track width + vignette,
-  // tuned by eye alongside the other shapes' fit coefficients.
-  const S = Math.min(w * 0.40 / HEART_HALF_WIDTH, h * 0.42 / HEART_HALF_HEIGHT)
+  // Uniform scale from unit heart-space (half-width 42.3, half-height 38) into
+  // pixel space. FIT shrinks the whole heart to leave comfortable window margin
+  // — the reference-matched shape is wider than before, and the user asked for
+  // it ~15% smaller so it sits well inside the frame (2026-07-16).
+  const FIT = 0.85
+  const S = Math.min(w * 0.40 * FIT / HEART_HALF_WIDTH, h * 0.42 * FIT / HEART_HALF_HEIGHT)
 
   // "Circumradius"-equivalent size handle (half-height in pixel space) —
   // drives the track width using the same 0.0728 coefficient the other games
@@ -268,10 +406,18 @@ function buildGeo(rect) {
   // full pixel height (2×R) as the analogous "size" handle.
   const sq = 2 * R
 
+  // The band's TRUE boundaries — what the stroke actually paints. The inner-wall
+  // shadow and the paint clip both ride these so they land on the edge the
+  // player sees (they used to ride a scaled copy and drifted off it). Computed
+  // once here, per resize.
+  const outerEdge = bandEdge(points, +lw / 2, cx, cy)
+  const innerEdge = bandEdge(points, -lw / 2, cx, cy)
+
   return {
     cx, cy, sq, S, R, lw,
     segs,
     points, labelMids,
+    outerEdge, innerEdge,
     cumLen, totalPathLength,
     sides: SIDES,
     w, h,
@@ -280,16 +426,24 @@ function buildGeo(rect) {
 
 
 // ── Racetrack draw passes (heart) ────────────────────────────────────────────
-// trackGeo: { cx, cy, S, lw } — CSS px. The heart's outline is retraced fresh
-// each frame via heartPath(ctx, segs) (cheap vector math, matches Triangle's
-// per-frame roundedPolyPath retrace) with different stroke widths/styles to
-// build the layered "raised channel" effect. Warm cream tones (the track/
-// stroke color per design spec) instead of Triangle's cool slate.
+// trackGeo: { cx, cy, S, R, lw, segs, outerEdge, innerEdge } — CSS px.
+// Retraced fresh each frame (cheap vector math, matches Triangle's per-frame
+// roundedPolyPath retrace) with different widths/styles to build the layered
+// "raised channel" effect. Warm cream tones (the track/stroke color per design
+// spec) instead of Triangle's cool slate.
 //
-// Inner-wall inset: scaledHeartSegs(cx, cy, S, offsetPx) approximates a
-// perpendicular inward offset by uniformly scaling the whole heart about its
-// own center — see that function's own comment for why this is good enough
-// at these small offsets relative to the shape's overall radius.
+// The passes stack outward-in, and each one is anchored to the geometry it
+// actually belongs to:
+//   A drawTrackShadow    — strokes the CENTERLINE wider than the band, so the
+//                          dark bleeds past the outer edge as a drop shadow.
+//   B drawTrackBody      — strokes the CENTERLINE at lw. This IS the band, so
+//                          its edges define the real boundaries.
+//   D drawTrackInnerWall — strokes `innerEdge`, the band's REAL inner boundary
+//                          from bandEdge(), seating the inner edge into the
+//                          field. (Was a scaledHeartSegs copy, which drifted off
+//                          that edge — see bandEdge for the numbers.)
+// Anything that needs to sit ON an edge must use outerEdge/innerEdge, never a
+// scaled copy of the heart.
 
 // Called once per resize — returns a radial gradient for Pass B.
 function buildTrackGradient(ctx, { cx, cy, R, lw }) {
@@ -302,12 +456,31 @@ function buildTrackGradient(ctx, { cx, cy, R, lw }) {
   return grad
 }
 
+// ── lineJoin: why 'round' matters here ───────────────────────────────────────
+// The centerline has ONE real corner: the cleft (a ~37° deflection). Canvas
+// treats the two sides of a corner differently:
+//   - INSIDE of the turn  = the OUTER edge here. The two offsets overlap and the
+//     union gives a sharp point. lineJoin does NOT affect it, so the outer V
+//     stays sharp no matter what.
+//   - OUTSIDE of the turn = the INNER edge here. There's a gap, and lineJoin
+//     fills it: 'miter' (canvas's DEFAULT) puts an angular point there, 'round'
+//     puts a smooth arc.
+// So 'round' is what keeps the inner boundary free of angles while leaving the
+// outer V untouched (user, 2026-07-16: smooth the inner boundary, keep the
+// outer V sharp). Leaving lineJoin unset silently gets 'miter' and the angle
+// comes back.
+// The bottom tip's inner V is NOT a join — it comes from the inner offset
+// folding (radius 3.34 < lw/2), and the centerline is smooth there — so it
+// survives 'round' untouched, which is what we want.
+const TRACK_LINE_JOIN = 'round'
+
 // Pass A — outer shadow: bleeds outside track footprint, soft drop shadow.
 function drawTrackShadow(ctx, { segs, lw }) {
   ctx.save()
   ctx.beginPath()
   heartPath(ctx, segs)
   ctx.lineWidth   = lw + 7
+  ctx.lineJoin    = TRACK_LINE_JOIN
   ctx.strokeStyle = 'rgba(120,60,70,0.20)'
   ctx.stroke()
   ctx.restore()
@@ -319,36 +492,42 @@ function drawTrackBody(ctx, { segs, lw }, trackGradient) {
   ctx.beginPath()
   heartPath(ctx, segs)
   ctx.lineWidth   = lw
+  ctx.lineJoin    = TRACK_LINE_JOIN
   ctx.strokeStyle = trackGradient ?? '#F7EBD9'
   ctx.stroke()
   ctx.restore()
 }
 
-// Pass D — inner wall shadow: faint dark stroke at the inner edge of track.
-function drawTrackInnerWall(ctx, { cx, cy, S, lw }) {
-  const innerSegs = scaledHeartSegs(cx, cy, S, -(lw * 0.5))
+// Pass D — inner wall shadow: faint dark line seating the track's inner edge
+// into the field. Rides `innerEdge` — the band's REAL inner boundary — so it
+// sits exactly on the visible edge. It used to stroke a scaledHeartSegs copy,
+// which drifted off that edge by ~24% of lw/2 at the cleft and ~16% at the
+// widest (see bandEdge). Round join for the same reason the body uses one.
+function drawTrackInnerWall(ctx, { innerEdge, lw }) {
   ctx.save()
   ctx.beginPath()
-  heartPath(ctx, innerSegs)
+  polyPath(ctx, innerEdge)
   ctx.lineWidth   = lw * 0.18
+  ctx.lineJoin    = TRACK_LINE_JOIN
   ctx.strokeStyle = 'rgba(120,60,70,0.13)'
   ctx.stroke()
   ctx.restore()
 }
 
 // ── applyPaintClip ────────────────────────────────────────────────────────────
-// Applies a permanent annular clip — outer heart minus inner heart — so
-// painted strokes can never bleed outside the track channel. clipArgs carries
-// cx/cy/S (device px / device-scaled) so outer/inner boundaries can be
-// recomputed as uniformly-scaled offsets — outward by lw/2, inward by lw.
+// Applies a permanent annular clip — the band itself — so painted strokes can
+// never bleed outside the track channel. Rides the band's REAL boundaries
+// (bandEdge), traced in CSS px and scaled by `dpr` to the paint canvas's device
+// pixels. Previously this used scaledHeartSegs copies offset +lw/2 / −lw, which
+// (a) drifted off the visible edge and (b) let the clip run a full lw/2 PAST the
+// inner edge, so paint could show inside the heart's opening.
 // save() is intentionally never restored — the clip persists.
-function applyPaintClip(ctx, { cx, cy, S, lw }) {
-  const outerSegs = scaledHeartSegs(cx, cy, S, lw / 2 + 0.5)
-  const innerSegs = scaledHeartSegs(cx, cy, S, -(lw + 0.5))
+function applyPaintClip(ctx, { outerEdge, innerEdge, dpr }) {
+  if (!outerEdge || !innerEdge) return
   ctx.save()
   ctx.beginPath()
-  heartPath(ctx, outerSegs)
-  heartPath(ctx, innerSegs)
+  polyPath(ctx, outerEdge, dpr)
+  polyPath(ctx, innerEdge, dpr)
   ctx.clip('evenodd')
 }
 
@@ -374,6 +553,31 @@ function lerpCumLen(cumLen, idx) {
   const i = Math.max(0, Math.min(N - 1, Math.floor(idx)))
   const t = idx - i
   return cumLen[i] + (cumLen[i + 1] - cumLen[i]) * t
+}
+
+// Inverse of lerpCumLen: the fractional index whose arc-length is `s`.
+// Needed because HeartCanvas's points are sampled at uniform BEZIER-PARAMETER
+// steps (STEPS_PER_SEG per segment), not uniform arc-length — a cubic bezier's
+// speed (d(arc-length)/dt) varies along its length (fastest through the flatter
+// mid-lobe stretch, slowest through the tightly-curved cleft/tip), so equal
+// steps in index-space are NOT equal steps in pixel-space. Any caller that
+// wants constant PIXEL speed over time (the pacing dot) must walk cumLen
+// (arc-length), not the raw index, then convert back to an index/position via
+// this lookup — binary search since cumLen is monotonic increasing.
+function idxAtLen(cumLen, s) {
+  const N = cumLen.length - 1
+  if (s <= 0) return 0
+  if (s >= cumLen[N]) return N
+  let lo = 0, hi = N
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (cumLen[mid] < s) lo = mid + 1
+    else hi = mid
+  }
+  const i = Math.max(0, lo - 1)
+  const segLen = cumLen[i + 1] - cumLen[i]
+  const t = segLen > 0 ? (s - cumLen[i]) / segLen : 0
+  return i + t
 }
 
 // Pixel position at a fractional index.
@@ -597,12 +801,17 @@ const HeartCanvas = forwardRef(function HeartCanvas(
   // Triangle (straight segment + corner arc needing sfArr), the heart's whole
   // outline is one continuous curve, so the pixel position is read directly
   // off the pre-sampled points/cumLen via the geometry-agnostic pointAt() —
-  // fraction/SIDES maps linearly onto the sample-index range [0, N].
+  // fraction/SIDES maps onto arc-length (via idxAtLen), NOT the raw sample
+  // index — the index range [0, N] is uniform in bezier-parameter, not pixel
+  // distance, so index-linear mapping made the dot visibly speed up through
+  // the flatter mid-lobe stretch and slow through the tightly-curved
+  // cleft/tip. Arc-length is what actually reads as "constant speed" on
+  // screen, and both halves have identical arc length (mirror symmetry), so
+  // time-linear-in-arc-length gives a true constant-speed traversal.
   function getPacing(elapsed) {
     const geo = geoRef.current
     if (!geo) return null
-    const { points } = geo
-    const N = points.length - 1
+    const { points, cumLen, totalPathLength } = geo
 
     const t = elapsed % CYCLE_MS
     let sideIdx = SIDES - 1
@@ -611,7 +820,8 @@ const HeartCanvas = forwardRef(function HeartCanvas(
     }
     const sideProgress = (t - SIDE_START_MS[sideIdx]) / SIDE_DURATIONS_MS[sideIdx]
     const fraction     = sideIdx + sideProgress
-    const idx          = (fraction / SIDES) * N
+    const s            = (fraction / SIDES) * totalPathLength
+    const idx          = idxAtLen(cumLen, s)
     const pos          = pointAt(points, idx)
     return { x: pos.x, y: pos.y, fraction }
   }
@@ -911,24 +1121,29 @@ const HeartCanvas = forwardRef(function HeartCanvas(
       const paintCtx = paintCanvas.getContext('2d')
       paintCtxRef.current = paintCtx
 
-      // Heart paint clip — annular region between outer & inner hearts.
-      // Coordinates are in device pixels (the paint canvas matches main DPR),
-      // so cx/cy/S are scaled by dpr (S scales linearly with pixel distance).
+      // Heart paint clip — the band itself, from its real boundaries. The edges
+      // are CSS px; the paint canvas is device px, so pass dpr and let
+      // applyPaintClip scale as it traces. (lw stays for layeredWash's init.)
       const clipArgs = {
-        cx: cx * dpr, cy: cy * dpr, S: S * dpr,
+        outerEdge: geoRef.current.outerEdge,
+        innerEdge: geoRef.current.innerEdge,
+        dpr,
         lw: lw * dpr,
       }
       clipArgsRef.current = clipArgs
 
       applyPaintClip(paintCtx, clipArgs)
 
-      // Track geometry for the racetrack draw passes (CSS px, centerline).
-      // cx/cy/S drive the offset-scaled heart paths; R stays for the radial
-      // track gradient.
+      // Track geometry for the racetrack draw passes (CSS px). `segs` is the
+      // centerline (stroked for the shadow + body); outerEdge/innerEdge are the
+      // band's real boundaries, used by the inner-wall pass. R stays for the
+      // radial track gradient.
       const trackGeo = {
         cx, cy, S, R,
         lw,
         segs: geoRef.current.segs,
+        outerEdge: geoRef.current.outerEdge,
+        innerEdge: geoRef.current.innerEdge,
       }
       trackGeoRef.current      = trackGeo
       trackGradientRef.current = buildTrackGradient(ctx, trackGeo)
