@@ -1287,6 +1287,29 @@ const RainbowCanvas = forwardRef(function RainbowCanvas(
           pacingCtx.lineWidth   = 2
           pacingCtx.strokeStyle = 'rgba(212,160,86,0.55)'
           pacingCtx.stroke()
+
+          // Hold countdown — "hold N" seconds-remaining, in the resting cloud.
+          // Drawn on this vivid overlay (like the circle) so it stays legible
+          // above the swelling circle and doesn't desaturate with the heat
+          // gauge. Only once the climb clock runs (not the pre-touch rest); the
+          // curved arc label keeps previewing the next breath alongside it. N
+          // counts the whole seconds left (2 → 1 on the shortest arc) and is
+          // gone at zero, exactly as the circle leaves the cloud.
+          if (startedRef.current && isHold) {
+            const secsLeft = Math.ceil((sched.dur * (1 - sched.tNorm)) / 1000)
+            if (secsLeft >= 1) {
+              const cloud  = geo.clouds[sched.type === 'holdR' ? 1 : 0]
+              const fontPx = Math.max(13, Math.min(22, lw * 0.62))
+              const ty     = cloud.cy + cloud.w * 0.24 * 0.42   // lower puff, clear of the circle
+              pacingCtx.textAlign    = 'center'
+              pacingCtx.textBaseline = 'middle'
+              pacingCtx.font         = `700 ${fontPx}px 'Nunito', sans-serif`
+              pacingCtx.fillStyle    = LABEL_COLORS[sched.arc]
+              pacingCtx.globalAlpha  = LABEL_ALPHA
+              pacingCtx.fillText(`hold ${secsLeft}`, cloud.cx, ty)
+              pacingCtx.globalAlpha  = 1   // reset so the embers below draw opaque
+            }
+          }
         }
 
         // Ember particles (Stage 3→4)
