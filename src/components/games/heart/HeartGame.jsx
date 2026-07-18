@@ -15,10 +15,10 @@ const COMPLETION_CANVAS_OPACITY = 0.25
 // 2-half label sequence: the path splits at the exact vertical centerline —
 // left half (cleft → bottom point, through the left lobe) is "breathe in",
 // right half (bottom point → cleft, through the right lobe) is "breathe out".
-// Both labels stay upright (0 rad) — the heart's lobes don't have a single
-// dominant edge direction the way Triangle's straight sides do.
-const LABEL_TEXTS  = ['breathe in', 'breathe out']
-const LABEL_ANGLES = [0, 0]
+// Each label sits on its side of the heart, halfway between the top of the arc
+// and the bottom V, and is rotated to run IN LINE with the track — the angles
+// come from the canvas geometry (labelGeo.labelAngles), not a fixed value.
+const LABEL_TEXTS = ['breathe in', 'breathe out']
 
 // ── HeartGame ─────────────────────────────────────────────────────────────────
 // Phase manager — owns game phase, stroke selection, session timing, exit, and
@@ -30,7 +30,7 @@ export default function HeartGame({ onExit }) {
   const [phase, setPhase]               = useState('game')   // 'game' | 'completion'
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
-  const [labelGeo, setLabelGeo]         = useState(null)   // { labelMids, sq }
+  const [labelGeo, setLabelGeo]         = useState(null)   // { labelMids, labelAngles, sq }
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef  = useRef(null)
@@ -153,7 +153,7 @@ export default function HeartGame({ onExit }) {
                     position:   'absolute',
                     left:       labelGeo.labelMids[i].x,
                     top:        labelGeo.labelMids[i].y,
-                    transform:  `translate(-50%, -50%) rotate(${LABEL_ANGLES[i]}rad) scale(var(--label-${i}-scale, 1))`,
+                    transform:  `translate(-50%, -50%) rotate(${labelGeo.labelAngles[i]}rad) scale(var(--label-${i}-scale, 1))`,
                     opacity:    `var(--label-${i}-alpha, 0.75)`,
                     fontFamily: "'Nunito', sans-serif",
                     fontWeight: 700,
