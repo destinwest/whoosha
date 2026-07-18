@@ -19,11 +19,13 @@
 //     Safety (held) plus a buoyant upward lift (joy), never literal arms.
 //   • TENDER CORE BLOOM — a warm cream-gold glow biased to where the heart track
 //     lives: the "loved" focal warmth that lifts the whole field.
-//   • JOY MOTES — soft, out-of-focus warm bokeh drifting through the periphery
-//     (dust caught in a sunbeam — NOT hearts). Two depth classes: a few dim,
-//     soft-light motes far back for depth; brighter, screen-blended motes of
-//     cream and rose-gold floating near. Seeded scatter, biased outward (center
-//     stays clear for the track) and slightly upward (the feeling lifts).
+//   • JOY MOTES — a wind-blown field of soft luminous specks (dust caught in a
+//     sunbeam — NOT hearts) streaming across the screen as if a warm breeze had
+//     carried a handful of glowing particles across it. Each speck is a soft
+//     glow stretched along the wind so it reads as blown, not static. Three
+//     depth classes (tiny dust → mid motes → a few bright sparks), placed as a
+//     mix of even scatter and a few gust clusters for streaky density. Alpha
+//     eases down near dead-center so the traced heart track stays legible.
 //   • GRAIN — a whisper of baked noise so the large rose gradient doesn't band on
 //     iOS. Overlay-blended, tiny alpha; adds texture, never visible as "noise."
 //
@@ -77,74 +79,91 @@ const BLOOM_R_RATIO  = 0.55                       // × max(w, h)
 const BLOOM_INNER    = 'rgba(255,236,214,0.30)'   // warm cream-gold
 const BLOOM_MID      = 'rgba(255,220,196,0.12)'
 
-// ── Joy motes ───────────────────────────────────────────────────────────────
-// Soft round bokeh, NOT hearts. Fixed seed → pixel-identical across re-bakes.
+// ── Joy motes — a wind-blown field of light ─────────────────────────────────
+// Soft luminous specks (NOT hearts) streaming across the field. Fixed seed →
+// pixel-identical across re-bakes.
 const FIELD_SEED = 0x10BE  // "love"
 
-// FAR: a few large, dim, soft-light motes far back for gentle warm depth.
-const FAR_COUNT      = 9
-const FAR_BLEND      = 'soft-light'
-const FAR_RGB        = '255,190,150'
-const FAR_ALPHA_MIN  = 0.10
-const FAR_ALPHA_MAX  = 0.20
-const FAR_SIZE_MIN   = 0.12    // mote radius as a fraction of min(w,h)
-const FAR_SIZE_MAX   = 0.24
+// Wind: a gentle breeze blowing rightward and slightly up — buoyant, calm.
+const WIND_ANGLE = -15 * Math.PI / 180
 
-// NEAR: more, brighter, screen-blended motes floating in front — sparks of joy.
-// Two warm tints alternate: cream and rose-gold.
-const NEAR_COUNT     = 16
-const NEAR_BLEND     = 'screen'
-const NEAR_RGB_A     = '255,240,222'   // warm cream
-const NEAR_RGB_B     = '255,212,182'   // rose-gold
-const NEAR_ALPHA_MIN = 0.06
-const NEAR_ALPHA_MAX = 0.14
-const NEAR_SIZE_MIN  = 0.03
-const NEAR_SIZE_MAX  = 0.09
+// Gust clustering: a few seed points; a fraction of the motes cluster around
+// them, smeared along the wind, so the field reads as blown in gusts rather
+// than a uniform dusting. The rest are an even scatter for coverage.
+const GUST_COUNT    = 6
+const CLUSTER_FRAC  = 0.55   // share of motes that ride a gust vs. even scatter
+const GUST_SPREAD   = 0.16   // gust radius as a fraction of min(w,h)
+const GUST_ELONGATE = 2.6    // gust smear multiplier along the wind
 
-// Motes sit on a ring band around center — never dead-center (the track lives
-// there) and never jammed into the extreme corners.
-const RING_MIN     = 0.34   // × the half-diagonal
-const RING_MAX     = 1.02
-const LIFT_RATIO   = 0.05   // near motes drift up by this fraction of h (buoyancy)
+// Alpha eases down inside this central radius (× half-min-side) so the traced
+// heart stays legible; never a hard hole.
+const CENTER_CLEAR_R = 0.42
+const CENTER_MIN_MUL = 0.30
+
+// Three depth classes, all screen-blended luminous dust: many tiny DUST specks
+// far back, a body of mid MOTES, and a few larger bright SPARKS near the front.
+// Streak = how far each speck is stretched along the wind (blown look).
+const MOTE_BLEND = 'screen'
+const CREAM      = '255,240,222'   // warm cream
+const ROSEGOLD   = '255,212,182'   // rose-gold
+const MOTE_CLASSES = [
+  // count, size (× min side), alpha, streak, tint
+  { count: 74, sMin: 0.006, sMax: 0.018, aMin: 0.05, aMax: 0.11, kMin: 1.6, kMax: 2.8, rgb: CREAM    },
+  { count: 52, sMin: 0.020, sMax: 0.048, aMin: 0.07, aMax: 0.15, kMin: 1.5, kMax: 2.6, rgb: ROSEGOLD },
+  { count: 20, sMin: 0.045, sMax: 0.090, aMin: 0.08, aMax: 0.16, kMin: 1.3, kMax: 2.2, rgb: CREAM    },
+]
 
 // ── Grain (anti-banding) ────────────────────────────────────────────────────
 const GRAIN_TILE  = 128    // px; small noise tile, pattern-tiled across the field
 const GRAIN_ALPHA = 0.035  // overlay-blended; adds dither, never visible as noise
 
-// Draws one soft round glow-mote: a radial gradient brightest at its core, fading
-// to transparent past its edge, so it reads as out-of-focus bokeh. size = radius
-// in px; rgb/alpha per depth class.
-function drawGlowMote(ctx, cx, cy, size, rgb, alpha) {
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, size)
+// Draws one soft glow-speck stretched along the wind so it reads as blown: a
+// radial gradient (bright core → transparent edge) drawn under an anisotropic
+// scale, turning the circle into a soft comet-streak. size = core radius in px.
+function drawStreakMote(ctx, cx, cy, size, streak, rgb, alpha) {
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.rotate(WIND_ANGLE)
+  ctx.scale(streak, 1)                    // stretch along the wind
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, size)
   g.addColorStop(0.0, `rgba(${rgb},${alpha.toFixed(3)})`)
   g.addColorStop(0.5, `rgba(${rgb},${(alpha * 0.5).toFixed(3)})`)
   g.addColorStop(1.0, `rgba(${rgb},0)`)
   ctx.fillStyle = g
-  ctx.fillRect(cx - size, cy - size, size * 2, size * 2)
+  ctx.fillRect(-size, -size, size * 2, size * 2)
+  ctx.restore()
 }
 
-// Scatters `count` motes of one depth class onto the ring band around center.
-// `lift` pulls placement upward (near class only) for a buoyant feel.
-function scatterMotes(ctx, rand, w, h, count, blend, rgbFn, aMin, aMax, sMin, sMax, lift) {
-  const cx = w / 2
-  const cy = h / 2
-  const halfDiag = Math.hypot(w, h) / 2
-  const minSide  = Math.min(w, h)
+// Fades motes that land over the central track so the traced heart stays clear.
+function centerAtten(px, py, w, h) {
+  const d = Math.hypot(px - w / 2, py - h / 2) / (Math.min(w, h) / 2)
+  return CENTER_MIN_MUL + (1 - CENTER_MIN_MUL) * clamp(d / CENTER_CLEAR_R, 0, 1)
+}
 
-  ctx.globalCompositeOperation = blend
-  for (let i = 0; i < count; i++) {
-    // Ring-band placement: even angular spread + jitter, radius biased outward.
-    const ang = (i / count) * Math.PI * 2 + (rand() - 0.5) * 1.2
-    const rr  = RING_MIN + (RING_MAX - RING_MIN) * Math.sqrt(rand())  // sqrt → outward bias
-    const px  = cx + Math.cos(ang) * rr * halfDiag
-    const py  = cy + Math.sin(ang) * rr * halfDiag - lift
-
-    const size  = (sMin + rand() * (sMax - sMin)) * minSide
-    const alpha = aMin + rand() * (aMax - aMin)
-
-    drawGlowMote(ctx, px, py, size, rgbFn(i, rand), alpha)
+// Scatters one depth class across the wind-blown field: a fraction ride a gust
+// (jitter around a seed, smeared along the wind), the rest scatter evenly across
+// a slightly over-scanned rect so streaks enter and exit the edges.
+function scatterWindField(ctx, rand, w, h, gusts, cls) {
+  const minSide = Math.min(w, h)
+  const cos = Math.cos(WIND_ANGLE)
+  const sin = Math.sin(WIND_ANGLE)
+  for (let i = 0; i < cls.count; i++) {
+    let px, py
+    if (rand() < CLUSTER_FRAC) {
+      const g = gusts[(rand() * gusts.length) | 0]
+      const along  = (rand() - 0.5) * 2 * GUST_SPREAD * GUST_ELONGATE * minSide
+      const across = (rand() - 0.5) * 2 * GUST_SPREAD * minSide
+      px = g.x + cos * along - sin * across
+      py = g.y + sin * along + cos * across
+    } else {
+      px = (-0.1 + rand() * 1.2) * w
+      py = (-0.1 + rand() * 1.2) * h
+    }
+    const size   = (cls.sMin + rand() * (cls.sMax - cls.sMin)) * minSide
+    const streak = cls.kMin + rand() * (cls.kMax - cls.kMin)
+    const alpha  = (cls.aMin + rand() * (cls.aMax - cls.aMin)) * centerAtten(px, py, w, h)
+    drawStreakMote(ctx, px, py, size, streak, cls.rgb, alpha)
   }
-  ctx.globalCompositeOperation = 'source-over'
 }
 
 // Builds a small tileable grayscale-noise pattern once, for anti-banding dither.
@@ -197,12 +216,12 @@ export function buildHeartFieldBg(w, h, dpr) {
   }
   ctx.globalCompositeOperation = 'source-over'
 
-  // 3 ─ Joy motes: far (behind) then near (in front). Alternating tints for near.
-  scatterMotes(ctx, rand, w, h, FAR_COUNT, FAR_BLEND,
-    () => FAR_RGB, FAR_ALPHA_MIN, FAR_ALPHA_MAX, FAR_SIZE_MIN, FAR_SIZE_MAX, 0)
-  scatterMotes(ctx, rand, w, h, NEAR_COUNT, NEAR_BLEND,
-    (i) => (i % 2 === 0 ? NEAR_RGB_A : NEAR_RGB_B),
-    NEAR_ALPHA_MIN, NEAR_ALPHA_MAX, NEAR_SIZE_MIN, NEAR_SIZE_MAX, h * LIFT_RATIO)
+  // 3 ─ Joy motes: a wind-blown field of luminous specks streaming across.
+  const gusts = []
+  for (let i = 0; i < GUST_COUNT; i++) gusts.push({ x: rand() * w, y: rand() * h })
+  ctx.globalCompositeOperation = MOTE_BLEND
+  for (const cls of MOTE_CLASSES) scatterWindField(ctx, rand, w, h, gusts, cls)
+  ctx.globalCompositeOperation = 'source-over'
 
   // 4 ─ Tender core bloom: warm cream-gold lift where the heart track lives.
   ctx.globalCompositeOperation = 'screen'
