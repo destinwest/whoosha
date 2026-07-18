@@ -16,8 +16,8 @@ const COMPLETION_CANVAS_OPACITY = 0.25
 // left half (cleft → bottom point, through the left lobe) is "breathe in",
 // right half (bottom point → cleft, through the right lobe) is "breathe out".
 // Each label sits on its side of the heart, halfway between the top of the arc
-// and the bottom V, and is rotated to run IN LINE with the track — the angles
-// come from the canvas geometry (labelGeo.labelAngles), not a fixed value.
+// and the bottom V, and is flowed along a path cut from the track centerline
+// (labelGeo.labelPaths) so the text arcs to match the curve.
 const LABEL_TEXTS = ['breathe in', 'breathe out']
 
 // ── HeartGame ─────────────────────────────────────────────────────────────────
@@ -30,7 +30,7 @@ export default function HeartGame({ onExit }) {
   const [phase, setPhase]               = useState('game')   // 'game' | 'completion'
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
-  const [labelGeo, setLabelGeo]         = useState(null)   // { labelMids, labelAngles, sq }
+  const [labelGeo, setLabelGeo]         = useState(null)   // { labelPaths, sq, w, h }
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef  = useRef(null)
@@ -141,32 +141,46 @@ export default function HeartGame({ onExit }) {
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
         />
 
-        {/* label overlay — DOM text, positioned from canvas geometry */}
+        {/* label overlay — SVG text flowed along a path cut from the track
+            centerline, so each label arcs to match the heart's curve. The paths
+            (and the viewBox size) come from canvas geometry; the per-label alpha
+            and scale still ride the --label-i-* CSS vars written per frame. */}
         {labelGeo && (() => {
           const fs = Math.max(13, labelGeo.sq * 0.048)
           return (
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+            <svg
+              viewBox={`0 0 ${labelGeo.w} ${labelGeo.h}`}
+              preserveAspectRatio="none"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}
+            >
+              <defs>
+                {labelGeo.labelPaths.map((d, i) => (
+                  <path key={i} id={`heart-label-path-${i}`} d={d} fill="none" />
+                ))}
+              </defs>
               {LABEL_TEXTS.map((text, i) => (
-                <div
+                <text
                   key={i}
+                  fill="rgba(74,32,44,1)"          /* deep warm rose (readable on salmon) */
+                  fontFamily="'Nunito', sans-serif"
+                  fontWeight="700"
+                  fontSize={fs}
+                  textAnchor="middle"
+                  dominantBaseline="central"
                   style={{
-                    position:   'absolute',
-                    left:       labelGeo.labelMids[i].x,
-                    top:        labelGeo.labelMids[i].y,
-                    transform:  `translate(-50%, -50%) rotate(${labelGeo.labelAngles[i]}rad) scale(var(--label-${i}-scale, 1))`,
-                    opacity:    `var(--label-${i}-alpha, 0.75)`,
-                    fontFamily: "'Nunito', sans-serif",
-                    fontWeight: 700,
-                    fontSize:   `${fs}px`,
-                    color:      'rgba(74,32,44,1)',   // deep warm rose (readable on salmon)
-                    whiteSpace: 'nowrap',
-                    willChange: 'transform, opacity',
+                    opacity:         `var(--label-${i}-alpha, 0.75)`,
+                    transform:       `scale(var(--label-${i}-scale, 1))`,
+                    transformBox:    'fill-box',
+                    transformOrigin: 'center',
+                    willChange:      'transform, opacity',
                   }}
                 >
-                  {text}
-                </div>
+                  <textPath href={`#heart-label-path-${i}`} startOffset="50%">
+                    {text}
+                  </textPath>
+                </text>
               ))}
-            </div>
+            </svg>
           )
         })()}
       </div>

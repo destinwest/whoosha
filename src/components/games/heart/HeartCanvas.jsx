@@ -381,23 +381,21 @@ function buildGeo(rect) {
   })
   const N = points.length - 1   // === 6 * STEPS_PER_SEG
 
-  // Label placement — one per half, on each SIDE of the heart, vertically midway
+  // Label anchors — one per half, on each SIDE of the heart, vertically midway
   // between the topmost part of the arc and the bottom V. Within each half, pick
   // the sample whose y is closest to that midpoint (the descent down the outer
-  // side crosses it exactly once; the crown ascent stays well above it), then
-  // orient the label along the local track tangent so the text runs IN LINE with
-  // the track — like the other games. The angle is normalized to ±90° so the
-  // text stays upright while parallel to the curve (left reads "\", right "/",
-  // mirror-symmetric). labelFracs are the lap-fraction (0 → SIDES) at those
-  // points, so the proximity highlight peaks when the bead passes the label.
+  // side crosses it exactly once; the crown ascent stays well above it). The SVG
+  // label paths (built below, once cumLen/sq exist) flow the text along the track
+  // from these anchors, so it arcs to match the curve. labelFracs are the lap-
+  // fraction (0 → SIDES) at those points, so the proximity highlight peaks when
+  // the bead passes the label.
   let yTop = Infinity, yBot = -Infinity
   for (const p of points) { if (p.y < yTop) yTop = p.y; if (p.y > yBot) yBot = p.y }
   const labelTargetY = (yTop + yBot) / 2
   const halfLen = N / SIDES   // sample indices per half (=== 3 * STEPS_PER_SEG)
 
-  const labelMids   = []
-  const labelAngles = []
-  const labelFracs  = []
+  const labelIdx   = []
+  const labelFracs = []
   for (let s = 0; s < SIDES; s++) {
     const lo = s * halfLen
     const hi = (s + 1) * halfLen
@@ -406,15 +404,7 @@ function buildGeo(rect) {
       const dy = Math.abs(points[j].y - labelTargetY)
       if (dy < bestDy) { bestDy = dy; bestIdx = j }
     }
-    // Tangent from the flanking samples (clamped to the half), angle normalized
-    // to ±90° so the label never reads upside down.
-    const a = points[Math.max(lo, bestIdx - 1)]
-    const b = points[Math.min(hi, bestIdx + 1)]
-    let ang = Math.atan2(b.y - a.y, b.x - a.x)
-    if (ang >  Math.PI / 2) ang -= Math.PI
-    if (ang < -Math.PI / 2) ang += Math.PI
-    labelMids.push(points[bestIdx])
-    labelAngles.push(ang)
+    labelIdx.push(bestIdx)
     labelFracs.push(bestIdx / halfLen)
   }
 
@@ -434,6 +424,27 @@ function buildGeo(rect) {
   // full pixel height (2×R) as the analogous "size" handle.
   const sq = 2 * R
 
+  // Label paths — an SVG polyline cut from the track centerline over an arc-
+  // length window centered on each anchor, so the text can be flowed along it
+  // (arced to match the track). text-anchor=middle + startOffset=50% centers the
+  // label on its anchor, so the window only has to be a bit longer than the
+  // text; sized from the font size, which scales with sq. The window is clamped
+  // to the anchor's own half, so a label never wraps around the cleft or tip.
+  const labelFs   = Math.max(13, sq * 0.048)
+  const labelSpan = labelFs * 4.5           // arc length on each side of the anchor
+  const labelPaths = labelIdx.map((idx, s) => {
+    const lo = s * halfLen
+    const hi = (s + 1) * halfLen
+    const startLen = cumLen[idx] - labelSpan
+    const endLen   = cumLen[idx] + labelSpan
+    let j0 = idx, j1 = idx
+    while (j0 > lo && cumLen[j0 - 1] >= startLen) j0--
+    while (j1 < hi && cumLen[j1 + 1] <= endLen)   j1++
+    let d = `M ${points[j0].x.toFixed(2)} ${points[j0].y.toFixed(2)}`
+    for (let j = j0 + 1; j <= j1; j++) d += ` L ${points[j].x.toFixed(2)} ${points[j].y.toFixed(2)}`
+    return d
+  })
+
   // The band's TRUE boundaries — what the stroke actually paints. The inner-wall
   // shadow and the paint clip both ride these so they land on the edge the
   // player sees (they used to ride a scaled copy and drifted off it). Computed
@@ -444,7 +455,7 @@ function buildGeo(rect) {
   return {
     cx, cy, sq, S, R, lw,
     segs,
-    points, labelMids, labelAngles, labelFracs,
+    points, labelFracs, labelPaths,
     outerEdge, innerEdge,
     cumLen, totalPathLength,
     sides: SIDES,
@@ -1143,7 +1154,7 @@ const HeartCanvas = forwardRef(function HeartCanvas(
         pacingCanvas.height = rect.height * dpr
       }
       geoRef.current     = buildGeo(rect)
-      onResize?.({ labelMids: geoRef.current.labelMids, labelAngles: geoRef.current.labelAngles, sq: geoRef.current.sq })
+      onResize?.({ labelPaths: geoRef.current.labelPaths, sq: geoRef.current.sq, w: geoRef.current.w, h: geoRef.current.h })
 
       const { cx, cy, S, R, lw } = geoRef.current
       const paintCtx = paintCanvas.getContext('2d')
