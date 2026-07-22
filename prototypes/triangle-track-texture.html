@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Whoosha · Triangle Track Texture (scree→firn)</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%; margin: 0;
+    font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+    background: #0d1220; color: #d7deec;
+    overflow: hidden; user-select: none; -webkit-user-select: none;
+  }
+  #stage { position: absolute; inset: 0; display: block; }
+  #game  { position: absolute; inset: 0; display: block; }
+
+  /* Control panel — slides up from the bottom; tap the handle to toggle. */
+  #panel {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: rgba(14,20,34,0.92);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid rgba(150,170,200,0.18);
+    padding: 8px 14px 18px;
+    transform: translateY(calc(100% - 34px));
+    transition: transform .28s cubic-bezier(.22,1,.36,1);
+    max-height: 78vh; overflow-y: auto;
+    z-index: 10;
+  }
+  #panel.open { transform: translateY(0); }
+  #handle {
+    height: 34px; margin: -8px -14px 6px; display: flex;
+    align-items: center; justify-content: center; gap: 8px;
+    font-size: 12px; letter-spacing: .04em; color: #9fb0cc; cursor: pointer;
+  }
+  #handle::before { content: ''; width: 34px; height: 4px; border-radius: 2px; background: #4a5876; }
+  .row { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
+  .row label { flex: 0 0 116px; font-size: 12px; color: #aebbd4; }
+  .row input[type=range] { flex: 1; }
+  .row .val { flex: 0 0 46px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; color: #dfe6f4; }
+  .toggles { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+  .toggles button {
+    font: inherit; font-size: 12px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid rgba(150,170,200,0.28); background: rgba(40,52,78,0.6);
+    color: #d7deec; cursor: pointer;
+  }
+  .toggles button.on { background: #4d6fae; border-color: #6f92d0; color: #fff; }
+  h4 { margin: 12px 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #7f90b0; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="panel">
+  <div id="handle">▲ TEXTURE CONTROLS — tap to open / close</div>
+
+  <div class="toggles">
+    <button id="tglTexture" class="on">Texture ON</button>
+    <button id="tglFirn" class="on">Firn ON</button>
+    <button id="tglPaint" class="on">Show paint trail</button>
+    <button id="tglDesat">Heat desat</button>
+    <button id="reseed">↻ New seed</button>
+    <button id="reset">Reset</button>
+  </div>
+
+  <h4>Rock body</h4>
+  <div class="row"><label>Mottle count</label><input id="mottleCount" type="range" min="0" max="90" step="1"><span class="val"></span></div>
+  <div class="row"><label>Mottle strength</label><input id="mottleStrength" type="range" min="0" max="2" step="0.05"><span class="val"></span></div>
+  <div class="row"><label>Grain alpha</label><input id="grainAlpha" type="range" min="0" max="0.2" step="0.005"><span class="val"></span></div>
+
+  <h4>Cleavage / strata</h4>
+  <div class="row"><label>Cleavage alpha</label><input id="cleavageAlpha" type="range" min="0" max="0.3" step="0.005"><span class="val"></span></div>
+  <div class="row"><label>Cleavage angle°</label><input id="cleavageAngle" type="range" min="-90" max="90" step="1"><span class="val"></span></div>
+  <div class="row"><label>Cleavage spacing</label><input id="cleavageSpacing" type="range" min="3" max="20" step="0.5"><span class="val"></span></div>
+  <div class="row"><label>Cleavage jitter</label><input id="cleavageJitter" type="range" min="0" max="1" step="0.05"><span class="val"></span></div>
+
+  <h4>Glacial firn (the whisper)</h4>
+  <div class="row"><label>Firn streaks</label><input id="firnCount" type="range" min="0" max="16" step="1"><span class="val"></span></div>
+  <div class="row"><label>Firn alpha</label><input id="firnAlpha" type="range" min="0" max="0.4" step="0.01"><span class="val"></span></div>
+  <div class="row"><label>Firn length</label><input id="firnLen" type="range" min="0.3" max="3" step="0.1"><span class="val"></span></div>
+
+  <h4>Mineral glints</h4>
+  <div class="row"><label>Glint count</label><input id="glintCount" type="range" min="0" max="40" step="1"><span class="val"></span></div>
+</div>
+
+<script>
+// ── PRNG (mulberry32, matches _shared/nightSky.js) ───────────────────────────
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const lerp = (a, b, t) => a + (b - a) * t;
+
+// ── Geometry helper (copied from _shared/roundedPolyPath.js) ─────────────────
+function roundedPolyPath(ctx, verts, cornerRadius) {
+  const n = verts.length;
+  if (n < 3) return;
+  if (cornerRadius <= 0) {
+    ctx.moveTo(verts[0].x, verts[0].y);
+    for (let i = 1; i < n; i++) ctx.lineTo(verts[i].x, verts[i].y);
+    ctx.closePath(); return;
+  }
+  const sx = (verts[0].x + verts[1].x) / 2, sy = (verts[0].y + verts[1].y) / 2;
+  ctx.moveTo(sx, sy);
+  for (let i = 1; i <= n; i++) {
+    const c = verts[i % n], nx = verts[(i + 1) % n];
+    ctx.arcTo(c.x, c.y, (c.x + nx.x) / 2, (c.y + nx.y) / 2, cornerRadius);
+  }
+  ctx.closePath();
+}
+function offsetPolygon(verts, d) {
+  const n = verts.length; let cx = 0, cy = 0;
+  for (const v of verts) { cx += v.x; cy += v.y; } cx /= n; cy /= n;
+  const lines = [];
+  for (let i = 0; i < n; i++) {
+    const a = verts[i], b = verts[(i + 1) % n];
+    const ex = b.x - a.x, ey = b.y - a.y;
+    let nx = -ey, ny = ex; const len = Math.hypot(nx, ny) || 1; nx /= len; ny /= len;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    if ((mx - cx) * nx + (my - cy) * ny < 0) { nx = -nx; ny = -ny; }
+    lines.push({ px: a.x + nx * d, py: a.y + ny * d, dx: ex, dy: ey });
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const L1 = lines[(i - 1 + n) % n], L2 = lines[i];
+    const den = L1.dx * L2.dy - L1.dy * L2.dx;
+    if (Math.abs(den) < 1e-9) { out.push({ x: L2.px, y: L2.py }); continue; }
+    const t = ((L2.px - L1.px) * L2.dy - (L2.py - L1.py) * L2.dx) / den;
+    out.push({ x: L1.px + t * L1.dx, y: L1.py + t * L1.dy });
+  }
+  return out;
+}
+
+// ── Triangle geometry (mirrors TriangleCanvas buildGeo) ──────────────────────
+const TRI_CORNER_RATIO = 0.28;
+function buildGeo(w, h) {
+  const cx = w / 2, cy = h / 2;
+  const R = Math.min(w * 0.46, h * 0.506);
+  const r = R * TRI_CORNER_RATIO;
+  const circleR = (2 * R) * 0.0728;
+  const lw = circleR * 2 + 8;
+  const hx = R * Math.cos(Math.PI / 6), hy = R * 0.5;
+  const verts = [
+    { x: cx - hx, y: cy + hy },   // V0 bottom-left (start)
+    { x: cx,      y: cy - R  },   // V1 apex
+    { x: cx + hx, y: cy + hy },   // V2 bottom-right
+  ];
+  return { w, h, cx, cy, R, cornerR: r, lw, verts };
+}
+
+// ── Background: sky + ridges (mirrors TriangleGame VIBRANT_PALETTE scene) ─────
+const SKY_STOPS = [
+  { t: 0.00, h: 211, s: 58.0, l: 74.5 },
+  { t: 0.22, h: 212, s: 46.0, l: 74.5 },
+  { t: 0.45, h: 220, s: 29.0, l: 73.0 },
+  { t: 0.68, h: 228, s: 19.0, l: 67.6 },
+  { t: 0.86, h: 228, s: 12.7, l: 61.4 },
+  { t: 1.00, h: 229, s: 10.2, l: 57.7 },
+];
+const VIBRANT = { satMul: 1.60, lightShift: -3.0 };
+function paletteColor(h, s, l, p) {
+  return `hsl(${h}, ${Math.min(100, s * p.satMul).toFixed(1)}%, ${(l + p.lightShift).toFixed(1)}%)`;
+}
+const RIDGE_FAR  = { amp: 0.010, wavelen: 0.60, alpha: 0.15, h: 219, s: 23.5, l: 66.7 };
+const RIDGE_NEAR = { amp: 0.022, wavelen: 0.24, alpha: 0.36, h: 231, s: 12.7, l: 43.1 };
+const RIDGE_YS = [0.15, 0.46, 0.72, 0.91, 0.96];
+
+function drawBackground(ctx, w, h) {
+  const sky = ctx.createLinearGradient(0, 0, 0, h);
+  for (const s of SKY_STOPS) sky.addColorStop(s.t, paletteColor(s.h, s.s, s.l, VIBRANT));
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+
+  RIDGE_YS.forEach((ry, i) => {
+    const t = i / (RIDGE_YS.length - 1);
+    const amp = lerp(RIDGE_FAR.amp, RIDGE_NEAR.amp, t) * h;
+    const wl  = lerp(RIDGE_FAR.wavelen, RIDGE_NEAR.wavelen, t) * w;
+    const al  = lerp(RIDGE_FAR.alpha, RIDGE_NEAR.alpha, t);
+    const hu  = lerp(RIDGE_FAR.h, RIDGE_NEAR.h, t);
+    const sa  = lerp(RIDGE_FAR.s, RIDGE_NEAR.s, t);
+    const li  = lerp(RIDGE_FAR.l, RIDGE_NEAR.l, t);
+    const baseY = ry * h;
+    ctx.beginPath(); ctx.moveTo(0, h);
+    for (let x = 0; x <= w; x += 4) {
+      const y = baseY + Math.sin((x / wl) * Math.PI * 2 + i * 1.7) * amp
+                      + Math.sin((x / (wl * 0.37)) * Math.PI * 2 + i) * amp * 0.4;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(w, h); ctx.closePath();
+    ctx.fillStyle = `hsla(${hu}, ${sa}%, ${li}%, ${al})`;
+    ctx.fill();
+  });
+}
+
+// ── Track passes (mirror TriangleCanvas) ─────────────────────────────────────
+const TRACK_LINE_JOIN = 'round';
+function buildTrackGradient(ctx, { cx, cy, R, lw }) {
+  const innerR = Math.max(0, R * 0.5 - lw / 2), outerR = R + lw / 2;
+  const g = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
+  g.addColorStop(0, '#A7B6C2'); g.addColorStop(0.4, '#93A4B2'); g.addColorStop(1, '#7C8D9C');
+  return g;
+}
+function drawTrackShadow(ctx, { verts, cornerR, lw }) {
+  ctx.save(); ctx.beginPath(); roundedPolyPath(ctx, verts, cornerR);
+  ctx.lineWidth = lw + 7; ctx.lineJoin = TRACK_LINE_JOIN; ctx.strokeStyle = 'rgba(40,52,68,0.22)';
+  ctx.stroke(); ctx.restore();
+}
+function drawTrackBody(ctx, { verts, cornerR, lw }, grad) {
+  ctx.save(); ctx.beginPath(); roundedPolyPath(ctx, verts, cornerR);
+  ctx.lineWidth = lw; ctx.lineJoin = TRACK_LINE_JOIN; ctx.strokeStyle = grad || '#93A4B2';
+  ctx.stroke(); ctx.restore();
+}
+function drawTrackInnerWall(ctx, { verts, cornerR, lw }) {
+  const iv = offsetPolygon(verts, -(lw * 0.5)), icr = Math.max(0, cornerR - lw * 0.5);
+  ctx.save(); ctx.beginPath(); roundedPolyPath(ctx, iv, icr);
+  ctx.lineWidth = lw * 0.18; ctx.lineJoin = TRACK_LINE_JOIN; ctx.strokeStyle = 'rgba(40,52,68,0.14)';
+  ctx.stroke(); ctx.restore();
+}
+
+// ── THE TEXTURE: scree→firn baked band (Heart's buildCandyBand structure) ────
+// Abstraction over replication: the "high mountain country" read comes from a
+// slate dome + broken-rock light/shadow mottle + fine directional cleavage
+// strata + fine flake grain + a WHISPER of glacial firn streaks + sparse
+// mineral glints — NOT a literal rock/ice photo. All blending is done in the
+// bake; per frame it is one drawImage.
+const SCREE_SEED = 0x5C7EE;   // "scree"
+// Slate dome — matches the track gradient geometry.
+const SCREE_GRAD = [
+  { t: 0.00, c: '#B0BFCB' },   // lit crown, cool light slate
+  { t: 0.45, c: '#93A4B2' },   // base slate
+  { t: 1.00, c: '#788A99' },   // seated outer edge, deeper slate
+];
+// Broken-rock light/shadow patches + a faint firn-blue whisper in the mottle.
+const SCREE_MOTTLE = [
+  { rgb: '198,210,220', aMax: 0.30 },   // lit rock face
+  { rgb: '104,120,134', aMax: 0.26 },   // shadowed rock pocket
+  { rgb: '80,94,108',   aMax: 0.18 },   // deep cleft shadow
+  { rgb: '214,228,238', aMax: 0.10 },   // whisper firn-blue
+];
+const GRAIN_TILE = 96;
+
+function buildGrainTile(rand) {
+  const tile = document.createElement('canvas');
+  tile.width = tile.height = GRAIN_TILE;
+  const t = tile.getContext('2d');
+  const img = t.createImageData(GRAIN_TILE, GRAIN_TILE), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    // Gray, slightly DARK-skewed (rock flake), unlike candy's light-skewed sugar.
+    const v = 70 + ((rand() * 150) | 0);   // 70–220
+    d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+  }
+  t.putImageData(img, 0, 0);
+  return tile;
+}
+
+// A soft elongated streak (firn/snow catching light), oriented along `ang`.
+function drawStreak(ctx, x, y, len, wid, ang, rgb, a) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(ang);
+  const g = ctx.createLinearGradient(-len / 2, 0, len / 2, 0);
+  g.addColorStop(0, `rgba(${rgb},0)`);
+  g.addColorStop(0.5, `rgba(${rgb},${a})`);
+  g.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.fillStyle = g;
+  // soft across the short axis via a second gradient mask — approximate with
+  // a rounded fill; keep it cheap.
+  ctx.beginPath();
+  ctx.ellipse(0, 0, len / 2, wid / 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function buildScreeBand(geo, dpr, P) {
+  const { w, h, cx, cy, R, lw, verts, cornerR } = geo;
+  const oc = document.createElement('canvas');
+  oc.width = w * dpr; oc.height = h * dpr;
+  const ctx = oc.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const rand = mulberry32(P.seed);
+
+  // 1 ─ Base slate dome — stroke the centerline exactly like drawTrackBody.
+  const innerR = Math.max(0, R * 0.5 - lw / 2), outerR = R + lw / 2;
+  const dome = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR);
+  for (const s of SCREE_GRAD) dome.addColorStop(s.t, s.c);
+  ctx.beginPath(); roundedPolyPath(ctx, verts, cornerR);
+  ctx.lineWidth = lw; ctx.lineJoin = TRACK_LINE_JOIN; ctx.strokeStyle = dome; ctx.stroke();
+
+  // Confine everything below to the exact stroked band silhouette.
+  ctx.globalCompositeOperation = 'source-atop';
+
+  const halfW = R * Math.cos(Math.PI / 6) + lw, halfH = R + lw;
+  const bx = cx - halfW, by = cy - halfH, bw = halfW * 2, bh = halfH * 2;
+
+  // 2 ─ Directional cleavage / strata: fine near-parallel lines at an angle,
+  //     alternating faint dark (cleavage plane) and occasional light (edge lit).
+  if (P.cleavageAlpha > 0) {
+    const ang = P.cleavageAngle * Math.PI / 180;
+    const dx = Math.cos(ang), dy = Math.sin(ang);   // along-line
+    const nx = -dy, ny = dx;                          // across-line (spacing dir)
+    const diag = Math.hypot(bw, bh);
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (let s = -diag; s <= diag; s += P.cleavageSpacing) {
+      const jit = (rand() - 0.5) * P.cleavageSpacing * P.cleavageJitter;
+      const off = s + jit;
+      const mxp = cx + nx * off, myp = cy + ny * off;
+      const light = rand() < 0.22;
+      const a = (light ? 0.5 : 1) * P.cleavageAlpha * (0.5 + rand() * 0.7);
+      ctx.beginPath();
+      ctx.moveTo(mxp - dx * diag, myp - dy * diag);
+      ctx.lineTo(mxp + dx * diag, myp + dy * diag);
+      ctx.lineWidth = light ? 0.8 : (0.6 + rand() * 0.9);
+      ctx.strokeStyle = light ? `rgba(224,234,242,${a})` : `rgba(58,72,86,${a})`;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // 3 ─ Broken-rock mottle: soft uneven light/shadow patches.
+  const mc = P.mottleCount;
+  for (let i = 0; i < mc; i++) {
+    const cls = SCREE_MOTTLE[(rand() * SCREE_MOTTLE.length) | 0];
+    const px = cx + (rand() * 2 - 1) * halfW;
+    const py = cy + (rand() * 2 - 1) * halfH;
+    const rad = lw * (0.3 + rand() * 0.9);
+    const a = cls.aMax * P.mottleStrength * (0.4 + rand() * 0.6);
+    const g = ctx.createRadialGradient(px, py, 0, px, py, rad);
+    g.addColorStop(0, `rgba(${cls.rgb},${a.toFixed(3)})`);
+    g.addColorStop(1, `rgba(${cls.rgb},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(px - rad, py - rad, rad * 2, rad * 2);
+  }
+
+  // 4 ─ Fine flake grain — high-freq dither, gray, tiled over the band.
+  if (P.grainAlpha > 0) {
+    const grainTile = buildGrainTile(rand);
+    const pat = ctx.createPattern(grainTile, 'repeat');
+    if (pat) {
+      ctx.globalAlpha = P.grainAlpha; ctx.fillStyle = pat;
+      ctx.fillRect(bx, by, bw, bh); ctx.globalAlpha = 1;
+    }
+  }
+
+  // 5 ─ Glacial firn whisper — a few pale blue-white streaks along the cleavage.
+  if (P.firn && P.firnCount > 0) {
+    const ang = P.cleavageAngle * Math.PI / 180;
+    for (let i = 0; i < P.firnCount; i++) {
+      const px = cx + (rand() * 2 - 1) * halfW;
+      const py = cy + (rand() * 2 - 1) * halfH;
+      const len = lw * P.firnLen * (0.7 + rand() * 0.9);
+      const wid = lw * (0.16 + rand() * 0.20);
+      const a = P.firnAlpha * (0.5 + rand() * 0.7);
+      drawStreak(ctx, px, py, len, wid, ang + (rand() - 0.5) * 0.25,
+                 '226,236,244', a.toFixed(3));
+    }
+  }
+
+  // 6 ─ Sparse mineral glints — bright cool specks (mica/quartz).
+  for (let i = 0; i < P.glintCount; i++) {
+    const px = cx + (rand() * 2 - 1) * halfW;
+    const py = cy + (rand() * 2 - 1) * halfH;
+    const r = 0.5 + rand() * 1.0;
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(238,244,248,${(0.18 + rand() * 0.28).toFixed(3)})`;
+    ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  return oc;
+}
+
+// ── A static "paint trail" so we can judge texture UNDER the fill ────────────
+// Mirrors the breath stroke: a warm-cream painted run along side 0 + part of 1.
+function drawPaintTrail(ctx, geo, frac) {
+  const { verts, cornerR, lw } = geo;
+  // clip to the band annulus
+  const outer = offsetPolygon(verts, lw / 2 + 0.5);
+  const inner = offsetPolygon(verts, -(lw + 0.5));
+  ctx.save();
+  ctx.beginPath();
+  roundedPolyPath(ctx, outer, cornerR + lw / 2 + 0.5);
+  roundedPolyPath(ctx, inner, Math.max(0, cornerR - lw - 0.5));
+  ctx.clip('evenodd');
+  // paint along the centerline up to `frac` of the perimeter
+  ctx.beginPath();
+  const pts = [verts[0], verts[1], verts[2], verts[0]];
+  let total = 0; const segs = [];
+  for (let i = 0; i < 3; i++) {
+    const a = pts[i], b = pts[i + 1]; const L = Math.hypot(b.x - a.x, b.y - a.y);
+    segs.push({ a, b, L }); total += L;
+  }
+  let want = total * frac; ctx.moveTo(pts[0].x, pts[0].y);
+  for (const s of segs) {
+    if (want <= 0) break;
+    const t = Math.min(1, want / s.L);
+    ctx.lineTo(s.a.x + (s.b.x - s.a.x) * t, s.a.y + (s.b.y - s.a.y) * t);
+    want -= s.L;
+  }
+  ctx.lineWidth = lw * 0.92; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = 'rgba(247,238,214,0.82)';
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ── Params & UI wiring ───────────────────────────────────────────────────────
+const DEFAULTS = {
+  seed: SCREE_SEED,
+  texture: true, firn: true, paint: true, desat: false,
+  mottleCount: 46, mottleStrength: 1.0, grainAlpha: 0.06,
+  cleavageAlpha: 0.09, cleavageAngle: -24, cleavageSpacing: 7, cleavageJitter: 0.5,
+  firnCount: 6, firnAlpha: 0.16, firnLen: 1.4,
+  glintCount: 14,
+};
+let P = { ...DEFAULTS };
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let geo = null, dpr = 1;
+
+function render() {
+  const w = window.innerWidth, h = window.innerHeight;
+  dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+  canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.filter = P.desat ? 'saturate(0.35)' : 'none';
+
+  geo = buildGeo(w, h);
+  drawBackground(ctx, w, h);
+
+  drawTrackShadow(ctx, geo);
+  if (P.texture) {
+    const band = buildScreeBand(geo, dpr, P);
+    ctx.drawImage(band, 0, 0, w, h);
+  } else {
+    drawTrackBody(ctx, geo, buildTrackGradient(ctx, geo));
+  }
+  drawTrackInnerWall(ctx, geo);
+
+  if (P.paint) drawPaintTrail(ctx, geo, 0.42);
+  ctx.filter = 'none';
+}
+
+// sliders
+const sliderIds = ['mottleCount','mottleStrength','grainAlpha','cleavageAlpha',
+  'cleavageAngle','cleavageSpacing','cleavageJitter','firnCount','firnAlpha','firnLen','glintCount'];
+function syncUI() {
+  for (const id of sliderIds) {
+    const el = document.getElementById(id);
+    el.value = P[id];
+    el.nextElementSibling.textContent = (typeof P[id] === 'number' && P[id] % 1 !== 0)
+      ? P[id].toFixed(2) : P[id];
+  }
+  document.getElementById('tglTexture').classList.toggle('on', P.texture);
+  document.getElementById('tglTexture').textContent = P.texture ? 'Texture ON' : 'Texture OFF';
+  document.getElementById('tglFirn').classList.toggle('on', P.firn);
+  document.getElementById('tglFirn').textContent = P.firn ? 'Firn ON' : 'Firn OFF';
+  document.getElementById('tglPaint').classList.toggle('on', P.paint);
+  document.getElementById('tglDesat').classList.toggle('on', P.desat);
+}
+for (const id of sliderIds) {
+  document.getElementById(id).addEventListener('input', (e) => {
+    P[id] = parseFloat(e.target.value);
+    e.target.nextElementSibling.textContent = (P[id] % 1 !== 0) ? P[id].toFixed(2) : P[id];
+    render();
+  });
+}
+document.getElementById('tglTexture').onclick = () => { P.texture = !P.texture; syncUI(); render(); };
+document.getElementById('tglFirn').onclick    = () => { P.firn = !P.firn; syncUI(); render(); };
+document.getElementById('tglPaint').onclick    = () => { P.paint = !P.paint; syncUI(); render(); };
+document.getElementById('tglDesat').onclick    = () => { P.desat = !P.desat; syncUI(); render(); };
+document.getElementById('reseed').onclick      = () => { P.seed = (Math.random() * 1e9) | 0; render(); };
+document.getElementById('reset').onclick        = () => { P = { ...DEFAULTS }; syncUI(); render(); };
+
+const panel = document.getElementById('panel');
+document.getElementById('handle').onclick = () => panel.classList.toggle('open');
+
+window.addEventListener('resize', render);
+syncUI();
+render();
+</script>
+</body>
+</html>
