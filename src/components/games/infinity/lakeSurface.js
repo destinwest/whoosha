@@ -158,3 +158,65 @@ export function buildLakeSurfaceBg(w, h, dpr) {
   ctx.globalCompositeOperation = 'source-over'
   return oc
 }
+
+// ── Shimmer sprite ────────────────────────────────────────────────────────────
+// A separate, transparent-backed sheet of soft light ripples — the MOVING half
+// of the water (the baked bands above are the still half). InfinityCanvas bakes
+// this once per resize, then in its existing rAF draws it a couple of times per
+// frame at slowly-drifting offsets (screen-blended). Two copies sliding past
+// each other make the overlaps brighten and dim as they interfere, which reads
+// as living shimmer without any per-frame allocation, filter, or new GPU layer.
+//
+// Baked at half resolution (it's soft and low-frequency, so scaling up on draw
+// is free and halves the memory). Its ripples deliberately DON'T match the
+// baked bands' seed/positions — the moving layer should add life over the
+// stills, not double them up. Same pale-light idiom, its own PRNG stream.
+const SHIMMER_SEED       = 0x5B27F
+const SHIMMER_RES        = 0.5        // sprite pixel scale vs. screen — soft, so half is plenty
+const SHIMMER_STREAKS    = 6          // soft light rows down the sheet
+const SHIMMER_GLOWS_MIN  = 4          // glows per streak (jittered)
+const SHIMMER_GLOWS_MAX  = 6
+const SHIMMER_RAD_MIN    = 0.28       // glow radius before squashing, × sprite width
+const SHIMMER_RAD_MAX    = 0.48
+const SHIMMER_SQUASH_MIN = 0.055      // ellipse squash — smaller = flatter streak
+const SHIMMER_SQUASH_MAX = 0.110
+const SHIMMER_ALPHA_MIN  = 0.045      // faint — the drift/interference does the work
+const SHIMMER_ALPHA_MAX  = 0.080
+const SHIMMER_RGB        = '226,240,253'  // pale sunlit blue-white, matches the bands' light
+
+// ── buildShimmerSprite ────────────────────────────────────────────────────────
+// Returns an offscreen canvas of soft light ripples on a transparent field.
+export function buildShimmerSprite(w, h, dpr) {
+  const sw = Math.max(2, Math.round(w * dpr * SHIMMER_RES))
+  const sh = Math.max(2, Math.round(h * dpr * SHIMMER_RES))
+  const oc = document.createElement('canvas')
+  oc.width  = sw
+  oc.height = sh
+  const ctx = oc.getContext('2d')
+
+  // Soft light rows accumulate with screen — same overlapping-glow technique as
+  // the baked bands, authored directly in sprite-pixel space (no dpr scale).
+  ctx.globalCompositeOperation = 'screen'
+  const rand = mulberry32(SHIMMER_SEED)
+  for (let i = 0; i < SHIMMER_STREAKS; i++) {
+    const y      = sh * ((i + 0.5) / SHIMMER_STREAKS) + (rand() - 0.5) * sh * 0.08
+    const squash = SHIMMER_SQUASH_MIN + rand() * (SHIMMER_SQUASH_MAX - SHIMMER_SQUASH_MIN)
+    const alpha  = SHIMMER_ALPHA_MIN + rand() * (SHIMMER_ALPHA_MAX - SHIMMER_ALPHA_MIN)
+    const glows  = SHIMMER_GLOWS_MIN + Math.floor(rand() * (SHIMMER_GLOWS_MAX - SHIMMER_GLOWS_MIN + 1))
+    const rad    = sw * (SHIMMER_RAD_MIN + rand() * (SHIMMER_RAD_MAX - SHIMMER_RAD_MIN))
+    for (let g = 0; g < glows; g++) {
+      const cx = sw * ((g + rand() * 0.8 - 0.4) / (glows - 1))
+      const cy = y + (rand() - 0.5) * sh * 0.03
+      ctx.save()
+      ctx.translate(cx, cy)
+      ctx.scale(1, squash)
+      const rg = ctx.createRadialGradient(0, 0, 0, 0, 0, rad)
+      rg.addColorStop(0, `rgba(${SHIMMER_RGB},${alpha.toFixed(3)})`)
+      rg.addColorStop(1, `rgba(${SHIMMER_RGB},0)`)
+      ctx.fillStyle = rg
+      ctx.fillRect(-rad, -rad, rad * 2, rad * 2)
+      ctx.restore()
+    }
+  }
+  return oc
+}

@@ -17,6 +17,7 @@
 import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
 import { createHeatGauge } from '../_shared/heatGauge'
 import { createSynergy }   from '../_shared/synergy'
+import { buildShimmerSprite } from './lakeSurface'
 
 // ── Breath timing ─────────────────────────────────────────────────────────────
 // Lazy-8, constant-speed pacing circle: SEGMENT_MS is how long it takes to trace
@@ -212,6 +213,25 @@ const smoothstep  = t => t * t * (3 - 2 * t)
 const easeIn      = t => t * t * t
 const easeOutSoft = t => 1 - Math.pow(1 - t, 2)
 
+// ── Ambient shimmer (the moving half of the water) ─────────────────────────────
+// The baked lake bands are static; this is the live layer. A single soft
+// ripple sprite (buildShimmerSprite, baked once per resize) is drawn TWICE per
+// frame at slowly-drifting offsets and screen-blended. The two copies slide
+// past each other on different slow clocks, so their overlaps brighten and dim
+// as they interfere — reads as living shimmer. No per-frame allocation, no
+// filter, no new GPU layer: two cached-bitmap drawImages into the existing game
+// canvas, drawn at the very bottom of the frame (above the baked bg element,
+// below the wake and pacing circle). Bounded oscillation (not an endless
+// scroll), so no seam/wrap handling is needed — the sprite is drawn slightly
+// larger than the screen (SHIMMER_MARGIN) so an offset never bares an edge.
+const SHIMMER_MARGIN      = 0.14   // draw this much larger than the screen, centered
+const SHIMMER_DRIFT_X     = 0.020  // horizontal oscillation amplitude, × W
+const SHIMMER_DRIFT_Y     = 0.030  // vertical oscillation amplitude, × H
+const SHIMMER_PERIOD_A_MS = 11_000 // pass A drift period
+const SHIMMER_PERIOD_B_MS = 17_000 // pass B drift period (coprime-ish → non-repeating overlap)
+const SHIMMER_ALPHA       = 0.55   // overall opacity multiplier (sprite is already faint)
+const TWO_PI = Math.PI * 2
+
 // A linear gradient along (x0,y0)->(x1,y1), opaque `colorRGB` in the middle,
 // fading to fully transparent over WAKELET_TIP_FADE at each end. Used as the
 // wavelet ribbon's fillStyle so opacity fades toward the tips — perpendicular
@@ -388,6 +408,7 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
   const geoRef         = useRef(null)
   const dprRef         = useRef(window.devicePixelRatio || 1)
   const trackPathRef   = useRef(null)   // Path2D of the centerline (CSS px), rebuilt on resize
+  const shimmerRef     = useRef(null)   // baked shimmer sprite (offscreen canvas), rebuilt on resize
 
   // ── Game state refs ────────────────────────────────────────────────────────
   const pacingStartRef = useRef(null)
@@ -592,6 +613,10 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
       geoRef.current = buildGeo(rect)
       const geo = geoRef.current
 
+      // Bake the ambient shimmer sprite once per resize (see the shimmer draw
+      // in frame()). CSS-px dims; the builder applies dpr + half-res internally.
+      shimmerRef.current = buildShimmerSprite(rect.width, rect.height, dpr)
+
       // Build the centerline Path2D once (CSS px; ctx is dpr-scaled each frame).
       const path = new Path2D()
       path.moveTo(geo.points[0].x, geo.points[0].y)
@@ -626,6 +651,29 @@ const InfinityCanvas = forwardRef(function InfinityCanvas(
       ctx.save()
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, W, H)
+
+      // ── 0. Ambient shimmer — the moving half of the water ─────────────────
+      // Two drifting copies of the baked shimmer sprite, screen-blended. Drawn
+      // first so it sits beneath the wake and pacing circle. See the SHIMMER_*
+      // constants for how the interference reads as living shimmer.
+      const shimmer = shimmerRef.current
+      if (shimmer) {
+        const m  = SHIMMER_MARGIN
+        const dw = W * (1 + m), dh = H * (1 + m)
+        const ox = -W * m / 2,  oy = -H * m / 2
+        const pa = (now / SHIMMER_PERIOD_A_MS) * TWO_PI
+        const pb = (now / SHIMMER_PERIOD_B_MS) * TWO_PI
+        const ax = Math.sin(pa)       *  SHIMMER_DRIFT_X * W
+        const ay = Math.cos(pa)       *  SHIMMER_DRIFT_Y * H
+        const bx = Math.sin(pb + 1.7) * -SHIMMER_DRIFT_X * W
+        const by = Math.cos(pb + 0.9) *  SHIMMER_DRIFT_Y * H * 0.7
+        ctx.save()
+        ctx.globalCompositeOperation = 'screen'
+        ctx.globalAlpha = SHIMMER_ALPHA
+        ctx.drawImage(shimmer, ox + ax, oy + ay, dw, dh)
+        ctx.drawImage(shimmer, ox + bx, oy + by, dw, dh)
+        ctx.restore()
+      }
 
       // ── 1. Track — invisible by design (see SHOW_TRACK) ───────────────────
       // Geometry still guides the pacing circle + bead; the band is only drawn
