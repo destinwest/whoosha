@@ -165,10 +165,15 @@ function heartPath(ctx, segs) {
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-// Warm ivory/cream paint-trail palette (the traced line itself) — soft drift
-// between near-white cream shades, per design spec (warm white/cream track,
-// not the pink/red/purple/lavender accent palette used for particles/glow).
-const LAP_COLORS = ['#FFFBF2', '#FDF0DE', '#FFF6E8', '#F7E9D3']
+// Candy-heart paint-trail palette (the traced line itself) — a warm "sunrise"
+// sweep the child paints the track through as they trace: soft WHITE →
+// pastel YELLOW → pastel ORANGE → back to the candy PINK the track starts as.
+// The paint TINTS the track colour (the sugar grain/glints from buildCandyTexture
+// are re-laid on top each frame, so the chalky texture stays visible on every
+// hue). Already-laid stamps keep their colour, so the heart fills with the sweep.
+// The final stop matches CANDY_GRAD's mid pink so a full-pink stamp reads as the
+// untouched track.
+const LAP_COLORS = ['#FDFBF7', '#F7E3A1', '#F6C79B', '#F3C1D3']
 
 // Time for one full LAP_COLORS cycle in ms of active tracing.
 // 72 000ms = ~72 seconds — roughly four laps at pacing speed.
@@ -509,17 +514,31 @@ function buildTrackGradient(ctx, { cx, cy, R, lw }) {
 // low-frequency mottle + fine high-frequency sugar grain + sparse crystal
 // glints, NOT a literal candy photo.
 //
+// SPLIT INTO TWO LAYERS so the child's paint can TINT the track colour without
+// erasing the sugar texture (user, 2026-07-21):
+//   • buildCandyBase    — pastel pink dome + low-freq colour mottle. Drawn UNDER
+//                         the paint, so paint covers this colour where traced.
+//   • buildCandyTexture — sugar grain + crystal glints only, masked to the band
+//                         silhouette and transparent everywhere else. Drawn OVER
+//                         the paint each frame, so the chalky texture stays
+//                         visible on top of ANY paint colour (and on the
+//                         untouched base). This is what makes "the texture
+//                         persists" true regardless of the paint hue.
+// Unpainted band = base + texture ≈ the previous single-bake look; painted band
+// = paint colour + texture = a tinted-but-still-chalky candy surface.
+//
 // Per POLISH-STRATEGY: every blend is done IN THE BAKE (globalCompositeOperation
-// below), and the result is drawn each frame as a single source-over bitmap —
-// per-frame cost is one drawImage, zero blend/filter. It REPLACES drawTrackBody's
-// live gradient stroke (a stroke → a bitmap; net per-frame cost ≈ neutral).
+// below), and each layer is drawn per frame as a single source-over bitmap —
+// per-frame cost is two drawImages (base + texture), zero blend/filter.
 //
 // The band SILHOUETTE is defined by STROKING the centerline at lw — byte-for-byte
 // the same call drawTrackBody makes — so the hard-won cleft/tip geometry is
-// untouched. Every texture pass after the base stroke uses 'source-atop', which
-// clips it to that exact stroked silhouette (no reliance on the outerEdge/
+// untouched. The base's texture passes use 'source-atop'; the texture layer,
+// which must stay transparent off-band, masks with 'destination-in' against the
+// same stroked silhouette (no reliance on the outerEdge/
 // innerEdge polygon approximation).
-const CANDY_SEED = 0x48E7   // "heart"
+const CANDY_SEED     = 0x48E7   // "heart" — base dome + mottle rng
+const CANDY_TEX_SEED = 0x48E8   // grain + glints rng (own stream, layout-agnostic)
 // Pastel dome, chalky soft pink: lit sugar-white crown → candy pink → seated
 // deeper rose at the outer edge. Radial, matching the track gradient's geometry.
 const CANDY_GRAD = [
@@ -559,13 +578,33 @@ function buildCandyGrainTile(rand) {
   return tile
 }
 
-function buildCandyBand(geo, dpr) {
-  const { w, h, cx, cy, S, R, lw, segs } = geo
+// Allocate an offscreen band canvas sized/scaled for the geometry.
+function candyLayerCanvas(geo, dpr) {
   const oc = document.createElement('canvas')
-  oc.width  = w * dpr
-  oc.height = h * dpr
+  oc.width  = geo.w * dpr
+  oc.height = geo.h * dpr
   const ctx = oc.getContext('2d')
   ctx.scale(dpr, dpr)
+  return { oc, ctx }
+}
+
+// Stroke the band silhouette exactly like drawTrackBody — the shared shape both
+// candy layers key off (base fills it, texture masks against it).
+function strokeBandSilhouette(ctx, segs, lw, style) {
+  ctx.beginPath()
+  heartPath(ctx, segs)
+  ctx.lineWidth   = lw
+  ctx.lineJoin    = TRACK_LINE_JOIN
+  ctx.strokeStyle = style
+  ctx.stroke()
+}
+
+// buildCandyBase — the COLOUR layer (pastel dome + low-freq mottle). Drawn under
+// the paint; the paint tint covers this where the child has traced. Grain and
+// glints live in buildCandyTexture so they can sit on top of the paint.
+function buildCandyBase(geo, dpr) {
+  const { cx, cy, S, R, lw, segs } = geo
+  const { oc, ctx } = candyLayerCanvas(geo, dpr)
   const rand = mulberry32(CANDY_SEED)
 
   // 1 ─ Base pastel dome — stroke the centerline exactly like drawTrackBody.
@@ -573,14 +612,9 @@ function buildCandyBand(geo, dpr) {
   const outerR = R + lw / 2
   const dome = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
   for (const s of CANDY_GRAD) dome.addColorStop(s.t, s.c)
-  ctx.beginPath()
-  heartPath(ctx, segs)
-  ctx.lineWidth   = lw
-  ctx.lineJoin    = TRACK_LINE_JOIN
-  ctx.strokeStyle = dome
-  ctx.stroke()
+  strokeBandSilhouette(ctx, segs, lw, dome)
 
-  // Confine everything below to the exact stroked band silhouette.
+  // Confine the mottle to the exact stroked band silhouette.
   ctx.globalCompositeOperation = 'source-atop'
 
   const halfW = S * HEART_HALF_WIDTH + lw / 2
@@ -600,7 +634,25 @@ function buildCandyBand(geo, dpr) {
     ctx.fillRect(px - rad, py - rad, rad * 2, rad * 2)
   }
 
-  // 3 ─ Fine sugar grain — chalky high-freq dither, pattern-tiled over the band.
+  ctx.globalCompositeOperation = 'source-over'
+  return oc
+}
+
+// buildCandyTexture — the TEXTURE layer (sugar grain + crystal glints only),
+// masked to the band silhouette and transparent everywhere else. Drawn OVER the
+// paint each frame, so the chalky sugar reads on top of any paint colour and on
+// the untouched base alike. These marks are near-white/neutral, so they lift as
+// "sugar" over any hue rather than tinting it.
+function buildCandyTexture(geo, dpr) {
+  const { cx, cy, S, R, lw, segs } = geo
+  const { oc, ctx } = candyLayerCanvas(geo, dpr)
+  const rand = mulberry32(CANDY_TEX_SEED)
+
+  const halfW = S * HEART_HALF_WIDTH + lw / 2
+  const halfH = R + lw / 2
+
+  // 1 ─ Fine sugar grain — chalky high-freq dither, pattern-tiled over the band
+  //     bounds (masked to the silhouette below).
   const grainTile = buildCandyGrainTile(rand)
   const pat = ctx.createPattern(grainTile, 'repeat')
   if (pat) {
@@ -610,7 +662,7 @@ function buildCandyBand(geo, dpr) {
     ctx.globalAlpha = 1
   }
 
-  // 4 ─ Crystal glints — sparse bright sugar specks catching the light.
+  // 2 ─ Crystal glints — sparse bright sugar specks catching the light.
   for (let i = 0; i < CANDY_GLINT_COUNT; i++) {
     const px = cx + (rand() * 2 - 1) * halfW
     const py = cy + (rand() * 2 - 1) * halfH
@@ -621,6 +673,11 @@ function buildCandyBand(geo, dpr) {
     ctx.fill()
   }
 
+  // 3 ─ Mask to the exact stroked band silhouette. destination-in keeps existing
+  //     grain/glint pixels only where the stroke is opaque; the layer stays
+  //     transparent off-band so it composites cleanly over the paint.
+  ctx.globalCompositeOperation = 'destination-in'
+  strokeBandSilhouette(ctx, segs, lw, '#000')
   ctx.globalCompositeOperation = 'source-over'
   return oc
 }
@@ -831,7 +888,8 @@ const HeartCanvas = forwardRef(function HeartCanvas(
   const clipArgsRef      = useRef(null)
   const trackGeoRef      = useRef(null)   // CSS px track centerline geometry
   const trackGradientRef = useRef(null)   // cached Pass B gradient (rebuilt on resize)
-  const candyBandRef     = useRef(null)   // baked candy-heart band bitmap (rebuilt on resize)
+  const candyBaseRef     = useRef(null)   // baked candy colour layer — dome + mottle (under paint)
+  const candyTexRef      = useRef(null)   // baked candy texture layer — grain + glints (over paint)
 
   // ── Game state refs ────────────────────────────────────────────────────────
   const pacingStartRef       = useRef(null)    // clock for pacing circle — starts at mount
@@ -1317,7 +1375,8 @@ const HeartCanvas = forwardRef(function HeartCanvas(
       }
       trackGeoRef.current      = trackGeo
       trackGradientRef.current = buildTrackGradient(ctx, trackGeo)
-      candyBandRef.current     = buildCandyBand(geoRef.current, dpr)
+      candyBaseRef.current     = buildCandyBase(geoRef.current, dpr)
+      candyTexRef.current      = buildCandyTexture(geoRef.current, dpr)
 
       const color = getDriftColor(colorTimeRef.current)
       stampStroke.init({ paintCtx, lw, dpr, color })
@@ -1355,20 +1414,23 @@ const HeartCanvas = forwardRef(function HeartCanvas(
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, W, H)
 
-      // ── 1. Racetrack — three passes ───────────────────────────────────────
+      // ── 1. Racetrack — colour base + inner wall ───────────────────────────
       const trackGeo = trackGeoRef.current
       if (trackGeo) {
         drawTrackShadow(ctx, trackGeo)
-        // Candy-heart band: baked chalky-pastel bitmap in place of the live
-        // gradient stroke (falls back to the stroke until the first bake lands).
-        if (candyBandRef.current) ctx.drawImage(candyBandRef.current, 0, 0, W, H)
+        // Candy-heart COLOUR base (dome + mottle). The sugar TEXTURE (grain +
+        // glints) is drawn later, on top of the paint, so tracing tints the
+        // colour without erasing the chalky surface. Falls back to the live
+        // gradient stroke until the first bake lands.
+        if (candyBaseRef.current) ctx.drawImage(candyBaseRef.current, 0, 0, W, H)
         else drawTrackBody(ctx, trackGeo, trackGradientRef.current)
         drawTrackInnerWall(ctx, trackGeo)
       }
 
       // ── 2. Paint layer ────────────────────────────────────────────────────
-      // source-over composites the paint above the track. globalAlpha drains
-      // as heat gauge climbs — paint fades from the track surface.
+      // source-over composites the paint above the colour base — it TINTS the
+      // track (white → yellow → orange → candy pink, per LAP_COLORS). globalAlpha
+      // drains as the heat gauge climbs — paint fades from the track surface.
       ctx.save()
       ctx.globalCompositeOperation = 'source-over'
       if (strokeModeRef.current === 'watercolor') {
@@ -1382,6 +1444,18 @@ const HeartCanvas = forwardRef(function HeartCanvas(
         ctx.drawImage(paintCanvas, 0, 0, W, H)
       }
       ctx.restore()
+
+      // ── 3. Candy texture overlay ──────────────────────────────────────────
+      // Sugar grain + crystal glints, masked to the band. Drawn OVER the paint so
+      // the chalky texture persists on every hue (and on the untouched base).
+      // Full alpha, unaffected by the heat gauge: it's part of the track surface,
+      // not the reward paint, so it stays as the paint fades under it.
+      if (trackGeo && candyTexRef.current) {
+        ctx.save()
+        ctx.globalCompositeOperation = 'source-over'
+        ctx.drawImage(candyTexRef.current, 0, 0, W, H)
+        ctx.restore()
+      }
 
       // ── Pacing position (computed once, shared by fingerprint + pacing circle) ─
       // Pacing starts at mount — independent of first touch.
