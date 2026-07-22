@@ -409,6 +409,12 @@ function buildGeo(rect) {
     labelFracs.push(bestIdx / halfLen)
   }
 
+  // Anchor point (viewBox px) each label's textPath is centered on (startOffset
+  // 50% + textAnchor middle land the glyphs here). The DOM overlay scales each
+  // label about THIS fixed point rather than the recomputed fill-box center —
+  // see the transform-origin note in HeartGame.jsx.
+  const labelAnchors = labelIdx.map(idx => ({ x: points[idx].x, y: points[idx].y }))
+
   // Cumulative arc-length at each point index (cumLen[0] = 0,
   // cumLen[N] = totalPathLength). The groove tracing core measures
   // finger-to-bead distance ALONG the path, and points are sampled by
@@ -456,7 +462,7 @@ function buildGeo(rect) {
   return {
     cx, cy, sq, S, R, lw,
     segs,
-    points, labelFracs, labelPaths,
+    points, labelFracs, labelPaths, labelAnchors,
     outerEdge, innerEdge,
     cumLen, totalPathLength,
     sides: SIDES,
@@ -1279,7 +1285,7 @@ const HeartCanvas = forwardRef(function HeartCanvas(
         pacingCanvas.height = rect.height * dpr
       }
       geoRef.current     = buildGeo(rect)
-      onResize?.({ labelPaths: geoRef.current.labelPaths, sq: geoRef.current.sq, w: geoRef.current.w, h: geoRef.current.h })
+      onResize?.({ labelPaths: geoRef.current.labelPaths, labelAnchors: geoRef.current.labelAnchors, sq: geoRef.current.sq, w: geoRef.current.w, h: geoRef.current.h })
 
       const { cx, cy, S, R, lw } = geoRef.current
       const paintCtx = paintCanvas.getContext('2d')

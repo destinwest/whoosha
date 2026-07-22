@@ -144,44 +144,57 @@ export default function HeartGame({ onExit }) {
         {/* label overlay — SVG text flowed along a path cut from the track
             centerline, so each label arcs to match the heart's curve. The paths
             (and the viewBox size) come from canvas geometry; the per-label alpha
-            and scale still ride the --label-i-* CSS vars written per frame. */}
+            and scale ride the --label-i-* CSS vars written per frame.
+
+            ONE <svg> PER LABEL, and the scale rides the <svg> ELEMENT (not the
+            inner <text>). An SVG root gets its own compositing layer under
+            will-change, so it's rasterized ONCE and the growth scales that
+            texture on the GPU. Scaling the inner <text> instead made WebKit
+            re-rasterize the glyphs every frame — each fractional scale re-hinted
+            and re-snapped them to the pixel grid, which is the residual shimmer.
+            Trade-off: at the 1.5× peak the cached texture is upsampled, so the
+            label softens slightly at its largest; at rest (its usual state) it's
+            crisp. Origin is the label's anchor, as a % of the box (preserve-
+            AspectRatio="none" maps the viewBox linearly onto it). */}
         {labelGeo && (() => {
           const fs = Math.max(13, labelGeo.sq * 0.048)
-          return (
-            <svg
-              viewBox={`0 0 ${labelGeo.w} ${labelGeo.h}`}
-              preserveAspectRatio="none"
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}
-            >
-              <defs>
-                {labelGeo.labelPaths.map((d, i) => (
-                  <path key={i} id={`heart-label-path-${i}`} d={d} fill="none" />
-                ))}
-              </defs>
-              {LABEL_TEXTS.map((text, i) => (
+          const { w, h } = labelGeo
+          return LABEL_TEXTS.map((text, i) => {
+            const a  = labelGeo.labelAnchors?.[i]
+            const ox = a ? `${((a.x / w) * 100).toFixed(3)}%` : '50%'
+            const oy = a ? `${((a.y / h) * 100).toFixed(3)}%` : '50%'
+            return (
+              <svg
+                key={i}
+                viewBox={`0 0 ${w} ${h}`}
+                preserveAspectRatio="none"
+                style={{
+                  position: 'absolute', inset: 0, width: '100%', height: '100%',
+                  pointerEvents: 'none', overflow: 'visible',
+                  opacity:         `var(--label-${i}-alpha, 0.75)`,
+                  transform:       `translateZ(0) scale(var(--label-${i}-scale, 1))`,
+                  transformOrigin: `${ox} ${oy}`,
+                  willChange:      'transform, opacity',
+                }}
+              >
+                <defs>
+                  <path id={`heart-label-path-${i}`} d={labelGeo.labelPaths[i]} fill="none" />
+                </defs>
                 <text
-                  key={i}
                   fill="rgba(74,32,44,1)"          /* deep warm rose (readable on salmon) */
                   fontFamily="'Nunito', sans-serif"
                   fontWeight="700"
                   fontSize={fs}
                   textAnchor="middle"
                   dominantBaseline="central"
-                  style={{
-                    opacity:         `var(--label-${i}-alpha, 0.75)`,
-                    transform:       `scale(var(--label-${i}-scale, 1))`,
-                    transformBox:    'fill-box',
-                    transformOrigin: 'center',
-                    willChange:      'transform, opacity',
-                  }}
                 >
                   <textPath href={`#heart-label-path-${i}`} startOffset="50%">
                     {text}
                   </textPath>
                 </text>
-              ))}
-            </svg>
-          )
+              </svg>
+            )
+          })
         })()}
       </div>
 
