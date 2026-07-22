@@ -239,6 +239,12 @@ const ALPHA_ACTIVE = 0.75
 const ALPHA_FLOOR  = 0.18
 const SCALE_ACTIVE = 1.5
 const BLEND_MS     = 600
+// Half-width (in lap-fraction units) of each label's grow/shrink pulse, centered
+// on the CUSP where its half begins (see the label-proximity block). One half of
+// the track = 1.0 fraction unit, so 0.5 makes the two pulses exactly complementary:
+// each label peaks at its own cusp and returns to floor by the half's midpoint,
+// where the other label begins to swell toward its cusp — no double-emphasis.
+const LABEL_PULSE_HALF_WIDTH = 0.5
 
 const smoothstep   = t => t * t * (3 - 2 * t)
 const easeIn       = t => t * t * t
@@ -392,16 +398,15 @@ function buildGeo(rect) {
   // the sample whose y is closest to that midpoint (the descent down the outer
   // side crosses it exactly once; the crown ascent stays well above it). The SVG
   // label paths (built below, once cumLen/sq exist) flow the text along the track
-  // from these anchors, so it arcs to match the curve. labelFracs are the lap-
-  // fraction (0 → SIDES) at those points, so the proximity highlight peaks when
-  // the bead passes the label.
+  // from these anchors, so it arcs to match the curve. This positions the TEXT
+  // only; the grow/shrink pulse is triggered at each half's cusp (fraction i),
+  // not here — see the label-proximity block in the frame loop.
   let yTop = Infinity, yBot = -Infinity
   for (const p of points) { if (p.y < yTop) yTop = p.y; if (p.y > yBot) yBot = p.y }
   const labelTargetY = (yTop + yBot) / 2
   const halfLen = N / SIDES   // sample indices per half (=== 3 * STEPS_PER_SEG)
 
   const labelIdx   = []
-  const labelFracs = []
   for (let s = 0; s < SIDES; s++) {
     const lo = s * halfLen
     const hi = (s + 1) * halfLen
@@ -411,7 +416,6 @@ function buildGeo(rect) {
       if (dy < bestDy) { bestDy = dy; bestIdx = j }
     }
     labelIdx.push(bestIdx)
-    labelFracs.push(bestIdx / halfLen)
   }
 
   // Anchor point (viewBox px) each label's textPath is centered on (startOffset
@@ -467,7 +471,7 @@ function buildGeo(rect) {
   return {
     cx, cy, sq, S, R, lw,
     segs,
-    points, labelFracs, labelPaths, labelAnchors,
+    points, labelPaths, labelAnchors,
     outerEdge, innerEdge,
     cumLen, totalPathLength,
     sides: SIDES,
@@ -1894,23 +1898,24 @@ const HeartCanvas = forwardRef(function HeartCanvas(
       ctx.restore()
 
       // ── Label proximity — write CSS vars for DOM overlay ──────────────────
-      // Driven by the pacing circle's ACTUAL fraction (from getPacing). Unlike
-      // Triangle (straight side + corner-arc approach, needing sfArr), the
-      // heart has no straight/arc split — each half is one continuous curve —
-      // so proximity is simply a symmetric falloff around each label's own
-      // half-midpoint (fraction i + 0.5): full through most of its half,
-      // smoothly fading near the cleft/bottom-point boundary with the other
-      // half.
+      // Driven by the pacing circle's ACTUAL fraction (from getPacing). Each
+      // label's grow/shrink pulse peaks at the CUSP where its half BEGINS —
+      // fraction i (the integer start of half i): fraction 0 = the top cleft
+      // ("breathe in"), fraction 1 = the bottom tip ("breathe out"). So a label
+      // swells as the dot arrives at that breath-transition point and shrinks as
+      // the dot moves on through the half. This is decoupled from where the text
+      // SITS (mid-side, via labelPaths) — the text stays put; only the emphasis
+      // moves. Symmetric falloff of LABEL_PULSE_HALF_WIDTH about the cusp.
       if (pacingPos) {
         const lpBlend = smoothstep(startedRef.current
           ? Math.min(1, (now - gameStartRef.current) / BLEND_MS)
           : 0)
 
         for (let i = 0; i < SIDES; i++) {
-          const target = geoRef.current.labelFracs?.[i] ?? (i + 0.5)
+          const target = i   // cusp where half i begins: 0 = cleft, 1 = bottom tip
           let dist = Math.abs(pacingPos.fraction - target)
           if (dist > SIDES / 2) dist = SIDES - dist
-          const proximity = 1 - smoothstep(Math.min(1, dist / 0.85))
+          const proximity = 1 - smoothstep(Math.min(1, dist / LABEL_PULSE_HALF_WIDTH))
           const alphaProx = ALPHA_FLOOR + (ALPHA_ACTIVE - ALPHA_FLOOR) * proximity
           const scaleProx = 1.0 + (SCALE_ACTIVE - 1.0) * proximity
           const alpha     = ALPHA_ACTIVE + (alphaProx - ALPHA_ACTIVE) * lpBlend
