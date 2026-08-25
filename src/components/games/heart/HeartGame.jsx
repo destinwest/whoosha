@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import StrokeSelector from '../square/StrokeSelector'   // shared until refactor
 import HeartCanvas from './HeartCanvas'
 import CompletionScreen from '../square/CompletionScreen'
+import GameSettingsControl from '../_shared/GameSettingsControl'
+import { useSettings } from '../../../hooks/useSettings'
 import { buildHeartFieldBg } from './heartField'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
@@ -31,6 +33,9 @@ export default function HeartGame({ onExit }) {
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
   const [labelGeo, setLabelGeo]         = useState(null)   // { labelPaths, sq, w, h }
+
+  // Resolved customization settings — writtenCues gates the DOM labels below.
+  const { settings } = useSettings('heart')
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef  = useRef(null)
@@ -95,6 +100,9 @@ export default function HeartGame({ onExit }) {
         </svg>
       </button>
 
+      {/* customize — top-right; panel hosts the global mute + writtenCues toggle */}
+      <GameSettingsControl gameKey="heart" tone="dark" />
+
       {/* game canvas — always mounted; blur/scale driven by CSS custom properties.
           Dims (doesn't vanish) once completion phase begins, same treatment as
           Infinity/Triangle's world wrapper. */}
@@ -156,7 +164,7 @@ export default function HeartGame({ onExit }) {
             label softens slightly at its largest; at rest (its usual state) it's
             crisp. Origin is the label's anchor, as a % of the box (preserve-
             AspectRatio="none" maps the viewBox linearly onto it). */}
-        {labelGeo && (() => {
+        {settings.writtenCues && labelGeo && (() => {
           const fs = Math.max(13, labelGeo.sq * 0.048)
           const { w, h } = labelGeo
           return LABEL_TEXTS.map((text, i) => {

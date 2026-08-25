@@ -1,4 +1,5 @@
 import { useSettings } from '../../../hooks/useSettings'
+import { useMutePref } from '../../../hooks/useMutePref'
 import { GAME_OPTIONS, ATTRIBUTES } from '../../../data/gameOptions'
 
 // ── GameSettingsPanel ─────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ function controllableAttrs(gameKey) {
 
 export default function GameSettingsPanel({ gameKey, onClose }) {
   const { settings, setOption, reset } = useSettings(gameKey)
+  const [muted, , setMuted] = useMutePref()   // global audio mute (not per-game)
   const attrs = controllableAttrs(gameKey)
 
   return (
@@ -83,11 +85,12 @@ export default function GameSettingsPanel({ gameKey, onClose }) {
           </button>
         </div>
 
-        {attrs.length === 0 && (
-          <p style={{ opacity: 0.7, fontSize: 14, margin: '12px 0' }}>
-            No options to customize for this game yet.
-          </p>
-        )}
+        {/* Global audio mute — lives here (not per-game) so the top chrome stays
+            uncluttered. On = sound plays. */}
+        <div style={{ margin: '16px 0' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85, marginBottom: 8 }}>Sound</div>
+          <Switch on={!muted} onChange={(soundOn) => setMuted(!soundOn)} />
+        </div>
 
         {attrs.map((attr) => (
           <div key={attr} style={{ margin: '16px 0' }}>

@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import StrokeSelector from '../square/StrokeSelector'   // shared until refactor (game #3)
 import HexagonCanvas  from './HexagonCanvas'
 import CompletionScreen from '../square/CompletionScreen'
-import MuteButton     from '../../ui/MuteButton'
+import GameSettingsControl from '../_shared/GameSettingsControl'
+import { useSettings } from '../../../hooks/useSettings'
 import { useHexBreath } from '../../../hooks/useHexBreath'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The two games
@@ -172,6 +173,9 @@ export default function HexagonGame({ onExit }) {
   const [activeStroke, setActiveStroke] = useState('classic')
   const [labelGeo, setLabelGeo]     = useState(null)      // { labelMids, sq }
 
+  // Resolved customization settings — writtenCues gates the DOM labels below.
+  const { settings } = useSettings('hexagon')
+
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef = useRef(null)
   const strokeModeRef   = useRef('classic')
@@ -246,8 +250,8 @@ export default function HexagonGame({ onExit }) {
         </svg>
       </button>
 
-      {/* mute toggle — top-right, mirrors exit-button treatment (same as Square) */}
-      <MuteButton className="absolute top-4 right-4 z-20" />
+      {/* customize — top-right; panel hosts the global mute + writtenCues toggle */}
+      <GameSettingsControl gameKey="hexagon" />
 
       {/* game canvas — always mounted; blur/scale driven by CSS custom properties.
           Dims (doesn't vanish) once completion phase begins, same treatment as
@@ -297,8 +301,9 @@ export default function HexagonGame({ onExit }) {
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
         />
 
-        {/* label overlay — DOM text, positioned from canvas geometry */}
-        {labelGeo && (() => {
+        {/* label overlay — DOM text, positioned from canvas geometry.
+            Gated on the writtenCues setting (off ⇒ no labels). */}
+        {settings.writtenCues && labelGeo && (() => {
           const fs = Math.max(13, labelGeo.sq * 0.048)
           return (
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>

@@ -57,7 +57,7 @@ export const GAME_OPTIONS = {
     background:   { default: 'sandstone', allowed: ['sandstone'] },
     trackTexture: { default: 'dirt',      allowed: ['dirt'] },
     writtenCues:  { default: true },
-    spokenCues:   { default: false },
+    spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
   },
   triangle: {
     background:   { default: 'sky',       allowed: ['sky'] },
@@ -65,33 +65,33 @@ export const GAME_OPTIONS = {
     // renderer is ported into TriangleCanvas in Phase 3 — see docs §5.
     trackTexture: { default: 'slate',     allowed: ['slate'] },
     writtenCues:  { default: true },
-    spokenCues:   { default: false },
+    spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
   },
   star: {
     background:   { default: 'nightSky',  allowed: ['nightSky'] },
     trackTexture: { default: 'gradient',  allowed: ['gradient'] },
     // Star is voice-only today (StarGame.jsx:29) — that's the default, not a bug.
-    writtenCues:  { default: false },
-    spokenCues:   { default: true },
+    writtenCues:  { default: false, menu: false },   // this game has no written labels
+    spokenCues:   { default: true, menu: false },    // voice already on; toggle not wired yet
   },
   infinity: {
     background:   { default: 'lake',      allowed: ['lake'] },
     trackTexture: { default: 'ribbon',    allowed: ['ribbon'] },
     writtenCues:  { default: true },
-    spokenCues:   { default: false },
+    spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
   },
   rainbow: {
     background:   { default: 'firstLight', allowed: ['firstLight'] },
     trackTexture: { default: 'arcs',       allowed: ['arcs'] },
     // Rainbow conveys phase visually + an in-cloud countdown; no in/out text today.
-    writtenCues:  { default: false },
-    spokenCues:   { default: false },
+    writtenCues:  { default: false, menu: false },   // this game has no written labels
+    spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
   },
   heart: {
     background:   { default: 'field',     allowed: ['field'] },
     trackTexture: { default: 'candy',     allowed: ['candy'] },
     writtenCues:  { default: true },
-    spokenCues:   { default: false },
+    spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
   },
 }
 

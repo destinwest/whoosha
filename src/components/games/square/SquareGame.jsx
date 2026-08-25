@@ -2,8 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import StrokeSelector   from './StrokeSelector'
 import SquareCanvas, { SCALE_ACTIVE } from './SquareCanvas'
 import CompletionScreen from './CompletionScreen'
-import MuteButton       from '../../ui/MuteButton'
-import GameSettingsPanel from '../_shared/GameSettingsPanel'
+import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSoundDirector } from '../../../hooks/useSoundDirector'
 import { useSettings }   from '../../../hooks/useSettings'
 
@@ -189,7 +188,6 @@ export default function SquareGame({ onExit }) {
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
   const [labelGeo, setLabelGeo]     = useState(null)      // { labelMids, sq }
-  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // ── Customization settings ──────────────────────────────────────────────────
   // Resolved attribute values for Square (defaults ⊕ the user's overrides). The
@@ -330,24 +328,9 @@ export default function SquareGame({ onExit }) {
           </svg>
         </button>
 
-        {/* mute toggle — top-right, mirrors exit-button treatment */}
-        <MuteButton className="absolute top-4 right-4 z-20" />
-
-        {/* settings gear — left of the mute button; opens the customize panel */}
-        {phase === 'game' && (
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="absolute top-4 z-20 w-11 h-11 flex items-center justify-center rounded-2xl bg-white/15 text-white hover:bg-white/25 active:bg-white/30 transition-colors"
-            style={{ right: 68 }}
-            aria-label="Customize game"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-              strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </button>
-        )}
+        {/* customize — top-right; the panel hosts the global mute + Square's
+            per-game options, so no separate mute button in the chrome. */}
+        {phase === 'game' && <GameSettingsControl gameKey="square" />}
       </div>
 
       {/* ── The world ──────────────────────────────────────────────────────────
@@ -487,11 +470,6 @@ export default function SquareGame({ onExit }) {
           durationSeconds={completionSeconds}
           onDismiss={handleCompletionDismiss}
         />
-      )}
-
-      {/* customize panel — schema-driven; reads/writes via useSettings */}
-      {settingsOpen && (
-        <GameSettingsPanel gameKey="square" onClose={() => setSettingsOpen(false)} />
       )}
     </div>
   )
