@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import StrokeSelector from '../square/StrokeSelector'   // shared until refactor
 import RainbowCanvas from './RainbowCanvas'
 import CompletionScreen from '../square/CompletionScreen'
+import GameSettingsControl from '../_shared/GameSettingsControl'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
 // StrokeSelector component, but each toggles its visibility independently.
@@ -127,6 +128,9 @@ export default function RainbowGame({ onExit }) {
           <path d="M19 12H5M12 5l-7 7 7 7" />
         </svg>
       </button>
+
+      {/* customize — top-right; panel hosts the global mute (Sound-only for now) */}
+      <GameSettingsControl gameKey="rainbow" tone="amber" />
 
       {/* game canvas — always mounted; blur/scale driven by CSS custom properties.
           Dims (doesn't vanish) once completion phase begins, same treatment as

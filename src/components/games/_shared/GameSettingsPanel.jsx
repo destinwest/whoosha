@@ -26,7 +26,7 @@ const VALUE_LABEL = {
   // backgrounds
   meadow: 'Day', meadowDusk: 'Dusk',
   // track textures
-  dirt: 'Dirt', slate: 'Slate', candy: 'Candy', gradient: 'Smooth', arcs: 'Arcs', ribbon: 'Ribbon',
+  dirt: 'Dirt', slate: 'Slate', screeFirn: 'Scree', candy: 'Candy', gradient: 'Smooth', arcs: 'Arcs', ribbon: 'Ribbon',
   nightSky: 'Night', sandstone: 'Sandstone', sky: 'Sky', field: 'Field', firstLight: 'First light', lake: 'Lake',
 }
 const valueLabel = (v) => VALUE_LABEL[v] ?? v

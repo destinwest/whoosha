@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import StrokeSelector from '../square/StrokeSelector'   // shared until refactor
 import StarCanvas from './StarCanvas'
 import CompletionScreen from '../square/CompletionScreen'
-import MuteButton from '../../ui/MuteButton'
+import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useStarVoice } from '../../../hooks/useStarVoice'
 import { buildNightSkyBg } from '../_shared/nightSky'
 
@@ -198,7 +198,8 @@ export default function StarGame({ onExit }) {
         </svg>
       </button>
 
-      <MuteButton className="absolute top-4 right-4 z-20" />
+      {/* customize — top-right; panel hosts the global mute (Sound-only for now) */}
+      <GameSettingsControl gameKey="star" />
 
       {/* game canvas — always mounted; blur/scale driven by CSS custom properties.
           Dims (doesn't vanish) once completion phase begins, same treatment as

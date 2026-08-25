@@ -279,6 +279,7 @@ export default function TriangleGame({ onExit }) {
             onGameStart={() => { sessionStartRef.current = Date.now() }}
             onResize={setLabelGeo}
             interactive={phase === 'game'}
+            trackTexture={settings.trackTexture}
           />
         </div>
 

@@ -61,9 +61,8 @@ export const GAME_OPTIONS = {
   },
   triangle: {
     background:   { default: 'sky',       allowed: ['sky'] },
-    // 'screeFirn' (the parked triangle/next prototype) joins `allowed` when its
-    // renderer is ported into TriangleCanvas in Phase 3 — see docs §5.
-    trackTexture: { default: 'slate',     allowed: ['slate'] },
+    // scree→firn ported into TriangleCanvas (buildScreeBand), user-approved 2026-08-25.
+    trackTexture: { default: 'slate',     allowed: ['slate', 'screeFirn'] },
     writtenCues:  { default: true },
     spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
   },

@@ -29,6 +29,7 @@ import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react'
 import * as stampStroke   from '../square/strokes/stampStroke'
 import * as layeredWash   from '../square/strokes/layeredWash'
 import { roundedPolyPath, offsetPolygon } from '../_shared/roundedPolyPath'
+import { mulberry32 } from '../_shared/nightSky'
 
 // ── TRIANGLE-SPECIFIC: shape + timing ────────────────────────────────────────
 const SIDES                 = 3
@@ -319,6 +320,154 @@ function buildTrackGradient(ctx, { cx, cy, R, lw }) {
   return grad
 }
 
+// ── TRIANGLE track texture: scree→firn baked band ────────────────────────────
+// The 'screeFirn' trackTexture option (user-approved 2026-08-25; prototype in
+// prototypes/triangle-track-texture.html). Same bake-once technique as Heart's
+// candy band: an offscreen band baked at resize / on selection, drawn each frame
+// as ONE drawImage (zero per-frame blend/filter) IN PLACE OF drawTrackBody.
+// The read is abstract "high mountain country" — slate dome + directional
+// cleavage strata + broken-rock mottle + fine flake grain + a whisper of glacial
+// firn + sparse mineral glints — not a literal rock photo. Every texture pass
+// after the base is confined to the exact stroked band silhouette via
+// 'source-atop', so the track footprint is byte-identical to drawTrackBody's.
+const SCREE_SEED = 0x5C7EE
+const SCREE_GRAD = [
+  { t: 0.00, c: '#B0BFCB' },   // lit crown, cool light slate
+  { t: 0.45, c: '#93A4B2' },   // base slate (= track base)
+  { t: 1.00, c: '#788A99' },   // seated outer edge, deeper slate
+]
+const SCREE_MOTTLE = [
+  { rgb: '198,210,220', aMax: 0.30 },   // lit rock face
+  { rgb: '104,120,134', aMax: 0.26 },   // shadowed rock pocket
+  { rgb: '80,94,108',   aMax: 0.18 },   // deep cleft shadow
+  { rgb: '214,228,238', aMax: 0.10 },   // whisper firn-blue
+]
+const SCREE_GRAIN_TILE = 96
+// Baked look = the prototype's approved default slider values.
+const SCREE = {
+  mottleCount: 46, grainAlpha: 0.06,
+  cleavageAlpha: 0.09, cleavageAngle: -24, cleavageSpacing: 7, cleavageJitter: 0.5,
+  firnCount: 6, firnAlpha: 0.16, firnLen: 1.4, glintCount: 14,
+}
+
+function buildScreeGrainTile(rand) {
+  const tile = document.createElement('canvas')
+  tile.width = tile.height = SCREE_GRAIN_TILE
+  const t = tile.getContext('2d')
+  const img = t.createImageData(SCREE_GRAIN_TILE, SCREE_GRAIN_TILE), d = img.data
+  for (let i = 0; i < d.length; i += 4) {
+    const v = 70 + ((rand() * 150) | 0)   // 70–220, dark-skewed rock flake
+    d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255
+  }
+  t.putImageData(img, 0, 0)
+  return tile
+}
+
+// A soft elongated firn/snow streak, oriented along `ang`.
+function drawScreeStreak(ctx, x, y, len, wid, ang, rgb, a) {
+  ctx.save()
+  ctx.translate(x, y); ctx.rotate(ang)
+  const g = ctx.createLinearGradient(-len / 2, 0, len / 2, 0)
+  g.addColorStop(0,   `rgba(${rgb},0)`)
+  g.addColorStop(0.5, `rgba(${rgb},${a})`)
+  g.addColorStop(1,   `rgba(${rgb},0)`)
+  ctx.fillStyle = g
+  ctx.beginPath(); ctx.ellipse(0, 0, len / 2, wid / 2, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+}
+
+// Bake the band as a full-canvas offscreen bitmap. w/h in CSS px, dpr device ratio.
+function buildScreeBand(trackGeo, w, h, dpr) {
+  const { cx, cy, R, lw, verts, cornerR } = trackGeo
+  const oc = document.createElement('canvas')
+  oc.width = w * dpr; oc.height = h * dpr
+  const ctx = oc.getContext('2d')
+  ctx.scale(dpr, dpr)
+  const rand = mulberry32(SCREE_SEED)
+
+  // 1 ─ Base slate dome — stroke the centerline exactly like drawTrackBody.
+  const innerR = Math.max(0, R * 0.5 - lw / 2), outerR = R + lw / 2
+  const dome = ctx.createRadialGradient(cx, cy, innerR, cx, cy, outerR)
+  for (const s of SCREE_GRAD) dome.addColorStop(s.t, s.c)
+  ctx.beginPath(); roundedPolyPath(ctx, verts, cornerR)
+  ctx.lineWidth = lw; ctx.strokeStyle = dome; ctx.stroke()
+
+  // Confine everything below to the exact stroked band silhouette.
+  ctx.globalCompositeOperation = 'source-atop'
+
+  const halfW = R * Math.cos(Math.PI / 6) + lw, halfH = R + lw
+  const bx = cx - halfW, by = cy - halfH, bw = halfW * 2, bh = halfH * 2
+
+  // 2 ─ Directional cleavage / strata — fine near-parallel lines at an angle.
+  {
+    const ang = SCREE.cleavageAngle * Math.PI / 180
+    const dx = Math.cos(ang), dy = Math.sin(ang)   // along-line
+    const nx = -dy, ny = dx                          // across-line (spacing dir)
+    const diag = Math.hypot(bw, bh)
+    ctx.save(); ctx.lineCap = 'round'
+    for (let s = -diag; s <= diag; s += SCREE.cleavageSpacing) {
+      const off = s + (rand() - 0.5) * SCREE.cleavageSpacing * SCREE.cleavageJitter
+      const mxp = cx + nx * off, myp = cy + ny * off
+      const light = rand() < 0.22
+      const a = (light ? 0.5 : 1) * SCREE.cleavageAlpha * (0.5 + rand() * 0.7)
+      ctx.beginPath()
+      ctx.moveTo(mxp - dx * diag, myp - dy * diag)
+      ctx.lineTo(mxp + dx * diag, myp + dy * diag)
+      ctx.lineWidth = light ? 0.8 : (0.6 + rand() * 0.9)
+      ctx.strokeStyle = light ? `rgba(224,234,242,${a})` : `rgba(58,72,86,${a})`
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  // 3 ─ Broken-rock mottle — soft uneven light/shadow patches.
+  for (let i = 0; i < SCREE.mottleCount; i++) {
+    const cls = SCREE_MOTTLE[(rand() * SCREE_MOTTLE.length) | 0]
+    const px = cx + (rand() * 2 - 1) * halfW
+    const py = cy + (rand() * 2 - 1) * halfH
+    const rad = lw * (0.3 + rand() * 0.9)
+    const a = cls.aMax * (0.4 + rand() * 0.6)
+    const g = ctx.createRadialGradient(px, py, 0, px, py, rad)
+    g.addColorStop(0, `rgba(${cls.rgb},${a.toFixed(3)})`)
+    g.addColorStop(1, `rgba(${cls.rgb},0)`)
+    ctx.fillStyle = g
+    ctx.fillRect(px - rad, py - rad, rad * 2, rad * 2)
+  }
+
+  // 4 ─ Fine flake grain — high-freq dither, tiled over the band.
+  {
+    const grainTile = buildScreeGrainTile(rand)
+    const pat = ctx.createPattern(grainTile, 'repeat')
+    if (pat) { ctx.globalAlpha = SCREE.grainAlpha; ctx.fillStyle = pat; ctx.fillRect(bx, by, bw, bh); ctx.globalAlpha = 1 }
+  }
+
+  // 5 ─ Glacial firn whisper — a few pale blue-white streaks along the cleavage.
+  {
+    const ang = SCREE.cleavageAngle * Math.PI / 180
+    for (let i = 0; i < SCREE.firnCount; i++) {
+      const px = cx + (rand() * 2 - 1) * halfW
+      const py = cy + (rand() * 2 - 1) * halfH
+      const len = lw * SCREE.firnLen * (0.7 + rand() * 0.9)
+      const wid = lw * (0.16 + rand() * 0.20)
+      const a = SCREE.firnAlpha * (0.5 + rand() * 0.7)
+      drawScreeStreak(ctx, px, py, len, wid, ang + (rand() - 0.5) * 0.25, '226,236,244', a.toFixed(3))
+    }
+  }
+
+  // 6 ─ Sparse mineral glints — bright cool specks (mica/quartz).
+  for (let i = 0; i < SCREE.glintCount; i++) {
+    const px = cx + (rand() * 2 - 1) * halfW
+    const py = cy + (rand() * 2 - 1) * halfH
+    const r = 0.5 + rand() * 1.0
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(238,244,248,${(0.18 + rand() * 0.28).toFixed(3)})`
+    ctx.fill()
+  }
+
+  ctx.globalCompositeOperation = 'source-over'
+  return oc
+}
+
 // Pass A — outer shadow: bleeds outside track footprint, soft drop shadow.
 function drawTrackShadow(ctx, { verts, cornerR, lw }) {
   ctx.save()
@@ -478,7 +627,7 @@ function projectGlobal(geo, px, py) {
 
 // ── TriangleCanvas ────────────────────────────────────────────────────────────
 const TriangleCanvas = forwardRef(function TriangleCanvas(
-  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onResize, interactive },
+  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onResize, interactive, trackTexture },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -491,6 +640,8 @@ const TriangleCanvas = forwardRef(function TriangleCanvas(
   const clipArgsRef      = useRef(null)
   const trackGeoRef      = useRef(null)   // CSS px track centerline geometry
   const trackGradientRef = useRef(null)   // cached Pass B gradient (rebuilt on resize)
+  const trackTextureRef  = useRef(trackTexture)  // 'slate' | 'screeFirn'
+  const screeBandRef     = useRef(null)   // baked scree→firn band bitmap (screeFirn only)
 
   // ── Game state refs ────────────────────────────────────────────────────────
   const pacingStartRef       = useRef(null)    // clock for pacing circle — starts at mount
@@ -915,6 +1066,20 @@ const TriangleCanvas = forwardRef(function TriangleCanvas(
     }
   }
 
+  // ── Track texture — re-bake the scree→firn band when the setting changes ────
+  // On mount, resize() does the first bake (trackGeoRef isn't set until then).
+  // Later flips between 'slate' and 'screeFirn' rebuild (or clear) the band here.
+  useEffect(() => {
+    trackTextureRef.current = trackTexture
+    const tg = trackGeoRef.current, cv = canvasRef.current
+    if (trackTexture === 'screeFirn' && tg && cv) {
+      const dpr = dprRef.current
+      screeBandRef.current = buildScreeBand(tg, cv.width / dpr, cv.height / dpr, dpr)
+    } else if (trackTexture !== 'screeFirn') {
+      screeBandRef.current = null
+    }
+  }, [trackTexture])
+
   // ── Main animation loop ────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current
@@ -974,6 +1139,10 @@ const TriangleCanvas = forwardRef(function TriangleCanvas(
       }
       trackGeoRef.current      = trackGeo
       trackGradientRef.current = buildTrackGradient(ctx, trackGeo)
+      // Re-bake the scree→firn band at the new size (screeFirn only).
+      screeBandRef.current = trackTextureRef.current === 'screeFirn'
+        ? buildScreeBand(trackGeo, rect.width, rect.height, dpr)
+        : null
 
       const color = getDriftColor(colorTimeRef.current)
       stampStroke.init({ paintCtx, lw, dpr, color })
@@ -1015,7 +1184,13 @@ const TriangleCanvas = forwardRef(function TriangleCanvas(
       const trackGeo = trackGeoRef.current
       if (trackGeo) {
         drawTrackShadow(ctx, trackGeo)
-        drawTrackBody(ctx, trackGeo, trackGradientRef.current)
+        // scree→firn: draw the baked band in place of the live gradient body
+        // (falls back to drawTrackBody until the first bake lands).
+        if (trackTextureRef.current === 'screeFirn' && screeBandRef.current) {
+          ctx.drawImage(screeBandRef.current, 0, 0, W, H)
+        } else {
+          drawTrackBody(ctx, trackGeo, trackGradientRef.current)
+        }
         // drawTrackHighlight(ctx, trackGeo)
         drawTrackInnerWall(ctx, trackGeo)
       }

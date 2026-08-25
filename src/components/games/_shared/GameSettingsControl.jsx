@@ -14,6 +14,7 @@ import GameSettingsPanel from './GameSettingsPanel'
 const TONE = {
   light: 'bg-white/15 text-white hover:bg-white/25 active:bg-white/30',
   dark:  'bg-slate-700/15 text-slate-700 hover:bg-slate-700/25 active:bg-slate-700/30',
+  amber: 'bg-amber-900/10 text-amber-900/70 hover:bg-amber-900/20 active:bg-amber-900/25', // Rainbow's pale chrome
 }
 
 export default function GameSettingsControl({
