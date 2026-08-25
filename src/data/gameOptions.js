@@ -71,7 +71,7 @@ export const GAME_OPTIONS = {
     trackTexture: { default: 'gradient',  allowed: ['gradient'] },
     // Star is voice-only today (StarGame.jsx:29) — that's the default, not a bug.
     writtenCues:  { default: false, menu: false },   // this game has no written labels
-    spokenCues:   { default: true, menu: false },    // voice already on; toggle not wired yet
+    spokenCues:   { default: true },   // wired via useVoice — toggle shown
   },
   infinity: {
     background:   { default: 'lake',      allowed: ['lake'] },

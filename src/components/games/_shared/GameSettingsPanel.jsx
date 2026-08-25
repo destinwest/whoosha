@@ -1,6 +1,8 @@
 import { useSettings } from '../../../hooks/useSettings'
 import { useMutePref } from '../../../hooks/useMutePref'
+import { useVoicePref } from '../../../hooks/useVoicePref'
 import { GAME_OPTIONS, ATTRIBUTES } from '../../../data/gameOptions'
+import { VOICES, VOICE_IDS } from '../../../sound/voices'
 
 // ── GameSettingsPanel ─────────────────────────────────────────────────────────
 // A calm modal that lets the player customize the current game. It is
@@ -48,6 +50,7 @@ function controllableAttrs(gameKey) {
 export default function GameSettingsPanel({ gameKey, onClose }) {
   const { settings, setOption, reset } = useSettings(gameKey)
   const [muted, , setMuted] = useMutePref()   // global audio mute (not per-game)
+  const [voiceId, setVoice] = useVoicePref()  // global spoken-cue voice (not per-game)
   const attrs = controllableAttrs(gameKey)
 
   return (
@@ -107,6 +110,20 @@ export default function GameSettingsPanel({ gameKey, onClose }) {
           </div>
         ))}
 
+        {/* Global voice picker — shown only where this game speaks (spokenCues on)
+            and there's more than one voice to choose from. */}
+        {settings.spokenCues && VOICE_IDS.length > 1 && (
+          <div style={{ margin: '16px 0' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85, marginBottom: 8 }}>Voice</div>
+            <Segmented
+              options={VOICE_IDS}
+              value={voiceId}
+              onChange={setVoice}
+              labelFn={(id) => VOICES[id].label}
+            />
+          </div>
+        )}
+
         <button
           onClick={reset}
           style={{
@@ -144,8 +161,8 @@ function Switch({ on, onChange }) {
   )
 }
 
-// A segmented picker for enum attributes.
-function Segmented({ options, value, onChange }) {
+// A segmented picker for enum attributes (and the global voice list).
+function Segmented({ options, value, onChange, labelFn = valueLabel }) {
   return (
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       {options.map((opt) => {
@@ -162,7 +179,7 @@ function Segmented({ options, value, onChange }) {
               fontWeight: 700, cursor: 'pointer', transition: 'background 140ms ease',
             }}
           >
-            {valueLabel(opt)}
+            {labelFn(opt)}
           </button>
         )
       })}
