@@ -3,7 +3,9 @@ import StrokeSelector   from './StrokeSelector'
 import SquareCanvas, { SCALE_ACTIVE } from './SquareCanvas'
 import CompletionScreen from './CompletionScreen'
 import MuteButton       from '../../ui/MuteButton'
+import GameSettingsPanel from '../_shared/GameSettingsPanel'
 import { useSoundDirector } from '../../../hooks/useSoundDirector'
+import { useSettings }   from '../../../hooks/useSettings'
 
 // Audio fade-out duration when the game ends (seconds). Long enough to
 // feel like a settle, short enough that the completion screen is silent
@@ -28,20 +30,28 @@ const STROKE_SELECTOR_ENABLED = false
 // slanted shafts — into a single offscreen canvas at device-pixel resolution.
 // All composition happens in canvas-land via globalCompositeOperation; no CSS
 // blend layers needed at runtime.
-export function buildMeadowBg(w, h, dpr, textureImg) {
+// Base-wash palettes for the meadow, keyed by the `background` setting value.
+// Only the base gradient changes between variants; the lighting/shaft passes are
+// shared, so both read as the same meadow at different times of day. The stop
+// offsets are common to all variants.
+const MEADOW_STOP_OFFSETS = [0, 0.30, 0.55, 0.78, 1.0]
+const MEADOW_PALETTES = {
+  meadow:     ['#28C5AD', '#159986', '#097969', '#094E44', '#082B26'], // vivid day (default)
+  meadowDusk: ['#2B6E86', '#1E5570', '#173F5E', '#102A40', '#081726'], // cooler twilight
+}
+
+export function buildMeadowBg(w, h, dpr, textureImg, variant = 'meadow') {
   const oc = document.createElement('canvas')
   oc.width  = w * dpr
   oc.height = h * dpr
   const ctx = oc.getContext('2d')
   ctx.scale(dpr, dpr)
 
-  // Base diagonal wash — deep emerald-teal, lighter top-left to darker bottom-right
+  // Base diagonal wash — lighter top-left to darker bottom-right. Palette per
+  // `variant`; falls back to the day meadow for any unknown value.
+  const stops = MEADOW_PALETTES[variant] ?? MEADOW_PALETTES.meadow
   const bg = ctx.createLinearGradient(0, 0, w * 0.6, h)
-  bg.addColorStop(0,    '#28C5AD')
-  bg.addColorStop(0.30, '#159986')
-  bg.addColorStop(0.55, '#097969')
-  bg.addColorStop(0.78, '#094E44')
-  bg.addColorStop(1.0,  '#082B26')
+  MEADOW_STOP_OFFSETS.forEach((o, i) => bg.addColorStop(o, stops[i]))
   ctx.fillStyle = bg
   ctx.fillRect(0, 0, w, h)
 
@@ -179,6 +189,13 @@ export default function SquareGame({ onExit }) {
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
   const [labelGeo, setLabelGeo]     = useState(null)      // { labelMids, sq }
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  // ── Customization settings ──────────────────────────────────────────────────
+  // Resolved attribute values for Square (defaults ⊕ the user's overrides). The
+  // game reads settings.background (bakes the matching meadow palette) and
+  // settings.writtenCues (shows/hides the DOM labels) — see docs/GAME-CUSTOMIZATION.md.
+  const { settings } = useSettings('square')
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef = useRef(null)
@@ -213,6 +230,10 @@ export default function SquareGame({ onExit }) {
     const el = bgCanvasRef.current
     if (!el) return
 
+    // Background variant (day / dusk) from settings — changing it re-runs this
+    // effect and re-bakes once (a resize-class cost, zero per-frame).
+    const variant = settings.background
+
     // Ground texture — loaded once. First bake may run before image resolves;
     // a re-bake fires via onload so texture appears as soon as it's ready.
     const textureImg = new Image()
@@ -226,7 +247,7 @@ export default function SquareGame({ onExit }) {
       el.width  = w * dpr
       el.height = h * dpr
       el.getContext('2d').drawImage(
-        buildMeadowBg(w, h, dpr, textureReady ? textureImg : null),
+        buildMeadowBg(w, h, dpr, textureReady ? textureImg : null, variant),
         0, 0,
       )
     }
@@ -238,7 +259,7 @@ export default function SquareGame({ onExit }) {
     const ro = new ResizeObserver(draw)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [settings.background])
 
   // ── Stroke selection ────────────────────────────────────────────────────────
   function handleStrokeSelect(newStroke) {
@@ -311,6 +332,22 @@ export default function SquareGame({ onExit }) {
 
         {/* mute toggle — top-right, mirrors exit-button treatment */}
         <MuteButton className="absolute top-4 right-4 z-20" />
+
+        {/* settings gear — left of the mute button; opens the customize panel */}
+        {phase === 'game' && (
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="absolute top-4 z-20 w-11 h-11 flex items-center justify-center rounded-2xl bg-white/15 text-white hover:bg-white/25 active:bg-white/30 transition-colors"
+            style={{ right: 68 }}
+            aria-label="Customize game"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* ── The world ──────────────────────────────────────────────────────────
@@ -383,8 +420,9 @@ export default function SquareGame({ onExit }) {
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
         />
 
-        {/* label overlay — DOM text, positioned from canvas geometry */}
-        {labelGeo && (() => {
+        {/* label overlay — DOM text, positioned from canvas geometry.
+            Gated on the writtenCues setting (off ⇒ no labels rendered). */}
+        {settings.writtenCues && labelGeo && (() => {
           const fs = Math.max(13, labelGeo.sq * 0.048)   // resting on-screen size
           // Crispness fix: render each label at its PEAK size (fs × SCALE_ACTIVE)
           // and use transform to scale it DOWN toward rest. The glyph bitmap is
@@ -449,6 +487,11 @@ export default function SquareGame({ onExit }) {
           durationSeconds={completionSeconds}
           onDismiss={handleCompletionDismiss}
         />
+      )}
+
+      {/* customize panel — schema-driven; reads/writes via useSettings */}
+      {settingsOpen && (
+        <GameSettingsPanel gameKey="square" onClose={() => setSettingsOpen(false)} />
       )}
     </div>
   )

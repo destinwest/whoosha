@@ -43,10 +43,15 @@ export const ATTRIBUTES = {
 // Defaults transcribed from docs/GAME-CUSTOMIZATION.md §3.2 (all code-verified).
 export const GAME_OPTIONS = {
   square: {
-    background:   { default: 'meadow',    allowed: ['meadow'] },
+    // 'meadowDusk' is a cooler twilight recolor of the meadow — the first real
+    // multi-value enum, wired in SquareGame's buildMeadowBg (Phase 2 slice).
+    background:   { default: 'meadow',    allowed: ['meadow', 'meadowDusk'] },
     trackTexture: { default: 'dirt',      allowed: ['dirt'] },
     writtenCues:  { default: true },
-    spokenCues:   { default: false },
+    // menu:false ⇒ not yet exposed in the customize panel. Square has no spoken
+    // audio wired; the control returns when the voice pass lands (Phase 3). The
+    // default still resolves normally — this only hides a would-be dead toggle.
+    spokenCues:   { default: false, menu: false },
   },
   hexagon: {
     background:   { default: 'sandstone', allowed: ['sandstone'] },
