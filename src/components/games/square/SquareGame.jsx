@@ -5,6 +5,7 @@ import CompletionScreen from './CompletionScreen'
 import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSoundDirector } from '../../../hooks/useSoundDirector'
 import { useSettings }   from '../../../hooks/useSettings'
+import { useSpokenCues } from '../../../hooks/useSpokenCues'
 
 // Audio fade-out duration when the game ends (seconds). Long enough to
 // feel like a settle, short enough that the completion screen is silent
@@ -173,6 +174,7 @@ function paintShaft(ctx, w, h, polygon, stops) {
 }
 
 const LABEL_TEXTS  = ['breathe in', 'hold', 'breathe out', 'hold']
+const SPOKEN_CUES  = ['in', 'hold', 'out', 'hold']   // voice cue per side, parallel to LABEL_TEXTS
 const LABEL_ANGLES = [0, -Math.PI / 2, 0, Math.PI / 2]
 
 // ── SquareGame ────────────────────────────────────────────────────────────────
@@ -212,8 +214,15 @@ export default function SquareGame({ onExit }) {
   // Bind update to a stable identity so SquareCanvas doesn't see a new
   // callback every render (which would trigger no re-render here, but is
   // still cheaper to keep stable).
+  // Spoken cues (optional, default off) ride the same snapshot: breathPhase is
+  // the 0–1 cycle position, so ×4 gives the side index. The pacing circle opens
+  // part-way through the last hold (START_AT_BREATH_PHASE), so that first partial
+  // phase is skipped — the voice begins with the first "breathe in".
+  const cues = useSpokenCues('square', phase === 'game', { skipFirst: true })
   const directorTickRef = useRef((snapshot) => {
     directorRef.current?.update(snapshot)
+    const i = Math.min(3, Math.floor(snapshot.breathPhase * 4))
+    cues.emit(i, SPOKEN_CUES[i])
   })
 
   // When the game phase begins, ramp the ambient bed in. Idempotent inside
@@ -289,6 +298,7 @@ export default function SquareGame({ onExit }) {
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
     directorRef.current?.fadeOut(COMPLETION_AUDIO_FADE_S)
+    cues.stop()
     setPhase('completion')
   }
 
@@ -304,6 +314,7 @@ export default function SquareGame({ onExit }) {
   // director's unlock() is idempotent.
   function handleContainerPointerDown() {
     directorRef.current?.unlock()
+    cues.unlock()
   }
 
   return (

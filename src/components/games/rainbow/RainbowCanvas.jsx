@@ -453,7 +453,7 @@ function drawArcLabel(ctx, geo, a, text, alpha, fontPx) {
 
 // ── RainbowCanvas ─────────────────────────────────────────────────────────────
 const RainbowCanvas = forwardRef(function RainbowCanvas(
-  { strokeModeRef, pacingCanvasRef, onGameStart, interactive },
+  { strokeModeRef, pacingCanvasRef, onBreath, onGameStart, interactive },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -977,6 +977,9 @@ const RainbowCanvas = forwardRef(function RainbowCanvas(
       const sched = startedRef.current
         ? getSchedule(now - gameStartRef.current)
         : PRE_START_SCHED
+      // Breath-phase signal for spoken cues — only once the climb has started.
+      // key = the phase instance, type = 'holdL' | 'in' | 'holdR' | 'out'.
+      if (startedRef.current) onBreath?.(sched.key, sched.type)
       if (sched.key !== schedKeyRef.current) {
         handlePhaseChange(geo, sched, now)
         schedKeyRef.current = sched.key

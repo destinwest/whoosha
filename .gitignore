@@ -5,3 +5,6 @@ dist
 *.rtf
 token*
 .claude/
+
+# Source recording the Jamal cues were cut from — not shipped
+public/sounds/Jamal/JamalAll.mp3

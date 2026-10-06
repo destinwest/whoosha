@@ -4,6 +4,7 @@ import HexagonCanvas  from './HexagonCanvas'
 import CompletionScreen from '../square/CompletionScreen'
 import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSettings } from '../../../hooks/useSettings'
+import { useSpokenCues } from '../../../hooks/useSpokenCues'
 import { useHexBreath } from '../../../hooks/useHexBreath'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The two games
@@ -157,6 +158,7 @@ function paintStrata(ctx, w, h) {
 // vertical so their text rotates ±π/2 — right side −π/2, left side +π/2,
 // matching the Square game's vertical 'hold' labels.
 const LABEL_TEXTS  = ['breathe in', 'breathe out', 'hold', 'breathe in', 'breathe out', 'hold']
+const SPOKEN_CUES  = ['in', 'out', 'hold', 'in', 'out', 'hold']   // voice cue per side, parallel to LABEL_TEXTS
 const LABEL_ANGLES = [-Math.PI / 6, Math.PI / 6, -Math.PI / 2, -Math.PI / 6, Math.PI / 6, Math.PI / 2]
 
 // ── HexagonGame ───────────────────────────────────────────────────────────────
@@ -188,9 +190,15 @@ export default function HexagonGame({ onExit }) {
   // toward silence as the heat gauge climbs. Stable callbacks so the canvas
   // frame loop (captured once at mount) always reaches the live graph.
   const breathRef     = useHexBreath()
-  const emitBreath    = useRef((fraction) => breathRef.current.update(fraction)).current
+  // Spoken cues (optional, default off) ride the same per-frame fraction [0,6).
+  const cues = useSpokenCues('hexagon', phase === 'game')
+  const emitBreath    = useRef((fraction) => {
+    breathRef.current.update(fraction)
+    const i = Math.min(5, Math.floor(fraction))
+    cues.emit(i, SPOKEN_CUES[i])
+  }).current
   const emitGameState = useRef((snapshot) => breathRef.current.updateGauge(snapshot.gaugeEffect)).current
-  const unlockAudio   = useRef(() => breathRef.current.unlock()).current
+  const unlockAudio   = useRef(() => { breathRef.current.unlock(); cues.unlock() }).current
 
   // ── Desert background — baked once per resize ──────────────────────────────
   useEffect(() => {
@@ -228,6 +236,7 @@ export default function HexagonGame({ onExit }) {
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
     breathRef.current?.fadeOut(COMPLETION_AUDIO_FADE_S)
+    cues.stop()
     setPhase('completion')
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }

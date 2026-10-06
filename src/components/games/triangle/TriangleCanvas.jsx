@@ -627,7 +627,7 @@ function projectGlobal(geo, px, py) {
 
 // ── TriangleCanvas ────────────────────────────────────────────────────────────
 const TriangleCanvas = forwardRef(function TriangleCanvas(
-  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onResize, interactive, trackTexture },
+  { strokeModeRef, pacingCanvasRef, onTick, onBreath, onGameStart, onResize, interactive, trackTexture },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -1217,6 +1217,8 @@ const TriangleCanvas = forwardRef(function TriangleCanvas(
       const pacingPos = getPacing(now - pacingStartRef.current)
       if (pacingPos) {
         pacingPosRef.current = pacingPos
+        // Breath-phase signal for spoken cues: fraction ∈ [0, 3) — one side per phase.
+        onBreath?.(pacingPos.fraction)
       }
 
       // ── Bead tracing (per-frame, leash + acceptance) ──────────────────────

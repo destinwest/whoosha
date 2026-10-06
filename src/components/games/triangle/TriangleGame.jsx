@@ -4,6 +4,7 @@ import TriangleCanvas from './TriangleCanvas'
 import CompletionScreen from '../square/CompletionScreen'
 import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSettings } from '../../../hooks/useSettings'
+import { useSpokenCues } from '../../../hooks/useSpokenCues'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
 // StrokeSelector component, but each toggles its visibility independently.
@@ -162,6 +163,7 @@ function paintRidgeStack(ctx, w, h, ys, seed, pal) {
 // The base edge runs right→left, so aligning to its direction would flip the
 // text upside-down; it's held at 0 (upright) instead.
 const LABEL_TEXTS  = ['breathe in', 'hold', 'breathe out']
+const SPOKEN_CUES  = ['in', 'hold', 'out']   // voice cue per side, parallel to LABEL_TEXTS
 const LABEL_ANGLES = [-Math.PI / 3, Math.PI / 3, 0]
 
 // ── TriangleGame ──────────────────────────────────────────────────────────────
@@ -178,6 +180,13 @@ export default function TriangleGame({ onExit }) {
 
   // Resolved customization settings — writtenCues gates the DOM labels below.
   const { settings } = useSettings('triangle')
+
+  // Spoken cues (optional, default off) — one per side: in / hold / out.
+  const cues = useSpokenCues('triangle', phase === 'game')
+  const emitBreath = useRef((fraction) => {
+    const i = Math.min(2, Math.floor(fraction))
+    cues.emit(i, SPOKEN_CUES[i])
+  }).current
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef  = useRef(null)
@@ -221,6 +230,7 @@ export default function TriangleGame({ onExit }) {
     document.documentElement.style.setProperty('--game-saturation', '1')
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
+    cues.stop()
     setPhase('completion')
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }
@@ -229,6 +239,7 @@ export default function TriangleGame({ onExit }) {
     <div
       className="absolute inset-0 overflow-hidden select-none"
       style={{ touchAction: 'none', background: '#A6B3CE' }}
+      onPointerDown={cues.unlock}   // audio-unlock fallback for direct URL loads
     >
       {/* back button */}
       <button
@@ -276,6 +287,7 @@ export default function TriangleGame({ onExit }) {
             ref={triangleCanvasRef}
             strokeModeRef={strokeModeRef}
             pacingCanvasRef={pacingCanvasRef}
+            onBreath={emitBreath}
             onGameStart={() => { sessionStartRef.current = Date.now() }}
             onResize={setLabelGeo}
             interactive={phase === 'game'}

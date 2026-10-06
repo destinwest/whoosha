@@ -48,23 +48,22 @@ export const GAME_OPTIONS = {
     background:   { default: 'meadow',    allowed: ['meadow', 'meadowDusk'] },
     trackTexture: { default: 'dirt',      allowed: ['dirt'] },
     writtenCues:  { default: true },
-    // menu:false ⇒ not yet exposed in the customize panel. Square has no spoken
-    // audio wired; the control returns when the voice pass lands (Phase 3). The
-    // default still resolves normally — this only hides a would-be dead toggle.
-    spokenCues:   { default: false, menu: false },
+    // (menu:false on an attribute ⇒ resolves normally but is hidden from the
+    // customize panel — used for toggles a game cannot honor yet.)
+    spokenCues:   { default: false },   // wired via useSpokenCues — toggle shown
   },
   hexagon: {
     background:   { default: 'sandstone', allowed: ['sandstone'] },
     trackTexture: { default: 'dirt',      allowed: ['dirt'] },
     writtenCues:  { default: true },
-    spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
+    spokenCues:   { default: false },   // wired via useSpokenCues — toggle shown
   },
   triangle: {
     background:   { default: 'sky',       allowed: ['sky'] },
     // scree→firn ported into TriangleCanvas (buildScreeBand), user-approved 2026-08-25.
     trackTexture: { default: 'slate',     allowed: ['slate', 'screeFirn'] },
     writtenCues:  { default: true },
-    spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
+    spokenCues:   { default: false },   // wired via useSpokenCues — toggle shown
   },
   star: {
     background:   { default: 'nightSky',  allowed: ['nightSky'] },
@@ -85,7 +84,7 @@ export const GAME_OPTIONS = {
     trackTexture: { default: 'arcs',       allowed: ['arcs'] },
     // Rainbow conveys phase visually + an in-cloud countdown; no in/out text today.
     writtenCues:  { default: false, menu: false },   // this game has no written labels
-    spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
+    spokenCues:   { default: false },   // wired via useSpokenCues — toggle shown
   },
   heart: {
     background:   { default: 'field',     allowed: ['field'] },

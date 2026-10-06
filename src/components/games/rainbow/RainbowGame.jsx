@@ -3,6 +3,7 @@ import StrokeSelector from '../square/StrokeSelector'   // shared until refactor
 import RainbowCanvas from './RainbowCanvas'
 import CompletionScreen from '../square/CompletionScreen'
 import GameSettingsControl from '../_shared/GameSettingsControl'
+import { useSpokenCues } from '../../../hooks/useSpokenCues'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
 // StrokeSelector component, but each toggles its visibility independently.
@@ -59,10 +60,17 @@ function buildFirstLightBg(w, h, dpr) {
 // are canvas text curved along the active arc (drawn by RainbowCanvas — a DOM
 // label can't follow the curve), so there is no label overlay here. No audio
 // this pass — no MuteButton.
+const SPOKEN_CUES = { holdL: 'hold', in: 'in', holdR: 'hold', out: 'out' }   // voice cue per schedule phase type
+
 export default function RainbowGame({ onExit }) {
 
   // Mount straight into play — no in-game intro (same as the other games).
   const [phase, setPhase] = useState('game')   // 'game' | 'completion'
+
+  // Spoken cues (optional, default off) — one per schedule phase; both cloud
+  // holds say "hold". Starts with the climb (first touch), like the schedule.
+  const cues = useSpokenCues('rainbow', phase === 'game')
+  const emitBreath = useRef((key, type) => cues.emit(key, SPOKEN_CUES[type])).current
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
 
@@ -108,6 +116,7 @@ export default function RainbowGame({ onExit }) {
     document.documentElement.style.setProperty('--game-saturation', '1')
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
+    cues.stop()
     setPhase('completion')
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }
@@ -116,6 +125,7 @@ export default function RainbowGame({ onExit }) {
     <div
       className="absolute inset-0 overflow-hidden select-none"
       style={{ touchAction: 'none', background: BG_SOLID }}
+      onPointerDown={cues.unlock}   // audio-unlock fallback for direct URL loads
     >
       {/* back button */}
       <button
@@ -163,6 +173,7 @@ export default function RainbowGame({ onExit }) {
             ref={rainbowCanvasRef}
             strokeModeRef={strokeModeRef}
             pacingCanvasRef={pacingCanvasRef}
+            onBreath={emitBreath}
             onGameStart={() => { sessionStartRef.current = Date.now() }}
             interactive={phase === 'game'}
           />
