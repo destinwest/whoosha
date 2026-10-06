@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from 'react'
 import InfinityCanvas   from './InfinityCanvas'
 import CompletionScreen from '../square/CompletionScreen'
 import { buildLakeSurfaceBg } from './lakeSurface'
+import GameSettingsControl from '../_shared/GameSettingsControl'
+import { useSettings } from '../../../hooks/useSettings'
+import { useVoice } from '../../../hooks/useVoice'
 
 // Game canvas opacity once completion phase begins — the world recedes behind
 // the completion card without vanishing entirely.
@@ -32,9 +35,30 @@ export default function InfinityGame({ onExit }) {
   const breathLabelRef       = useRef('in')
   const breathSecondsLeftRef = useRef(4)
 
+  // ── Spoken cues (optional — spokenCues setting, default off) ────────────────
+  // Fired from the same per-frame tick that drives the written label, so the
+  // voice lands exactly when the label flips (inhale 1 segment / exhale 2).
+  // Refs keep the tick handler correct even if the canvas holds an older copy.
+  // While spoken is off the phase is still tracked, so switching it on waits
+  // for the next transition instead of speaking mid-breath.
+  const { settings } = useSettings('infinity')
+  const voiceRef   = useVoice()
+  const phaseRef   = useRef(phase)
+  phaseRef.current = phase
+  const spokenRef  = useRef(settings.spokenCues)
+  spokenRef.current = settings.spokenCues
+  const lastSpokenRef = useRef(null)   // last breath phase a cue was fired (or skipped) for
+
   // Per-rAF-frame tick from InfinityCanvas — only re-render when the displayed
   // breath label or countdown second actually changes, not on every frame.
   function handleGameStateTick(state) {
+    if (phaseRef.current === 'game' && state.breathLabel !== lastSpokenRef.current) {
+      if (!spokenRef.current) {
+        lastSpokenRef.current = state.breathLabel
+      } else if (voiceRef.current?.play(state.breathLabel)) {   // 'in' | 'out'; retried next frame if not started
+        lastSpokenRef.current = state.breathLabel
+      }
+    }
     if (state.breathLabel !== breathLabelRef.current) {
       breathLabelRef.current = state.breathLabel
       setBreathLabel(state.breathLabel)
@@ -70,12 +94,15 @@ export default function InfinityGame({ onExit }) {
     document.documentElement.style.setProperty('--game-saturation', '1')
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
+    voiceRef.current?.stop()   // don't let a cue linger under the completion card
     setPhase('completion')
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }
 
   return (
-    <div className="absolute inset-0 overflow-hidden select-none" style={{ touchAction: 'none', background: '#0656AB' }}>
+    <div className="absolute inset-0 overflow-hidden select-none" style={{ touchAction: 'none', background: '#0656AB' }}
+      onPointerDown={() => voiceRef.current?.unlock()}   // audio-unlock fallback for direct URL loads
+    >
       {/* Top chrome */}
       <div style={{ opacity: 'var(--intro-ui, 1)' }}>
         <button
@@ -88,6 +115,9 @@ export default function InfinityGame({ onExit }) {
             <path d="M19 12H5M12 5l-7 7 7 7" />
           </svg>
         </button>
+
+        {/* customize — top-right; panel hosts the global mute + spoken toggle */}
+        <GameSettingsControl gameKey="infinity" />
       </div>
 
       {/* The world */}

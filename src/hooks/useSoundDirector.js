@@ -11,7 +11,7 @@
 // cleanup and the remounted effects), so a consumer's own mount effect (e.g.
 // SquareGame's `startAmbient` on [phase]) fired against a null ref and audio
 // never started in dev. Creating in the effect matches the useHexBreath /
-// useStarVoice shape: every mount pass gets a live instance.
+// useVoice shape: every mount pass gets a live instance.
 //
 // Mute preference is wired in here so that consumers don't have to thread it
 // through manually — toggling mute anywhere in the app immediately propagates

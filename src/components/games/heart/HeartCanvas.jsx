@@ -879,7 +879,7 @@ function projectGlobal(geo, px, py) {
 
 // ── HeartCanvas ───────────────────────────────────────────────────────────────
 const HeartCanvas = forwardRef(function HeartCanvas(
-  { strokeModeRef, pacingCanvasRef, onTick, onGameStart, onResize, interactive },
+  { strokeModeRef, pacingCanvasRef, onTick, onBreath, onGameStart, onResize, interactive },
   ref,
 ) {
   // ── Canvas infrastructure ──────────────────────────────────────────────────
@@ -1466,6 +1466,9 @@ const HeartCanvas = forwardRef(function HeartCanvas(
       const pacingPos = getPacing(now - pacingStartRef.current)
       if (pacingPos) {
         pacingPosRef.current = pacingPos
+        // Breath-phase signal for spoken cues: fraction ∈ [0, 2) — floor 0 = the
+        // breathe-in half, 1 = the breathe-out half (see HeartGame's emitBreath).
+        onBreath?.(pacingPos.fraction)
       }
 
       // ── Bead tracing (per-frame, leash + acceptance) ──────────────────────

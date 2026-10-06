@@ -1,6 +1,6 @@
 // ── useVoice ─────────────────────────────────────────────────────────────────
 // Game-agnostic spoken-cue path — the generalization of the original
-// useStarVoice. Builds a per-game node graph (master gain → destination) on the
+// Star-only voice hook. Builds a per-game node graph (master gain → destination) on the
 // app's shared AudioContext, plays cues from the globally-selected voice pack
 // (useVoicePref), honours the shared mute pref, and tears down on unmount
 // WITHOUT touching the shared context. Rebuilds when the selected voice changes

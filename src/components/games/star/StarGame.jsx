@@ -28,11 +28,11 @@ const BG_SOLID = '#070A22'   // flat fallback behind the canvas (sky's darkest t
 // drawing, geometry, and pointer handling live in StarCanvas.
 //
 // No on-screen breathing labels — voice-only instruction (spoken "breathe in" /
-// "breathe out" cues via useStarVoice), testing whether voice-only reads better
+// "breathe out" cues via useVoice), testing whether voice-only reads better
 // than text for this game. The star's 10 arms made the old text labels feel
 // cramped regardless of layout tuning; removed rather than fought.
 //
-// A one-shot spoken intro ("StarGameBreathIntro.mp3") also plays once at game
+// A one-shot spoken intro ("Faith/FaithIntro.mp3") also plays once at game
 // open, ahead of the first breath cue — see emitTick below. This is the one
 // piece of Star's audio design that's deliberately different from every other
 // game (none of which have an intro clip).
@@ -93,7 +93,7 @@ export default function StarGame({ onExit }) {
   // mapping, back from when the origin was also valley-anchored).
   //
   // lastBreathPhaseRef only advances when play() reports it actually started
-  // (see useStarVoice) — if the AudioContext's resume() from unlock() hasn't
+  // (see useVoice) — if the AudioContext's resume() from unlock() hasn't
   // resolved yet on this exact frame (a possible few-ms gap right at
   // unlock), the SAME phaseIdx is retried on the next frame instead of the
   // cue being silently lost until the next phase boundary.
@@ -113,7 +113,7 @@ export default function StarGame({ onExit }) {
   // FIRST, instantly-disposed voice instance claim the intro (play() succeeds
   // for a few ms, then dispose silences it) and the surviving instance would
   // never replay it. In production this cleanup only runs at real unmount.
-  // (Genuinely true as of 2026-07-13: useStarVoice runs on the app's shared
+  // (Genuinely true as of 2026-07-13: useVoice runs on the app's shared
   // AudioContext — see sharedContext.js — unlocked synchronously by the home
   // carousel's card-tap handler, so it's typically ALREADY 'running' by the
   // time this component mounts. A note here briefly, incorrectly claimed this

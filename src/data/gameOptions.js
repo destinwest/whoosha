@@ -76,8 +76,9 @@ export const GAME_OPTIONS = {
   infinity: {
     background:   { default: 'lake',      allowed: ['lake'] },
     trackTexture: { default: 'ribbon',    allowed: ['ribbon'] },
-    writtenCues:  { default: true },
-    spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
+    // Labels couple with the countdown slot — the written toggle isn't wired yet.
+    writtenCues:  { default: true, menu: false },
+    spokenCues:   { default: false },   // wired via useVoice — toggle shown
   },
   rainbow: {
     background:   { default: 'firstLight', allowed: ['firstLight'] },
@@ -90,7 +91,7 @@ export const GAME_OPTIONS = {
     background:   { default: 'field',     allowed: ['field'] },
     trackTexture: { default: 'candy',     allowed: ['candy'] },
     writtenCues:  { default: true },
-    spokenCues:   { default: false, menu: false },   // not wired anywhere yet (voice pass)
+    spokenCues:   { default: false },   // wired via useVoice — toggle shown
   },
 }
 

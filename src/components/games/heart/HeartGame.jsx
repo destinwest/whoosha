@@ -4,6 +4,7 @@ import HeartCanvas from './HeartCanvas'
 import CompletionScreen from '../square/CompletionScreen'
 import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSettings } from '../../../hooks/useSettings'
+import { useVoice } from '../../../hooks/useVoice'
 import { buildHeartFieldBg } from './heartField'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
@@ -25,7 +26,7 @@ const LABEL_TEXTS = ['breathe in', 'breathe out']
 // ── HeartGame ─────────────────────────────────────────────────────────────────
 // Phase manager — owns game phase, stroke selection, session timing, exit, and
 // the baked salmon-radial background. All canvas drawing, geometry, and
-// pointer handling live in HeartCanvas. No audio this pass (matches Triangle).
+// pointer handling live in HeartCanvas. Audio: optional spoken cues only (useVoice).
 export default function HeartGame({ onExit }) {
 
   // Mount straight into play — no in-game intro (same as Hexagon / Infinity / Triangle).
@@ -36,6 +37,28 @@ export default function HeartGame({ onExit }) {
 
   // Resolved customization settings — writtenCues gates the DOM labels below.
   const { settings } = useSettings('heart')
+
+  // ── Spoken cues (optional — spokenCues setting, default off) ────────────────
+  // Same shape as Star: HeartCanvas hands a per-frame breath fraction ∈ [0, 2)
+  // to the STABLE emitBreath, which edge-detects the half (0 = in, 1 = out) and
+  // fires one cue per transition. phase/spoken are mirrored into refs so the
+  // callback never goes stale. While spoken is off the phase is still tracked,
+  // so switching it on waits for the next transition instead of speaking mid-breath.
+  const voiceRef   = useVoice()
+  const phaseRef   = useRef(phase)
+  phaseRef.current = phase
+  const spokenRef  = useRef(settings.spokenCues)
+  spokenRef.current = settings.spokenCues
+  const lastBreathPhaseRef = useRef(-1)
+  const emitBreath = useRef((fraction) => {
+    if (phaseRef.current !== 'game') return
+    const phaseIdx = Math.floor(fraction)
+    if (phaseIdx === lastBreathPhaseRef.current) return
+    if (!spokenRef.current) { lastBreathPhaseRef.current = phaseIdx; return }
+    // Only advance once play() reports it started — retried next frame otherwise.
+    const played = voiceRef.current?.play(phaseIdx === 0 ? 'in' : 'out')
+    if (played) lastBreathPhaseRef.current = phaseIdx
+  }).current
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const sessionStartRef  = useRef(null)
@@ -79,6 +102,7 @@ export default function HeartGame({ onExit }) {
     document.documentElement.style.setProperty('--game-saturation', '1')
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
+    voiceRef.current?.stop()   // don't let a cue linger under the completion card
     setPhase('completion')
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }
@@ -87,6 +111,7 @@ export default function HeartGame({ onExit }) {
     <div
       className="absolute inset-0 overflow-hidden select-none"
       style={{ touchAction: 'none', background: '#E8836B' }}
+      onPointerDown={() => voiceRef.current?.unlock()}   // audio-unlock fallback for direct URL loads
     >
       {/* back button */}
       <button
@@ -100,7 +125,7 @@ export default function HeartGame({ onExit }) {
         </svg>
       </button>
 
-      {/* customize — top-right; panel hosts the global mute + writtenCues toggle */}
+      {/* customize — top-right; panel hosts the global mute + written/spoken toggles */}
       <GameSettingsControl gameKey="heart" tone="dark" />
 
       {/* game canvas — always mounted; blur/scale driven by CSS custom properties.
@@ -134,6 +159,7 @@ export default function HeartGame({ onExit }) {
             ref={heartCanvasRef}
             strokeModeRef={strokeModeRef}
             pacingCanvasRef={pacingCanvasRef}
+            onBreath={emitBreath}
             onGameStart={() => { sessionStartRef.current = Date.now() }}
             onResize={setLabelGeo}
             interactive={phase === 'game'}

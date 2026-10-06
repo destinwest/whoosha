@@ -1,14 +1,13 @@
 // ── voice ────────────────────────────────────────────────────────────────────
 // Generic spoken-cue player — the game-agnostic generalization of the original
-// starVoice.js. A "voice pack" is just a map of cue → clip URL, e.g.
-//   { in: '/sounds/BreatheIn.mp3', out: '/sounds/BreatheOut.mp3', hold: '…', intro: '…' }
+// Star-only player (since removed). A "voice pack" is just a map of cue → clip URL, e.g.
+//   { in: '/sounds/Faith/FaithBreatheIn.mp3', out: '…', hold: '…', intro: '…' }
 // Any cue whose clip is absent from the pack simply no-ops when played, so a
 // pack can ship without a 'hold' (or 'intro') and gain it later.
 //
 // Deliberately SAMPLED, not synthesized: the "cued/breath-coupled elements stay
 // synthesized" rule (POLISH-STRATEGY 2026-06-02) is about material synthesis
-// handles well — spoken words aren't in that set (see the original note in
-// starVoice.js). Deliberately NOT the full SoundDirector: nothing here outlives
+// handles well — spoken words aren't in that set. Deliberately NOT the full SoundDirector: nothing here outlives
 // a single clip — each cue is a fresh one-shot AudioBufferSource — so there is
 // no persistent graph for an iOS lock/unlock to leave broken. Runs on the app's
 // shared AudioContext (see sharedContext.js), handed in by useVoice.

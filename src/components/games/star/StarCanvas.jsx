@@ -39,7 +39,7 @@
 //   interactive    — boolean; controls pointer events on the canvas element
 //
 // Voice cues ("breathe in" / "breathe out") are owned by StarGame via
-// useStarVoice, driven off onBreath — see the comment there. No other audio
+// useVoice, driven off onBreath — see the comment there. No other audio
 // this pass (no ambient bed).
 //
 // Imperative API (via ref):
@@ -91,7 +91,7 @@ const CYCLE_MS              = SIDE_DURATIONS_MS.reduce((a, b) => a + b, 0)  // 4
 const VOICE_PHASE_MS        = CYCLE_MS / SIDES
 // How long the pacing circle stays frozen at its mount position (the bottom
 // trough) before it starts moving, so it doesn't move — and no breath cue fires, see
-// the onBreath call site — until the spoken intro ("StarGameBreathIntro.mp3",
+// the onBreath call site — until the spoken intro ("Faith/FaithIntro.mp3",
 // a "take one big deep breath in" prompt) has had time to finish. The clip
 // itself runs 5.407s (confirmed via ffprobe, 2026-07-15); this adds a ~593ms
 // buffer past its own fade-out tail (was 5500/~93ms — user asked for half a
