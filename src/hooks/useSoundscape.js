@@ -1,9 +1,21 @@
-// ── useHexBreath ───────────────────────────────────────────────────────────
-// BREATH + AMBIENT-BED audio path for the Hexagon game. Deliberately NOT the
-// full SoundDirector: no bowl, no rumble, no reverb sends. Just the app's
-// shared AudioContext, the noise buffers, the hex breath module, and the sampled
-// ambient bed (synthHexAmbient) — routed to the speakers through a master
-// gain (which also honours the shared mute preference).
+// ── useSoundscape ────────────────────────────────────────────────────────────
+// The shared BREATH + AMBIENT-BED audio path — one "soundscape" a game can play:
+// the breath whoosh that follows the pacing circle (synthHexBreath) over a
+// selectable sampled bed (sound/ambientTracks.js). Generalized from the original
+// Hexagon-only useHexBreath; every game except Square uses it (Square's richer
+// SoundDirector owns its own copy of the same idea).
+//
+//   const scapeRef = useSoundscape(track)   // track id, or null/undefined = silent
+//
+// `track` comes from resolveAmbientTrack(settings): null when the player chose
+// Ambient "Off" or has spoken instructions on (the two are alternatives, never
+// layered). With no track nothing is built — the api below is all no-ops — and
+// changing the track tears the graph down and rebuilds it with the new bed.
+//
+// Deliberately NOT the full SoundDirector: no bowl, no rumble, no reverb sends.
+// Just the app's shared AudioContext, the noise buffers, the breath module, and
+// the bed — routed to the speakers through a master gain (which also honours
+// the shared mute preference).
 //
 // The ambient bed ducks in two independent ways, chained in series (each is
 // its own gain node so either can attenuate the bed without touching the
@@ -39,8 +51,11 @@
 //   unlock()               — resume the context; call on the first user
 //                            gesture (required on iOS). Idempotent. Also
 //                            advances interruption recovery.
-//   update(fraction)       — drive the breath with the pacing fraction [0,6)
-//                            each frame. No-op until the context is running.
+//   update(fraction)       — Hexagon's driver: the pacing fraction [0,6) each
+//                            frame. No-op until the context is running.
+//   updatePhase(kind, p)   — every other game's driver: the current breath
+//                            phase ('in' | 'out' | 'hold') and its 0..1
+//                            progress, each frame.
 //   updateGauge(gaugeFx)   — duck the ambient bed toward silence as the heat
 //                            gauge (0..1) climbs. Call once per frame from
 //                            HexagonCanvas's onGameStateTick. No-op until the
@@ -59,7 +74,7 @@
 import { useEffect, useRef } from 'react'
 import { createNoiseBuffers } from '../sound/noiseBuffer'
 import { createHexBreath }    from '../sound/synthHexBreath'
-import { createHexAmbient }   from '../sound/synthHexAmbient'
+import { createAmbientTrack } from '../sound/ambientTracks'
 import { getSharedAudioContext, playSilentBuffer } from '../sound/sharedContext'
 import { useMutePref }        from './useMutePref'
 
@@ -91,12 +106,16 @@ const TC_BREATH_DUCK        = 0.25
 const RECOVERY_INTERVAL_MS  = 400
 const RECOVERY_MAX_ATTEMPTS = 40   // ~16s of gesture-free retrying while visible
 
-export function useHexBreath() {
-  const ref      = useRef({ unlock() {}, update() {}, updateGauge() {}, fadeOut() {} })
+const NOOP_API = () => ({ unlock() {}, update() {}, updatePhase() {}, updateGauge() {}, fadeOut() {} })
+
+export function useSoundscape(track) {
+  const ref      = useRef(NOOP_API())
   const mutedRef = useRef(false)
   const [muted]  = useMutePref()
 
   useEffect(() => {
+    if (!track) return   // no soundscape selected — keep the no-op api, build nothing
+
     let ctx
     let disposed = false
 
@@ -154,7 +173,7 @@ export function useHexBreath() {
 
       // The `gen` guard drops the result if a dispose or a newer buildSources
       // (recovery rebuild) happened while the fetch/decode was in flight.
-      createHexAmbient(ctx)
+      createAmbientTrack(ctx, track)
         .then((mod) => {
           if (disposed || gen !== buildGen) { try { mod.dispose() } catch (e) {}; return }
           ambient = mod
@@ -284,6 +303,16 @@ export function useHexBreath() {
       return   // audio unavailable — leave the no-op api in place
     }
 
+    // Sidechain: the bed steps back while the breath is swelling (see header).
+    function duckBedForBreath(presence) {
+      if (!ambientBreathDuck) return
+      const target = 1 + (BED_BREATH_DUCK_FLOOR - 1) * presence
+      if (Math.abs(target - lastBreathDuck) > RESCHEDULE_EPS) {
+        ambientBreathDuck.gain.setTargetAtTime(target, ctx.currentTime, TC_BREATH_DUCK)
+        lastBreathDuck = target
+      }
+    }
+
     ref.current = {
       unlock() {
         // Silent-buffer kick + resume from inside the gesture — the strongest
@@ -295,15 +324,11 @@ export function useHexBreath() {
       },
       update(fraction) {
         if (disposed || ctx.state !== 'running' || !breath) return
-        const presence = breath.update(fraction)   // 0..1 raw bell value
-        if (ambientBreathDuck) {
-          const now    = ctx.currentTime
-          const target = 1 + (BED_BREATH_DUCK_FLOOR - 1) * presence
-          if (Math.abs(target - lastBreathDuck) > RESCHEDULE_EPS) {
-            ambientBreathDuck.gain.setTargetAtTime(target, now, TC_BREATH_DUCK)
-            lastBreathDuck = target
-          }
-        }
+        duckBedForBreath(breath.update(fraction))   // 0..1 raw bell value
+      },
+      updatePhase(kind, progress) {
+        if (disposed || ctx.state !== 'running' || !breath) return
+        duckBedForBreath(breath.updatePhase(kind, progress))
       },
       updateGauge(gaugeEffect) {
         if (disposed || !ambientBedGain) return
@@ -331,15 +356,22 @@ export function useHexBreath() {
       stopRecoveryPump()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       ctx.removeEventListener('statechange', onStateChange)
-      disposeSources()
-      disposeSpine()
+      ref.current = NOOP_API()
+      // Quick fade before tearing down so switching the soundscape off (or to
+      // another track) mid-game doesn't cut with a click. These are this
+      // effect-run's own nodes; a rebuilt graph lives in a fresh closure.
+      const oldMaster = master
+      try { oldMaster.gain.setTargetAtTime(0, ctx.currentTime, 0.02) } catch (e) {}
+      setTimeout(() => {
+        disposeSources()
+        disposeSpine()
+      }, 120)
       // Do NOT close or suspend the shared context — it's the app-lifetime
       // singleton (closing it would count against iOS's per-page context cap,
       // and suspending here would undo the card-tap unlock during StrictMode's
-      // dev remount). All of this game's nodes are stopped/disconnected above.
-      ref.current = { unlock() {}, update() {}, updateGauge() {}, fadeOut() {} }
+      // dev remount).
     }
-  }, [])
+  }, [track])
 
   // Mirror the shared mute pref into the master gain.
   useEffect(() => {

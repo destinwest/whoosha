@@ -5,7 +5,8 @@ import CompletionScreen from '../square/CompletionScreen'
 import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSettings } from '../../../hooks/useSettings'
 import { useSpokenCues } from '../../../hooks/useSpokenCues'
-import { useHexBreath } from '../../../hooks/useHexBreath'
+import { useSoundscape } from '../../../hooks/useSoundscape'
+import { resolveAmbientTrack } from '../../../sound/ambientTracks'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The two games
 // share the StrokeSelector component, but each toggles its visibility
@@ -186,10 +187,11 @@ export default function HexagonGame({ onExit }) {
   const pacingCanvasRef = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
 
   // ── Breath + ambient audio ──────────────────────────────────────────────────
-  // Breath (synthHexBreath) + ambient bed (synthHexAmbient), the bed ducking
-  // toward silence as the heat gauge climbs. Stable callbacks so the canvas
-  // frame loop (captured once at mount) always reaches the live graph.
-  const breathRef     = useHexBreath()
+  // The soundscape: breath whoosh + the selected ambient bed (Canyon by default),
+  // the bed ducking toward silence as the heat gauge climbs. Silent when the
+  // player picks Ambient "Off" or turns spoken instructions on. Stable callbacks
+  // so the canvas frame loop (captured once at mount) always reaches the live graph.
+  const breathRef     = useSoundscape(resolveAmbientTrack(settings))
   // Spoken cues (optional, default off) ride the same per-frame fraction [0,6).
   const cues = useSpokenCues('hexagon', phase === 'game')
   const emitBreath    = useRef((fraction) => {

@@ -24,7 +24,7 @@ import { createNoiseBuffers }     from './noiseBuffer'
 import { createBreath }           from './synthBreath'
 import { createRumble }           from './synthRumble'
 import { createBowl }             from './synthBowl'
-import { createAmbient }          from './synthAmbient'
+import { createAmbientTrack } from './ambientTracks'
 import { createReverb }           from './reverb'
 import { getSharedAudioContext }  from './sharedContext'
 
@@ -515,15 +515,35 @@ export default class SoundDirector {
     // synergyBus starts silent; update() ramps it from bowl progress.
     this.synergyBus.gain.value = 0
 
-    // Ambient bed loads asynchronously (fetch + decode; cached after first
-    // load). It's a Web Audio buffer source (NOT a media element) so it has no
-    // iOS media-session entanglement — no lock-screen track, no pause on
-    // headphone removal — and it rebuilds with the other sources on
-    // interruption recovery. The `gen` guard drops the result if a dispose or a
-    // newer _buildSources (rebuild) happened while this promise was in flight.
-    createAmbient(this.ctx)
+    this._loadAmbientBed()
+  }
+
+  // ── setAmbientTrack ─────────────────────────────────────────────────────
+  // Selects which sampled bed plays under the breath (an id from
+  // sound/ambientTracks.js; defaults to Square's own 'forest'). Safe any time:
+  // before startAmbient it just records the choice; afterwards it swaps the bed
+  // in place, leaving the breath/bowl sources untouched.
+  setAmbientTrack(id) {
+    if (!id || id === this._ambientTrack) return
+    this._ambientTrack = id
+    if (this._started && this._breath) this._loadAmbientBed()
+  }
+
+  // Ambient bed loads asynchronously (fetch + decode; cached after first
+  // load). It's a Web Audio buffer source (NOT a media element) so it has no
+  // iOS media-session entanglement — no lock-screen track, no pause on
+  // headphone removal — and it rebuilds with the other sources on
+  // interruption recovery. The guards drop the result if a dispose, a newer
+  // _buildSources (rebuild), or a newer track choice happened while this
+  // promise was in flight.
+  _loadAmbientBed() {
+    const buildGen = this._buildGen
+    const bedGen   = this._bedGen = (this._bedGen || 0) + 1
+    this._ambient?.dispose()
+    this._ambient = null
+    createAmbientTrack(this.ctx, this._ambientTrack || 'forest')
       .then((ambient) => {
-        if (this._disposed || gen !== this._buildGen) {
+        if (this._disposed || buildGen !== this._buildGen || bedGen !== this._bedGen) {
           ambient.dispose()
           return
         }

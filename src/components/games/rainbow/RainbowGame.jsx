@@ -4,6 +4,9 @@ import RainbowCanvas from './RainbowCanvas'
 import CompletionScreen from '../square/CompletionScreen'
 import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSpokenCues } from '../../../hooks/useSpokenCues'
+import { useSettings } from '../../../hooks/useSettings'
+import { useSoundscape } from '../../../hooks/useSoundscape'
+import { resolveAmbientTrack } from '../../../sound/ambientTracks'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
 // StrokeSelector component, but each toggles its visibility independently.
@@ -70,7 +73,14 @@ export default function RainbowGame({ onExit }) {
   // Spoken cues (optional, default off) — one per schedule phase; both cloud
   // holds say "hold". Starts with the climb (first touch), like the schedule.
   const cues = useSpokenCues('rainbow', phase === 'game')
-  const emitBreath = useRef((key, type) => cues.emit(key, SPOKEN_CUES[type])).current
+  // Soundscape (optional, default off) — breath whoosh + ambient bed on the same
+  // signal. Never plays alongside spoken cues.
+  const { settings } = useSettings('rainbow')
+  const scapeRef = useSoundscape(resolveAmbientTrack(settings))
+  const emitBreath = useRef((key, type, tNorm) => {
+    cues.emit(key, SPOKEN_CUES[type])
+    scapeRef.current.updatePhase(SPOKEN_CUES[type], tNorm)
+  }).current
   const [completionSeconds, setCompletionSeconds] = useState(0)
   const [activeStroke, setActiveStroke] = useState('classic')
 
@@ -117,6 +127,7 @@ export default function RainbowGame({ onExit }) {
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
     cues.stop()
+    scapeRef.current.fadeOut(2)   // soundscape settles out under the completion card
     setPhase('completion')
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }
@@ -125,7 +136,7 @@ export default function RainbowGame({ onExit }) {
     <div
       className="absolute inset-0 overflow-hidden select-none"
       style={{ touchAction: 'none', background: BG_SOLID }}
-      onPointerDown={cues.unlock}   // audio-unlock fallback for direct URL loads
+      onPointerDown={() => { cues.unlock(); scapeRef.current.unlock() }}   // audio-unlock fallback for direct URL loads
     >
       {/* back button */}
       <button

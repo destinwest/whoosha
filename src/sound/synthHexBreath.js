@@ -205,21 +205,18 @@ export function createHexBreath(ctx, buffers) {
   let lastInhaleGain = 0
   let lastExhaleGain = 0
 
-  // `fraction` — hexagon pacing position in [0,6) (one unit per side), from
-  // HexagonCanvas getPacing. Inhale swells on sides 0 & 3, exhale on 1 & 4,
-  // holds (2 & 5) stay silent.
+  // updatePhase(kind, sp) — the game-agnostic driver. `kind` is the current
+  // breath phase ('in' | 'out' | anything else = hold/silent) and `sp` its 0..1
+  // progress. Inhale swells on 'in', exhale on 'out', holds stay silent.
   //
   // Returns the current breath PRESENCE — the raw bell value 0..1 (the max of
   // the inhale/exhale envelopes, NOT scaled by peakGain) — so a caller can
   // sidechain-duck other layers (e.g. the ambient bed) while the breath is
   // audible, without needing to know this module's internal gain tuning.
-  function update(fraction) {
+  function updatePhase(kind, sp) {
     const now = ctx.currentTime
-    const f    = ((fraction % 6) + 6) % 6
-    const side = Math.floor(f)
-    const sp   = f - side   // 0..1 progress within the current side
 
-    const ip     = INHALE_SIDES.has(side) ? sp : null
+    const ip     = kind === 'in' ? sp : null
     const ipBell = ip === null ? 0 : evaluateAsymmetricBell(ip, ENVELOPE_PEAK_AT)
     const ig     = ipBell * params.inhale.peakGain
     if (Math.abs(ig - lastInhaleGain) > RESCHEDULE_EPS) {
@@ -228,7 +225,7 @@ export function createHexBreath(ctx, buffers) {
     }
     inhaleChain.onProgress(ip, now)
 
-    const xp     = EXHALE_SIDES.has(side) ? sp : null
+    const xp     = kind === 'out' ? sp : null
     const xpBell = xp === null ? 0 : evaluateAsymmetricBell(xp, ENVELOPE_PEAK_AT)
     const xg     = xpBell * params.exhale.peakGain
     if (Math.abs(xg - lastExhaleGain) > RESCHEDULE_EPS) {
@@ -240,11 +237,21 @@ export function createHexBreath(ctx, buffers) {
     return Math.max(ipBell, xpBell)
   }
 
+  // update(fraction) — Hexagon's driver: pacing position in [0,6) (one unit per
+  // side), from HexagonCanvas getPacing. Sides 0 & 3 inhale, 1 & 4 exhale,
+  // 2 & 5 hold. Same return value as updatePhase.
+  function update(fraction) {
+    const f    = ((fraction % 6) + 6) % 6
+    const side = Math.floor(f)
+    const kind = INHALE_SIDES.has(side) ? 'in' : EXHALE_SIDES.has(side) ? 'out' : 'hold'
+    return updatePhase(kind, f - side)
+  }
+
   function dispose() {
     inhaleChain.dispose()
     exhaleChain.dispose()
     try { output.disconnect() } catch (e) {}
   }
 
-  return { output, update, dispose }
+  return { output, update, updatePhase, dispose }
 }

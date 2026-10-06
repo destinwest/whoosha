@@ -10,7 +10,7 @@
 // after the simulated unmount (cleanup nulled it, and no render runs between
 // cleanup and the remounted effects), so a consumer's own mount effect (e.g.
 // SquareGame's `startAmbient` on [phase]) fired against a null ref and audio
-// never started in dev. Creating in the effect matches the useHexBreath /
+// never started in dev. Creating in the effect matches the useSoundscape /
 // useVoice shape: every mount pass gets a live instance.
 //
 // Mute preference is wired in here so that consumers don't have to thread it
@@ -21,9 +21,13 @@ import { useEffect, useRef } from 'react'
 import SoundDirector from '../sound/SoundDirector'
 import { useMutePref } from './useMutePref'
 
-export function useSoundDirector() {
+// `silenced` — true when this game's soundscape is switched off (Ambient "Off",
+// or spoken instructions on). Treated exactly like the mute preference, so the
+// director keeps running (and keeps its iOS recovery state) but is inaudible.
+export function useSoundDirector(silenced = false) {
   const directorRef = useRef(null)
-  const [muted]     = useMutePref()
+  const [userMuted] = useMutePref()
+  const muted       = userMuted || silenced
 
   // Mirror the latest mute pref into a ref so the mount effect below can
   // apply it to a freshly-created director without depending on `muted`

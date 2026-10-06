@@ -5,6 +5,8 @@ import CompletionScreen from '../square/CompletionScreen'
 import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useVoice } from '../../../hooks/useVoice'
 import { useSettings } from '../../../hooks/useSettings'
+import { useSoundscape } from '../../../hooks/useSoundscape'
+import { resolveAmbientTrack } from '../../../sound/ambientTracks'
 import { buildNightSkyBg } from '../_shared/nightSky'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
@@ -52,7 +54,7 @@ export default function StarGame({ onExit }) {
   const pacingCanvasRef  = useRef(null)  // sibling above saturate wrapper — pacing circle bypasses desaturation
 
   // ── Voice cues ───────────────────────────────────────────────────────────
-  // Minimal, non-SoundDirector audio path (mirrors Hexagon's useHexBreath) —
+  // Minimal, non-SoundDirector audio path (mirrors the shared useSoundscape) —
   // just the two spoken clips, no ambient bed. `phaseRef` mirrors `phase` into
   // a ref so the STABLE `emitBreath` callback (identity fixed via useRef, so
   // StarCanvas doesn't get a new prop every render) can gate on the latest
@@ -68,6 +70,10 @@ export default function StarGame({ onExit }) {
   const { settings } = useSettings('star')
   const spokenRef = useRef(settings.spokenCues)
   spokenRef.current = settings.spokenCues
+
+  // Soundscape (optional, default off — Star is voice-first): breath whoosh +
+  // ambient bed, driven from emitBreath below. Never plays alongside the voice.
+  const scapeRef = useSoundscape(resolveAmbientTrack(settings))
 
   const lastBreathPhaseRef = useRef(-1)
   // Edge-detects breath-phase transitions from StarCanvas's per-frame, TIME-
@@ -99,13 +105,15 @@ export default function StarGame({ onExit }) {
   // cue being silently lost until the next phase boundary.
   const emitBreath = useRef((fraction) => {
     if (phaseRef.current !== 'game') return   // no new cues once completion begins
-    if (!spokenRef.current) return            // spoken cues off for this game
     const phaseIdx = Math.floor(fraction)
+    // Soundscape (optional) — only ever audible when spoken cues are off.
+    scapeRef.current.updatePhase(phaseIdx % 2 === 0 ? 'in' : 'out', fraction - phaseIdx)
+    if (!spokenRef.current) return            // spoken cues off for this game
     if (phaseIdx === lastBreathPhaseRef.current) return
     const played = voiceRef.current?.play(phaseIdx % 2 === 0 ? 'in' : 'out')
     if (played) lastBreathPhaseRef.current = phaseIdx
   }).current
-  const unlockAudio = useRef(() => voiceRef.current?.unlock()).current
+  const unlockAudio = useRef(() => { voiceRef.current?.unlock(); scapeRef.current.unlock() }).current
 
   const introPlayedRef = useRef(false)
   // Reset the intro flag whenever the voice-session effect tears down.
@@ -187,6 +195,7 @@ export default function StarGame({ onExit }) {
     setCompletionSeconds(dur)
     setPhase('completion')
     voiceRef.current?.stop()   // silence any in-flight cue rather than let it linger under the card
+    scapeRef.current.fadeOut(2)   // soundscape settles out under the completion card
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }
 

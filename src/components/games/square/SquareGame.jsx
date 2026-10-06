@@ -6,6 +6,7 @@ import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSoundDirector } from '../../../hooks/useSoundDirector'
 import { useSettings }   from '../../../hooks/useSettings'
 import { useSpokenCues } from '../../../hooks/useSpokenCues'
+import { resolveAmbientTrack } from '../../../sound/ambientTracks'
 
 // Audio fade-out duration when the game ends (seconds). Long enough to
 // feel like a settle, short enough that the completion screen is silent
@@ -209,7 +210,14 @@ export default function SquareGame({ onExit }) {
   // and receives per-frame state updates from SquareCanvas, but produces no
   // audible output yet. Later phases attach ambient/dysregulation/synergy
   // modules onto the buses prepared inside the director.
-  const directorRef = useSoundDirector()
+  // The soundscape (bed + breath + bowl) is one option: `ambientTrack` is null
+  // when the player picked Ambient "Off" or has spoken instructions on, which
+  // silences the director; otherwise it names the bed to play.
+  const ambientTrack = resolveAmbientTrack(settings)
+  const directorRef  = useSoundDirector(!ambientTrack)
+  useEffect(() => {
+    directorRef.current?.setAmbientTrack(ambientTrack)   // no-op for null / unchanged
+  }, [ambientTrack])
 
   // Bind update to a stable identity so SquareCanvas doesn't see a new
   // callback every render (which would trigger no re-render here, but is

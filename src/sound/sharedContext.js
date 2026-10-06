@@ -2,7 +2,7 @@
 // The app's single shared AudioContext, and the gesture-time unlock helper.
 //
 // One AudioContext for the app's lifetime, created lazily and reused by EVERY
-// game's audio path (SoundDirector, useHexBreath, useVoice). Browsers cap
+// game's audio path (SoundDirector, useSoundscape, useVoice). Browsers cap
 // AudioContexts per page (~4 on iOS Safari) and don't reliably release closed
 // ones, so a fresh context per game-mount risks permanently breaking audio
 // after a handful of entries — doubly so in dev, where StrictMode's

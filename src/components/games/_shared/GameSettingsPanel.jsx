@@ -23,10 +23,13 @@ const ATTR_LABEL = {
   trackTexture: 'Track texture',
   writtenCues:  'Written instructions',
   spokenCues:   'Spoken instructions',
+  ambient:      'Ambient sound',
 }
 const VALUE_LABEL = {
   // backgrounds
   meadow: 'Day', meadowDusk: 'Dusk',
+  // ambient soundscapes
+  off: 'Off', forest: 'Forest', canyon: 'Canyon',
   // track textures
   dirt: 'Dirt', slate: 'Slate', screeFirn: 'Scree', candy: 'Candy', gradient: 'Smooth', arcs: 'Arcs', ribbon: 'Ribbon',
   nightSky: 'Night', sandstone: 'Sandstone', sky: 'Sky', field: 'Field', firstLight: 'First light', lake: 'Lake',
@@ -52,6 +55,21 @@ export default function GameSettingsPanel({ gameKey, onClose }) {
   const [muted, , setMuted] = useMutePref()   // global audio mute (not per-game)
   const [voiceId, setVoice] = useVoicePref()  // global spoken-cue voice (not per-game)
   const attrs = controllableAttrs(gameKey)
+
+  const renderAttr = (attr) => (
+    <div key={attr} style={{ margin: '16px 0' }}>
+      <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85, marginBottom: 8 }}>
+        {ATTR_LABEL[attr] ?? attr}
+      </div>
+      {ATTRIBUTES[attr].type === 'toggle'
+        ? <Switch on={settings[attr]} onChange={(v) => setOption(attr, v)} />
+        : <Segmented
+            options={GAME_OPTIONS[gameKey][attr].allowed}
+            value={settings[attr]}
+            onChange={(v) => setOption(attr, v)}
+          />}
+    </div>
+  )
 
   return (
     <div
@@ -95,20 +113,7 @@ export default function GameSettingsPanel({ gameKey, onClose }) {
           <Switch on={!muted} onChange={(soundOn) => setMuted(!soundOn)} />
         </div>
 
-        {attrs.map((attr) => (
-          <div key={attr} style={{ margin: '16px 0' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85, marginBottom: 8 }}>
-              {ATTR_LABEL[attr] ?? attr}
-            </div>
-            {ATTRIBUTES[attr].type === 'toggle'
-              ? <Switch on={settings[attr]} onChange={(v) => setOption(attr, v)} />
-              : <Segmented
-                  options={GAME_OPTIONS[gameKey][attr].allowed}
-                  value={settings[attr]}
-                  onChange={(v) => setOption(attr, v)}
-                />}
-          </div>
-        ))}
+        {attrs.filter((attr) => attr !== 'ambient').map(renderAttr)}
 
         {/* Global voice picker — shown only where this game speaks (spokenCues on)
             and there's more than one voice to choose from. */}
@@ -121,6 +126,32 @@ export default function GameSettingsPanel({ gameKey, onClose }) {
               onChange={setVoice}
               labelFn={(id) => VOICES[id].label}
             />
+          </div>
+        )}
+
+        {/* Ambient soundscape — the alternative to spoken instructions. While
+            spoken instructions are on it is paused: shown dimmed and inert, the
+            choice kept for when they're switched back off. */}
+        {attrs.includes('ambient') && (
+          <div style={{ margin: '16px 0' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85, marginBottom: 8 }}>
+              {ATTR_LABEL.ambient}
+            </div>
+            <div
+              aria-disabled={settings.spokenCues}
+              style={settings.spokenCues ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
+            >
+              <Segmented
+                options={GAME_OPTIONS[gameKey].ambient.allowed}
+                value={settings.ambient}
+                onChange={(v) => setOption('ambient', v)}
+              />
+            </div>
+            {settings.spokenCues && (
+              <div style={{ fontSize: 12, opacity: 0.65, marginTop: 8 }}>
+                Paused while spoken instructions are on.
+              </div>
+            )}
           </div>
         )}
 

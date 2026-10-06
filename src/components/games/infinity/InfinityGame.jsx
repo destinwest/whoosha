@@ -5,6 +5,8 @@ import { buildLakeSurfaceBg } from './lakeSurface'
 import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSettings } from '../../../hooks/useSettings'
 import { useVoice } from '../../../hooks/useVoice'
+import { useSoundscape } from '../../../hooks/useSoundscape'
+import { resolveAmbientTrack } from '../../../sound/ambientTracks'
 
 // Game canvas opacity once completion phase begins — the world recedes behind
 // the completion card without vanishing entirely.
@@ -15,6 +17,10 @@ const COMPLETION_CANVAS_OPACITY = 0.25
 // the pacing circle is tracing at any moment is independent of this — see
 // InfinityCanvas's getPacing.
 const PHASE_TEXT = { in: 'breathe in', out: 'breathe out' }
+
+// Share of the breath cycle spent inhaling — InfinityCanvas runs 1 inhale
+// segment to 2 exhale segments (INHALE_SEGMENTS / EXHALE_SEGMENTS there).
+const INHALE_SHARE = 1 / 3
 
 // ── InfinityGame ──────────────────────────────────────────────────────────────
 // Phase manager — owns intro/game/completion phase, session timing, exit, and the
@@ -49,9 +55,21 @@ export default function InfinityGame({ onExit }) {
   spokenRef.current = settings.spokenCues
   const lastSpokenRef = useRef(null)   // last breath phase a cue was fired (or skipped) for
 
+  // Soundscape (optional, default off) — breath whoosh + ambient bed. Never
+  // plays alongside spoken cues. breathPhase is the 0..1 cycle position; the
+  // inhale is its first INHALE_SHARE, the exhale the rest.
+  const scapeRef = useSoundscape(resolveAmbientTrack(settings))
+
   // Per-rAF-frame tick from InfinityCanvas — only re-render when the displayed
   // breath label or countdown second actually changes, not on every frame.
   function handleGameStateTick(state) {
+    if (phaseRef.current === 'game' && typeof state.breathPhase === 'number') {
+      const bp = state.breathPhase
+      const progress = state.breathLabel === 'in'
+        ? bp / INHALE_SHARE
+        : (bp - INHALE_SHARE) / (1 - INHALE_SHARE)
+      scapeRef.current.updatePhase(state.breathLabel, Math.min(1, Math.max(0, progress)))
+    }
     if (phaseRef.current === 'game' && state.breathLabel !== lastSpokenRef.current) {
       if (!spokenRef.current) {
         lastSpokenRef.current = state.breathLabel
@@ -95,13 +113,14 @@ export default function InfinityGame({ onExit }) {
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
     voiceRef.current?.stop()   // don't let a cue linger under the completion card
+    scapeRef.current.fadeOut(2)   // soundscape settles out under the completion card
     setPhase('completion')
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }
 
   return (
     <div className="absolute inset-0 overflow-hidden select-none" style={{ touchAction: 'none', background: '#0656AB' }}
-      onPointerDown={() => voiceRef.current?.unlock()}   // audio-unlock fallback for direct URL loads
+      onPointerDown={() => { voiceRef.current?.unlock(); scapeRef.current.unlock() }}   // audio-unlock fallback for direct URL loads
     >
       {/* Top chrome */}
       <div style={{ opacity: 'var(--intro-ui, 1)' }}>

@@ -5,6 +5,8 @@ import CompletionScreen from '../square/CompletionScreen'
 import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSettings } from '../../../hooks/useSettings'
 import { useVoice } from '../../../hooks/useVoice'
+import { useSoundscape } from '../../../hooks/useSoundscape'
+import { resolveAmbientTrack } from '../../../sound/ambientTracks'
 import { buildHeartFieldBg } from './heartField'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
@@ -50,9 +52,13 @@ export default function HeartGame({ onExit }) {
   const spokenRef  = useRef(settings.spokenCues)
   spokenRef.current = settings.spokenCues
   const lastBreathPhaseRef = useRef(-1)
+  // Soundscape (optional, default off) — breath whoosh + ambient bed on the same
+  // fraction. Never plays alongside spoken cues.
+  const scapeRef = useSoundscape(resolveAmbientTrack(settings))
   const emitBreath = useRef((fraction) => {
     if (phaseRef.current !== 'game') return
     const phaseIdx = Math.floor(fraction)
+    scapeRef.current.updatePhase(phaseIdx === 0 ? 'in' : 'out', fraction - phaseIdx)
     if (phaseIdx === lastBreathPhaseRef.current) return
     if (!spokenRef.current) { lastBreathPhaseRef.current = phaseIdx; return }
     // Only advance once play() reports it started — retried next frame otherwise.
@@ -103,6 +109,7 @@ export default function HeartGame({ onExit }) {
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
     voiceRef.current?.stop()   // don't let a cue linger under the completion card
+    scapeRef.current.fadeOut(2)   // soundscape settles out under the completion card
     setPhase('completion')
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }
@@ -111,7 +118,7 @@ export default function HeartGame({ onExit }) {
     <div
       className="absolute inset-0 overflow-hidden select-none"
       style={{ touchAction: 'none', background: '#E8836B' }}
-      onPointerDown={() => voiceRef.current?.unlock()}   // audio-unlock fallback for direct URL loads
+      onPointerDown={() => { voiceRef.current?.unlock(); scapeRef.current.unlock() }}   // audio-unlock fallback for direct URL loads
     >
       {/* back button */}
       <button

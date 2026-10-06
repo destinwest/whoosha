@@ -32,7 +32,14 @@ export const ATTRIBUTES = {
   trackTexture: { type: 'enum',   scope: 'per-game' },
   writtenCues:  { type: 'toggle', scope: 'global'   },
   spokenCues:   { type: 'toggle', scope: 'global'   },
+  // The soundscape: an ambient bed + the breath whoosh, coupled. An ALTERNATIVE
+  // to spokenCues — a game plays it only while spokenCues is off (that coherence
+  // rule lives in sound/ambientTracks.js resolveAmbientTrack, not here).
+  ambient:      { type: 'enum',   scope: 'per-game' },
 }
+
+// Ambient values every game offers: 'off' + the track ids in sound/ambientTracks.js.
+const AMBIENT_VALUES = ['off', 'forest', 'canyon']
 
 // Per-game options. INVARIANT: for every enum attribute, `allowed` lists only
 // values that RENDER TODAY, and `default` ∈ `allowed`. Free-mix widens these
@@ -51,12 +58,14 @@ export const GAME_OPTIONS = {
     // (menu:false on an attribute ⇒ resolves normally but is hidden from the
     // customize panel — used for toggles a game cannot honor yet.)
     spokenCues:   { default: false },   // wired via useSpokenCues — toggle shown
+    ambient:      { default: 'forest', allowed: AMBIENT_VALUES },   // this game's original bed
   },
   hexagon: {
     background:   { default: 'sandstone', allowed: ['sandstone'] },
     trackTexture: { default: 'dirt',      allowed: ['dirt'] },
     writtenCues:  { default: true },
     spokenCues:   { default: false },   // wired via useSpokenCues — toggle shown
+    ambient:      { default: 'canyon', allowed: AMBIENT_VALUES },   // this game's original bed
   },
   triangle: {
     background:   { default: 'sky',       allowed: ['sky'] },
@@ -64,6 +73,7 @@ export const GAME_OPTIONS = {
     trackTexture: { default: 'slate',     allowed: ['slate', 'screeFirn'] },
     writtenCues:  { default: true },
     spokenCues:   { default: false },   // wired via useSpokenCues — toggle shown
+    ambient:      { default: 'off', allowed: AMBIENT_VALUES },
   },
   star: {
     background:   { default: 'nightSky',  allowed: ['nightSky'] },
@@ -71,6 +81,7 @@ export const GAME_OPTIONS = {
     // Star is voice-only today (StarGame.jsx:29) — that's the default, not a bug.
     writtenCues:  { default: false, menu: false },   // this game has no written labels
     spokenCues:   { default: true },   // wired via useVoice — toggle shown
+    ambient:      { default: 'off', allowed: AMBIENT_VALUES },
   },
   infinity: {
     background:   { default: 'lake',      allowed: ['lake'] },
@@ -78,6 +89,7 @@ export const GAME_OPTIONS = {
     // Labels couple with the countdown slot — the written toggle isn't wired yet.
     writtenCues:  { default: true, menu: false },
     spokenCues:   { default: false },   // wired via useVoice — toggle shown
+    ambient:      { default: 'off', allowed: AMBIENT_VALUES },
   },
   rainbow: {
     background:   { default: 'firstLight', allowed: ['firstLight'] },
@@ -85,12 +97,14 @@ export const GAME_OPTIONS = {
     // Rainbow conveys phase visually + an in-cloud countdown; no in/out text today.
     writtenCues:  { default: false, menu: false },   // this game has no written labels
     spokenCues:   { default: false },   // wired via useSpokenCues — toggle shown
+    ambient:      { default: 'off', allowed: AMBIENT_VALUES },
   },
   heart: {
     background:   { default: 'field',     allowed: ['field'] },
     trackTexture: { default: 'candy',     allowed: ['candy'] },
     writtenCues:  { default: true },
     spokenCues:   { default: false },   // wired via useVoice — toggle shown
+    ambient:      { default: 'off', allowed: AMBIENT_VALUES },
   },
 }
 

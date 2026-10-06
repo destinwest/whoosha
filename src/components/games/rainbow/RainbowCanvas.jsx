@@ -978,8 +978,9 @@ const RainbowCanvas = forwardRef(function RainbowCanvas(
         ? getSchedule(now - gameStartRef.current)
         : PRE_START_SCHED
       // Breath-phase signal for spoken cues — only once the climb has started.
-      // key = the phase instance, type = 'holdL' | 'in' | 'holdR' | 'out'.
-      if (startedRef.current) onBreath?.(sched.key, sched.type)
+      // key = the phase instance, type = 'holdL' | 'in' | 'holdR' | 'out',
+      // tNorm = 0..1 progress through it.
+      if (startedRef.current) onBreath?.(sched.key, sched.type, sched.tNorm)
       if (sched.key !== schedKeyRef.current) {
         handlePhaseChange(geo, sched, now)
         schedKeyRef.current = sched.key

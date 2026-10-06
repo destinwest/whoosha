@@ -5,6 +5,8 @@ import CompletionScreen from '../square/CompletionScreen'
 import GameSettingsControl from '../_shared/GameSettingsControl'
 import { useSettings } from '../../../hooks/useSettings'
 import { useSpokenCues } from '../../../hooks/useSpokenCues'
+import { useSoundscape } from '../../../hooks/useSoundscape'
+import { resolveAmbientTrack } from '../../../sound/ambientTracks'
 
 // Mirrors the flag in SquareGame.jsx — see comment there. The games share the
 // StrokeSelector component, but each toggles its visibility independently.
@@ -169,7 +171,7 @@ const LABEL_ANGLES = [-Math.PI / 3, Math.PI / 3, 0]
 // ── TriangleGame ──────────────────────────────────────────────────────────────
 // Phase manager — owns game phase, stroke selection, session timing, exit, and
 // the baked mountain-sky background. All canvas drawing, geometry, and pointer
-// handling live in TriangleCanvas. No audio this pass (silent alpine theme).
+// handling live in TriangleCanvas. Audio is optional: spoken cues or a soundscape.
 export default function TriangleGame({ onExit }) {
 
   // Mount straight into play — no in-game intro (same as Hexagon / Infinity).
@@ -183,9 +185,13 @@ export default function TriangleGame({ onExit }) {
 
   // Spoken cues (optional, default off) — one per side: in / hold / out.
   const cues = useSpokenCues('triangle', phase === 'game')
+  // Soundscape (optional, default off) — breath whoosh + ambient bed, driven by
+  // the same per-frame fraction. Never plays alongside spoken cues.
+  const scapeRef = useSoundscape(resolveAmbientTrack(settings))
   const emitBreath = useRef((fraction) => {
     const i = Math.min(2, Math.floor(fraction))
     cues.emit(i, SPOKEN_CUES[i])
+    scapeRef.current.updatePhase(SPOKEN_CUES[i], fraction - i)
   }).current
 
   // ── Refs ───────────────────────────────────────────────────────────────────
@@ -231,6 +237,7 @@ export default function TriangleGame({ onExit }) {
     const dur = Math.round((Date.now() - (sessionStartRef.current ?? Date.now())) / 1000)
     setCompletionSeconds(dur)
     cues.stop()
+    scapeRef.current.fadeOut(2)   // soundscape settles out under the completion card
     setPhase('completion')
   }
   function handleCompletionDismiss() { onExit(completionSeconds) }
@@ -239,7 +246,7 @@ export default function TriangleGame({ onExit }) {
     <div
       className="absolute inset-0 overflow-hidden select-none"
       style={{ touchAction: 'none', background: '#A6B3CE' }}
-      onPointerDown={cues.unlock}   // audio-unlock fallback for direct URL loads
+      onPointerDown={() => { cues.unlock(); scapeRef.current.unlock() }}   // audio-unlock fallback for direct URL loads
     >
       {/* back button */}
       <button
