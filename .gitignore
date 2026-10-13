@@ -4,7 +4,9 @@ dist
 .DS_Store
 *.rtf
 token*
-.claude/
+# Local Claude settings stay private; shared slash commands are versioned
+.claude/*
+!.claude/commands/
 
 # Source recording the Jamal cues were cut from — not shipped
 public/sounds/Jamal/JamalAll.mp3
