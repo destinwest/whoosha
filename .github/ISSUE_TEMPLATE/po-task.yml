@@ -1,0 +1,17 @@
+name: PO task
+description: Something only Destin can do, such as an on-device check, a product decision, a recording, or a dashboard/DB action. Agents never pick these up.
+title: "PO: <what to do>"
+labels: ["po-task"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: The check, decision, or action, and what "done" looks like.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why / what it unblocks
+      description: 'Link the stories waiting on this (e.g. "Unblocks #14").'

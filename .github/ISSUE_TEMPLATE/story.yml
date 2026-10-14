@@ -1,0 +1,77 @@
+name: Story
+description: A unit of work an agent can pick up once the PO marks it Ready.
+title: "<area>: <short outcome>"
+labels: ["status:draft"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New stories start as **status:draft**. Only the PO (Destin) moves a story to **status:ready**.
+        A story is Ready when every field below is filled in, size is S or M, and nothing it depends on is still open.
+        Definition of Ready and Definition of Done live in `WORKING-WITH-CLAUDE.md` §6.
+  - type: textarea
+    id: story
+    attributes:
+      label: Story
+      description: Who benefits, what changes, why it matters.
+      placeholder: |
+        As a <parent | child player | PO>,
+        I want <capability>,
+        so that <outcome>.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What exists today, what prompted this, links to Decision log entries or prior PRs.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria (agent-verifiable)
+      description: Things the agent can prove itself, such as a clean build, behavior it can observe or instrument, or code structure. Make each one a checkbox.
+      placeholder: |
+        - [ ] `npm run build` is clean
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: device
+    attributes:
+      label: On-device checks (PO, iPhone)
+      description: What Destin will look at or listen for on iOS before accepting. Write "none" if this is agent-verifiable only.
+      placeholder: |
+        - [ ] 60fps holds on iPhone 12 during ...
+        - [ ] Sounds ... / looks ...
+    validations:
+      required: true
+  - type: textarea
+    id: read-first
+    attributes:
+      label: Read first
+      description: The doc sections the agent must read before starting. Name sections, never "the whole briefing".
+      placeholder: |
+        - BRIEFING §6.4 (Square game behavior)
+        - POLISH-STRATEGY: Layering rules, Anti-patterns
+        - docs/GAME-CUSTOMIZATION.md §4
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints & out of scope
+      description: Rules that apply, such as the layer budget, the file-ownership split, or color roles. Also list what NOT to touch.
+  - type: input
+    id: depends
+    attributes:
+      label: Dependencies
+      description: 'Use the form "Blocked by #12". The picker skips this story until #12 is closed.'
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      description: S is about one sitting and M is a few verified commits. L must be split before it can be Ready.
+      options:
+        - S
+        - M
+        - L (needs splitting)
+    validations:
+      required: true
